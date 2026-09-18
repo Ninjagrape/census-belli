@@ -45,7 +45,14 @@ prompt: null  # crawl stage is deterministic, no LLM needed
 
 quality_checks:
   - name: min_battles_crawled
-    check: "SELECT COUNT(DISTINCT battle_id) FROM crawl_log WHERE http_status = 200"
+    # Counts distinct successfully fetched URLs, not battle_id. battle_id is a
+    # FK to battles, and battles has no rows until the extract stage runs, so
+    # every crawl_log row written by this stage necessarily has battle_id NULL.
+    # COUNT(DISTINCT battle_id) is therefore always 0 and this ERROR gate could
+    # never pass, halting the pipeline after every crawl.
+    # The handful of seed list pages are counted too, which is immaterial
+    # against a threshold of 3000.
+    check: "SELECT COUNT(DISTINCT url) FROM crawl_log WHERE http_status = 200"
     threshold: ">= 3000"
     severity: error
 

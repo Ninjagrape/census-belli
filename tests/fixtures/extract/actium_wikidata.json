@@ -1,0 +1,84 @@
+{
+  "entities": {
+    "Q193320": {
+      "id": "Q193320",
+      "type": "item",
+      "labels": {
+        "en": { "language": "en", "value": "Battle of Actium" }
+      },
+      "sitelinks": {
+        "enwiki": {
+          "site": "enwiki",
+          "title": "Battle of Actium",
+          "url": "https://en.wikipedia.org/wiki/Battle_of_Actium"
+        }
+      },
+      "claims": {
+        "P585": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P585",
+              "datavalue": {
+                "type": "time",
+                "value": {
+                  "time": "-0031-09-02T00:00:00Z",
+                  "precision": 11,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985786"
+                }
+              }
+            }
+          }
+        ],
+        "P625": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P625",
+              "datavalue": {
+                "type": "globecoordinate",
+                "value": { "latitude": 38.9333, "longitude": 20.7667, "precision": 0.01 }
+              }
+            }
+          }
+        ],
+        "P276": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P276",
+              "datavalue": { "type": "wikibase-entityid", "value": { "id": "Q193687" } }
+            }
+          }
+        ],
+        "P361": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P361",
+              "datavalue": { "type": "wikibase-entityid", "value": { "id": "Q744742" } }
+            }
+          }
+        ],
+        "P710": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P710",
+              "datavalue": { "type": "wikibase-entityid", "value": { "id": "Q1405" } }
+            }
+          }
+        ],
+        "P1120": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P1120",
+              "datavalue": { "type": "quantity", "value": { "amount": "+7500" } }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

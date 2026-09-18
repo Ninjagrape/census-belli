@@ -1,0 +1,36 @@
+{{Infobox military conflict
+| conflict    = Battle of Austerlitz
+| partof      = the [[War of the Third Coalition]]
+| image       = [[File:Austerlitz-baron-Pascal.jpg|300px|Napoleon at Austerlitz]]
+| date        = 2 December 1805
+| place       = near [[Austerlitz]], [[Moravia]]; open ground broken by the Pratzen ridge
+| result      = Decisive French victory
+| territory   = French occupation of Moravia
+| combatant1  = {{flagicon|France}} [[First French Empire|French Empire]]
+| combatant2  = {{ubl|{{flagicon|Russia}} [[Russian Empire]]|{{flagicon|Austria}} [[Austrian Empire]]}}
+| commander1  = [[Napoleon|Napoleon I]]<br />[[Jean Lannes]]<br />[[Louis-Nicolas Davout]]
+| commander2  = [[Alexander I of Russia|Alexander I]]<br />[[Mikhail Kutuzov]]<br />[[Franz von Weyrother]] {{KIA}}
+| strength1   = 65,000 to 75,000 engaged<ref name="chandler">Chandler 1966, p. 416.</ref>
+| strength2   = between 84,000 and 95,000 engaged, of whom 16,000 cavalry
+| casualties1 = 1,305 killed<br />6,940 wounded<br />573 captured
+| casualties2 = about 16,000 killed or wounded<br />12,000 captured
+}}
+
+The '''Battle of Austerlitz''' (2 December 1805), also known as the Battle of the
+Three Emperors, was one of the most important engagements of the [[Napoleonic Wars]].
+
+== Prelude ==
+
+Kutuzov could call upon some 110,000 men in the theatre, but the Austrian
+contingents strung along the march route never reached the field.
+
+== The battle ==
+
+Napoleon directed the battle in person from the Zuran hill, while Marshal
+Soult's corps stormed the Pratzen Heights at dawn under thick fog.
+
+== References ==
+
+{{reflist}}
+
+{{Campaignbox War of the Third Coalition}}

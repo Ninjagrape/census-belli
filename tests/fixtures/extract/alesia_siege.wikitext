@@ -1,0 +1,20 @@
+{{Infobox siege
+| conflict    = Siege of Alesia
+| partof      = the [[Gallic Wars]]
+| date        = September 52 BC
+| place       = Alesia, Gaul; hilltop oppidum ringed by Roman earthworks and a double line of fortifications
+| result      = Roman victory
+| combatant1  = [[Roman Republic]]
+| combatant2  = [[Gallic tribes|Gallic confederation]]
+| commander1  = [[Julius Caesar]]<br />[[Mark Antony]]<br />[[Titus Labienus]]
+| commander2  = [[Vercingetorix]] {{POW}}
+| strength1   = 12 legions, around 60,000 men engaged
+| garrison2   = 80,000 men inside the oppidum
+| strength2   = a relief force variously reported as between 100,000 and 250,000 available
+| casualties1 = 12,800 killed or wounded
+| casualties2 = unknown; 40,000 captured
+}}
+
+The '''Siege of Alesia''' was a military engagement in the [[Gallic Wars]].
+
+{{Campaignbox Gallic Wars}}

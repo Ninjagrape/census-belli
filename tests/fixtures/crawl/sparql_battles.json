@@ -1,0 +1,24 @@
+{
+  "head": { "vars": ["battle", "battleLabel", "date"] },
+  "results": {
+    "bindings": [
+      {
+        "battle": { "type": "uri", "value": "http://www.wikidata.org/entity/Q184408" },
+        "battleLabel": { "xml:lang": "en", "type": "literal", "value": "Battle of Cannae" },
+        "date": { "type": "literal", "value": "-0216-08-02T00:00:00Z" }
+      },
+      {
+        "battle": { "type": "uri", "value": "http://www.wikidata.org/entity/Q184408" },
+        "battleLabel": { "xml:lang": "en", "type": "literal", "value": "Battle of Cannae" }
+      },
+      {
+        "battle": { "type": "uri", "value": "http://www.wikidata.org/entity/Q170545" },
+        "battleLabel": { "xml:lang": "en", "type": "literal", "value": "Battle of Actium" }
+      },
+      {
+        "battle": { "type": "uri", "value": "http://www.wikidata.org/entity/P585" },
+        "battleLabel": { "xml:lang": "en", "type": "literal", "value": "not an item" }
+      }
+    ]
+  }
+}

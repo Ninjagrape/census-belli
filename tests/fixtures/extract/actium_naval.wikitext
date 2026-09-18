@@ -1,0 +1,23 @@
+{{Infobox naval conflict
+| conflict    = Battle of Actium
+| partof      = the [[Final War of the Roman Republic]]
+| date        = 2 September 31 BC
+| place       = Ionian Sea, near the promontory of Actium; a fortified harbour mouth
+| result      = Decisive Octavian victory
+| combatant1  = Forces of [[Octavian]]
+| combatant2  = Forces of [[Mark Antony]] and [[Cleopatra]]
+| commander1  = [[Marcus Vipsanius Agrippa]]<br />[[Octavian]]
+| commander2  = [[Mark Antony]]<br />[[Cleopatra]]
+| ships1      = 400 ships
+| ships2      = 230 ships
+| strength1   = 80,000 infantry
+| strength2   = on paper 120,000 infantry; roughly 20,000 present at the battle
+| casualties1 = 2,500 killed
+| casualties2 = 5,000 killed<br />up to 200 ships captured or sunk
+}}
+
+The '''Battle of Actium''' was the decisive confrontation of the Final War of the
+Roman Republic. Agrippa commanded the fleet while Octavian remained aboard a
+transport and took no tactical part in the fighting.
+
+{{Campaignbox Final War of the Roman Republic}}
