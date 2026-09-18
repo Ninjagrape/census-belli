@@ -10,22 +10,24 @@
 - [x] .gitignore
 - [ ] README.md (public-facing, not the CLAUDE.md)
 - [ ] LICENSE (MIT or similar)
-- [ ] Alembic migration init from config/schema.sql
+- [x] Alembic migration init from config/schema.sql
+      - verified offline (57 DDL statements); not yet applied to a live DB
 - [x] .env.example with required env vars (DATABASE_URL, ANTHROPIC_API_KEY, GEMINI_API_KEY)
-- [ ] Docker compose for local Postgres
+- [x] Docker compose for local Postgres
+      - [ ] not yet run: no container runtime on the dev machine
 - [ ] CI config (GitHub Actions: lint, type check, test)
 - [ ] Pre-commit hooks (ruff, mypy)
 
 ## Infrastructure
-- [ ] Database connection module (pipeline/db.py) using SQLAlchemy Core
-- [ ] Config loader that merges agent YAML specs with CLI overrides
+- [x] Database connection module (pipeline/db.py) using SQLAlchemy Core
+- [x] Config loader that merges agent YAML specs with CLI overrides
 - [ ] Structured logging setup (structlog config)
 - [x] LLM client wrapper (pipeline/llm/) that handles retries, token logging, cost tracking
       - provider-agnostic: anthropic + gemini, routed per stage via agents/<stage>.yaml
       - llm_calls table doubles as the resume cache, keyed on request hash
       - [ ] smoke-test the Gemini path against a live key (refusal + truncation branches)
 - [x] Quality check runner (actually execute the SQL checks in orchestrator.py)
-- [ ] Stage runner base class / protocol that each pipeline/stages/*.py implements
+- [x] Stage runner base class / protocol that each pipeline/stages/*.py implements
 
 ## Stage 1: Crawl (pipeline/stages/crawl.py)
 - [ ] Wikipedia battle list page parser (extract links to individual battle articles)
@@ -149,6 +151,18 @@
   - [ ] Sensitivity comparison view
 - [ ] Static report output (markdown + figures for the README/blog)
 - [ ] CSV/JSON export of final rankings
+
+## Known constraints
+- BC dates cannot round-trip through Python. `datetime.date` has MINYEAR == 1,
+  so no pre-1 AD date can be constructed, bound as a parameter, or decoded from
+  a result. Postgres stores them fine. Any stage reading `battles.date_start`
+  must filter to AD rows or project through `to_char`/`EXTRACT`.
+  See tests/integration/test_db.py::test_bc_dates_cannot_round_trip_through_python
+- `alembic ... --sql` needs `PYTHONIOENCODING=utf-8` on Windows: schema.sql uses
+  box-drawing characters that cp1252 cannot encode. The Makefile targets set it.
+- tests/integration/test_db.py has never been executed: no Postgres, Docker or
+  podman on this machine. 20 tests skip. Run `make db-up && make test` on a
+  machine with a container runtime before trusting the database layer.
 
 ## Tooling (.claude/)
 - [x] bayesian-model-reviewer agent — inference correctness for the PyMC stages
