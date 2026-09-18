@@ -4,6 +4,8 @@ For the next session or agent picking this project up cold.
 
 Read `CLAUDE.md` first for what the project *is*. This file covers what state it is **in**, what is verified versus merely written, and the traps that have already cost time.
 
+`CLAUDE.md` points every session here, and asks you to update this file before you finish. Keep it current: a stale handover is worse than none, because the next agent will trust it. If you change the state of the project, change §1, §6 and §7 to match.
+
 Last updated: 2026-09-18. Working tree clean at `bf815ef`.
 
 ---

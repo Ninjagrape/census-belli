@@ -1,5 +1,21 @@
 # General WAR: Military Commander Ranking via Bayesian Wins Above Replacement
 
+## Start here, every session
+
+**Read `handover.md` before doing anything else, including answering a question about this repo.** It records what is actually built, what is verified against a real database versus merely written, the bugs already found and fixed, and the footguns that have cost time. It is maintained to be current; `TODO.md` is the task list, this file is the design, `handover.md` is the state.
+
+Then:
+
+- **If the user asks for something specific, do that.** Their request always wins over the resumption below.
+- **If the user asks you to continue, resume, or says nothing specific**, pick up at the next unfinished step in `handover.md` §7 and start work. Say which step you are starting and why, then begin — do not re-plan what is already planned there.
+
+Two rules that override the momentum to just keep building:
+
+1. **Verify before trusting.** Run the three commands in `handover.md` §1 and confirm the state matches before building on it. Files change between sessions, sometimes from other agents working in parallel.
+2. **Never report a stage green on unit tests alone.** Most verification gates in this project need a live Postgres. Say explicitly what you verified and what you could not. A passing fixture suite has already hidden a systematic bug that would have corrupted the published ranking — see `handover.md` §4.2.
+
+Before you finish a session, update `handover.md` so the next one starts where you stopped.
+
 ## Project Overview
 
 A data pipeline and Bayesian modelling system that ranks military commanders throughout history using a Wins Above Replacement (WAR) framework. Improves on Ethan Arsht's original methodology (https://towardsdatascience.com/napoleon-was-the-best-general-ever-and-the-math-proves-it-86efed303eeb/) by adding multi-source data validation, proper missing-data handling, command hierarchy attribution, and uncertainty quantification.
