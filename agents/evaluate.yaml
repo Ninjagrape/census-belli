@@ -69,6 +69,7 @@ prompt: null
 quality_checks:
   - name: held_out_accuracy
     check: "Held-out prediction accuracy (binary win/loss) above chance"
+    method: held_out_accuracy    # not SQL: needs the k-fold predictions, not the DB
     threshold: "> 0.55"
     severity: warning
 

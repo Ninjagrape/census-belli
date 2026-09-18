@@ -23,7 +23,11 @@ tools:
 
 params:
   fuzzy_threshold: 85          # minimum similarity score for candidate matches
-  llm_model: claude-sonnet-4-6
+  # Gemini serves this stage too. Most resolution is SPARQL plus rapidfuzz;
+  # the LLM only breaks ties the fuzzy matcher leaves ambiguous, so the
+  # judgement asked of it is narrow and well bounded.
+  llm_provider: gemini
+  llm_model: gemini-3.8-flash
   llm_temperature: 0.0
 
 steps:

@@ -17,15 +17,32 @@ import argparse
 import importlib
 import sys
 import time
-from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
 import structlog
 import yaml
 
+from pipeline.quality import (
+    QualityCheckResult,
+    QualityRunner,
+    Severity,
+    StageResult,
+    has_blocking_failure,
+)
+
 logger = structlog.get_logger()
+
+__all__ = [
+    "STAGE_ORDER",
+    "QualityCheckResult",
+    "Severity",
+    "StageResult",
+    "load_agent_spec",
+    "run_pipeline",
+    "run_quality_checks",
+    "run_stage",
+]
 
 # ─── Stage definitions ───────────────────────────────────────────────────────
 
@@ -42,29 +59,9 @@ STAGE_ORDER = [
 ]
 
 
-class Severity(Enum):
-    WARNING = "warning"
-    ERROR = "error"
-
-
-@dataclass
-class QualityCheckResult:
-    name: str
-    passed: bool
-    severity: Severity
-    actual_value: Any = None
-    threshold: str = ""
-    message: str = ""
-
-
-@dataclass
-class StageResult:
-    stage: str
-    success: bool
-    duration_seconds: float
-    quality_checks: list[QualityCheckResult] = field(default_factory=list)
-    error: str | None = None
-    retries_used: int = 0
+# Severity, QualityCheckResult and StageResult are defined in pipeline.quality
+# and re-exported above, so that quality.py can own them without a circular
+# import back into this module.
 
 
 # ─── Agent spec loading ──────────────────────────────────────────────────────
@@ -83,53 +80,27 @@ def load_agent_spec(stage: str) -> dict:
 def run_quality_checks(spec: dict, db_conn: Any) -> list[QualityCheckResult]:
     """
     Run all quality checks defined in an agent spec.
-    Returns a list of results. Any ERROR-severity failure blocks the pipeline.
+
+    Args:
+        spec: The loaded agent spec.
+        db_conn: An open database connection, or None. With no connection the
+            SQL checks fail rather than pass, so an unavailable database is
+            never mistaken for a clean gate.
+
+    Returns:
+        A list of results. Any ERROR-severity failure blocks the pipeline.
     """
-    results = []
-    checks = spec.get("quality_checks", [])
-
-    for check in checks:
-        result = _run_single_check(check, db_conn)
-        results.append(result)
-        level = "error" if not result.passed and result.severity == Severity.ERROR else "warning"
-        log_fn = logger.error if level == "error" else logger.warning if not result.passed else logger.info
-        log_fn(
-            "quality_check",
-            name=result.name,
-            passed=result.passed,
-            actual=result.actual_value,
-            threshold=result.threshold,
-        )
-
-    return results
-
-
-def _run_single_check(check: dict, db_conn: Any) -> QualityCheckResult:
-    """Execute a single quality check against the database."""
-    name = check["name"]
-    severity = Severity(check.get("severity", "warning"))
-    threshold = check.get("threshold", "")
-    sql = check.get("check", "")
-
-    # TODO: implement actual DB query execution and threshold comparison.
-    # For now, return a placeholder that passes.
-    # The real implementation will:
-    #   1. Execute the SQL query against db_conn
-    #   2. Parse the threshold string (e.g. ">= 0.85", "< 100", "= 0")
-    #   3. Compare and return pass/fail
-
-    return QualityCheckResult(
-        name=name,
-        passed=True,  # placeholder
-        severity=severity,
-        threshold=threshold,
-        message="Not yet implemented",
-    )
+    runner = QualityRunner(db_conn)
+    return runner.run_all(spec.get("quality_checks", []) or [])
 
 
 # ─── Stage runner ────────────────────────────────────────────────────────────
 
-def run_stage(stage: str, config_overrides: dict | None = None) -> StageResult:
+def run_stage(
+    stage: str,
+    config_overrides: dict | None = None,
+    db_conn: Any = None,
+) -> StageResult:
     """
     Run a single pipeline stage.
 
@@ -137,10 +108,19 @@ def run_stage(stage: str, config_overrides: dict | None = None) -> StageResult:
     2. Import and execute the stage's runner module
     3. Run quality checks
     4. Handle retries on failure
+
+    Args:
+        stage: The stage name; must appear in STAGE_ORDER.
+        config_overrides: Parameter overrides merged into the spec's params.
+        db_conn: An open database connection used to run the quality gate.
+
+    Returns:
+        The stage's result, including every quality check that ran.
     """
     spec = load_agent_spec(stage)
-    retry_policy = spec.get("retry_policy", {})
+    retry_policy = spec.get("retry_policy", {}) or {}
     max_retries = retry_policy.get("max_stage_retries", 1)
+    on_failure = retry_policy.get("on_failure", "pause_and_alert")
 
     if config_overrides:
         spec.setdefault("params", {}).update(config_overrides)
@@ -157,12 +137,9 @@ def run_stage(stage: str, config_overrides: dict | None = None) -> StageResult:
             duration = time.time() - start
 
             # Run quality gates
-            # TODO: pass actual DB connection
-            checks = run_quality_checks(spec, db_conn=None)
+            checks = run_quality_checks(spec, db_conn=db_conn)
 
-            has_error = any(
-                not c.passed and c.severity == Severity.ERROR for c in checks
-            )
+            has_error = has_blocking_failure(checks)
 
             if has_error and attempt < max_retries:
                 logger.warning("stage_quality_failed_retrying", stage=stage, attempt=attempt + 1)
@@ -174,6 +151,7 @@ def run_stage(stage: str, config_overrides: dict | None = None) -> StageResult:
                 duration_seconds=duration,
                 quality_checks=checks,
                 retries_used=attempt,
+                on_failure=on_failure,
             )
 
         except Exception as e:
@@ -186,7 +164,7 @@ def run_stage(stage: str, config_overrides: dict | None = None) -> StageResult:
                 time.sleep(backoff)
                 continue
 
-            on_failure = retry_policy.get("on_failure", "pause_and_alert")
+            logger.error("stage_failed", stage=stage, on_failure=on_failure)
 
             return StageResult(
                 stage=stage,
@@ -194,10 +172,17 @@ def run_stage(stage: str, config_overrides: dict | None = None) -> StageResult:
                 duration_seconds=duration,
                 error=str(e),
                 retries_used=attempt,
+                on_failure=on_failure,
             )
 
     # should not reach here, but just in case
-    return StageResult(stage=stage, success=False, duration_seconds=0, error="Exhausted retries")
+    return StageResult(
+        stage=stage,
+        success=False,
+        duration_seconds=0,
+        error="Exhausted retries",
+        on_failure=on_failure,
+    )
 
 
 # ─── Pipeline orchestrator ───────────────────────────────────────────────────
@@ -206,6 +191,7 @@ def run_pipeline(
     stages: list[str],
     config_overrides: dict | None = None,
     stop_on_error: bool = True,
+    db_conn: Any = None,
 ) -> list[StageResult]:
     """
     Run a sequence of pipeline stages in order.
@@ -214,6 +200,7 @@ def run_pipeline(
         stages: list of stage names, or ["all"] for the full pipeline.
         config_overrides: dict of param overrides passed to every stage.
         stop_on_error: if True, halt the pipeline on the first ERROR-severity failure.
+        db_conn: an open database connection used to run each stage's quality gate.
 
     Returns:
         List of StageResult for each stage that ran.
@@ -229,7 +216,7 @@ def run_pipeline(
 
     results = []
     for stage in stages:
-        result = run_stage(stage, config_overrides)
+        result = run_stage(stage, config_overrides, db_conn=db_conn)
         results.append(result)
 
         logger.info(
@@ -240,9 +227,17 @@ def run_pipeline(
             retries=result.retries_used,
         )
 
-        if not result.success and stop_on_error:
-            logger.error("pipeline_halted", failed_stage=stage)
-            break
+        if not result.success:
+            if stop_on_error and result.halts_pipeline:
+                logger.error("pipeline_halted", failed_stage=stage)
+                break
+            # The spec set on_failure: continue_with_logging, so a failure here
+            # is recorded but the pipeline carries on.
+            logger.warning(
+                "stage_failed_continuing",
+                failed_stage=stage,
+                on_failure=result.on_failure,
+            )
 
     # Summary
     total_duration = sum(r.duration_seconds for r in results)

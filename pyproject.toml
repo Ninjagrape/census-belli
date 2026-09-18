@@ -25,7 +25,11 @@ dependencies = [
     "cmdstanpy>=1.2",
 
     # LLM extraction
-    "anthropic>=0.39",
+    # anthropic 1.x is a major-version break from 0.x (httpx2, removed
+    # deprecated params); pipeline/llm/anthropic_client.py targets 1.x.
+    "anthropic>=1.0",
+    "google-genai>=2.3",
+    "jsonschema>=4.21",
 
     # entity resolution
     "rapidfuzz>=3.6",

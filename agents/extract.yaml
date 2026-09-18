@@ -26,8 +26,15 @@ tools:
   - db_upsert
 
 params:
-  llm_model: claude-sonnet-4-6
-  llm_temperature: 0.0
+  # Gemini serves this stage. It is the highest-volume and lowest-judgement
+  # LLM work in the pipeline, one call per battle article, and flash-tier
+  # pricing runs several times cheaper per article than the Anthropic
+  # equivalent for what is essentially structured transcription.
+  # Cheaper still: gemini-3.1-flash-lite, if extraction quality holds on a
+  # sample. Verify against the held-out labels before switching.
+  llm_provider: gemini
+  llm_model: gemini-3.8-flash
+  llm_temperature: 0.0         # honoured: Gemini still accepts sampling params
   llm_max_tokens: 4096
   batch_size: 50               # process this many articles per LLM batch
   log_all_llm_calls: true

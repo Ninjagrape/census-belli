@@ -373,6 +373,55 @@ CREATE TABLE crawl_log (
 CREATE INDEX idx_crawl_url    ON crawl_log (url);
 CREATE INDEX idx_crawl_battle ON crawl_log (battle_id);
 
+-- ─── LLM CALL AUDIT ─────────────────────────────────────────────────────────
+-- One row per LLM call made by the extract, resolve and classify stages.
+-- A ranking derived from LLM-extracted data is only defensible if every
+-- extraction traces back to a specific prompt, model version and response,
+-- so this table is the provenance record for the whole LLM surface.
+--
+-- input_hash also makes those stages idempotent and resumable: a stage looks
+-- up the hash of the request it is about to send and skips work it has
+-- already completed, so a re-run after a crash costs nothing for the
+-- articles it already handled.
+
+CREATE TABLE llm_calls (
+    call_id             BIGSERIAL PRIMARY KEY,
+    stage               TEXT NOT NULL,          -- extract | resolve | classify
+    provider            TEXT NOT NULL,          -- anthropic | gemini
+    model               TEXT NOT NULL,          -- exact model identifier, never an alias
+    input_hash          TEXT NOT NULL,          -- sha256 of provider+model+prompt+schema
+    status              TEXT NOT NULL,
+    prompt_tokens       INT DEFAULT 0,
+    completion_tokens   INT DEFAULT 0,
+    cached_prompt_tokens INT DEFAULT 0,         -- subset of prompt_tokens served from cache
+    cost_usd            NUMERIC(12, 6),         -- NULL when the model is not in the price table
+    latency_ms          INT,
+    attempts            INT DEFAULT 1,          -- round trips including retries
+    response_json       JSONB,                  -- parsed output; NULL unless status = 'ok'
+    raw_text            TEXT,                   -- raw body, kept only when parsing failed
+    error               TEXT,
+    battle_id           INT REFERENCES battles(battle_id),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT llm_calls_status_known CHECK (
+        status IN ('ok', 'parse_error', 'refusal', 'api_error', 'truncated')
+    ),
+    -- A successful call must have produced an object; a failed one must say why.
+    CONSTRAINT llm_calls_ok_has_output CHECK (
+        (status = 'ok' AND response_json IS NOT NULL)
+        OR (status <> 'ok' AND error IS NOT NULL)
+    )
+);
+
+-- Partial index: the cache lookup only ever asks for successful calls, and
+-- restricting the index to those keeps it small next to a table that will
+-- accumulate a row per article per stage per prompt revision.
+CREATE INDEX idx_llm_calls_hash_ok ON llm_calls (input_hash) WHERE status = 'ok';
+CREATE INDEX idx_llm_calls_stage   ON llm_calls (stage, created_at);
+CREATE INDEX idx_llm_calls_battle  ON llm_calls (battle_id);
+CREATE INDEX idx_llm_calls_review  ON llm_calls (stage, status) WHERE status <> 'ok';
+
+
 
 -- ─── MODEL OUTPUTS ──────────────────────────────────────────────────────────
 -- Stores results from different model runs so you can compare specifications.

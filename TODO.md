@@ -11,7 +11,7 @@
 - [ ] README.md (public-facing, not the CLAUDE.md)
 - [ ] LICENSE (MIT or similar)
 - [ ] Alembic migration init from config/schema.sql
-- [ ] .env.example with required env vars (DATABASE_URL, ANTHROPIC_API_KEY)
+- [x] .env.example with required env vars (DATABASE_URL, ANTHROPIC_API_KEY, GEMINI_API_KEY)
 - [ ] Docker compose for local Postgres
 - [ ] CI config (GitHub Actions: lint, type check, test)
 - [ ] Pre-commit hooks (ruff, mypy)
@@ -20,8 +20,11 @@
 - [ ] Database connection module (pipeline/db.py) using SQLAlchemy Core
 - [ ] Config loader that merges agent YAML specs with CLI overrides
 - [ ] Structured logging setup (structlog config)
-- [ ] LLM client wrapper (pipeline/llm.py) that handles retries, token logging, cost tracking
-- [ ] Quality check runner (actually execute the SQL checks in orchestrator.py)
+- [x] LLM client wrapper (pipeline/llm/) that handles retries, token logging, cost tracking
+      - provider-agnostic: anthropic + gemini, routed per stage via agents/<stage>.yaml
+      - llm_calls table doubles as the resume cache, keyed on request hash
+      - [ ] smoke-test the Gemini path against a live key (refusal + truncation branches)
+- [x] Quality check runner (actually execute the SQL checks in orchestrator.py)
 - [ ] Stage runner base class / protocol that each pipeline/stages/*.py implements
 
 ## Stage 1: Crawl (pipeline/stages/crawl.py)
@@ -137,7 +140,7 @@
 - [ ] config/expert_rankings.yaml (curated from published lists)
 
 ## Stage 9: Report (pipeline/stages/report.py)
-- [ ] agents/report.yaml spec
+- [x] agents/report.yaml spec
 - [ ] Rankings table generator (top N with CIs)
 - [ ] Interactive explorer (Plotly or HTML artifact)
   - [ ] Searchable general lookup
@@ -146,6 +149,20 @@
   - [ ] Sensitivity comparison view
 - [ ] Static report output (markdown + figures for the README/blog)
 - [ ] CSV/JSON export of final rankings
+
+## Tooling (.claude/)
+- [x] bayesian-model-reviewer agent — inference correctness for the PyMC stages
+- [x] historiography-reviewer agent — domain plausibility of extracted data
+- [x] /data-audit command — data-level health check, distinct from /status
+- [x] /extraction-eval command — prompt regression harness
+- [ ] tests/fixtures/gold/ — 20 hand-labelled battles the eval harness scores against
+      (the real work behind /extraction-eval; also unblocks /test-stage extract and classify)
+- [ ] Implement the non-SQL quality check methods registered in pipeline/quality.py
+      (diagnostics_json, posterior_check, per_round_check, range_check,
+      statistical_test, brier_score, jaccard_overlap, held_out_accuracy).
+      These currently report as unimplemented rather than passing.
+- [ ] Wire a real DB connection into the orchestrator CLI once pipeline/db.py exists
+      (run_stage and run_pipeline already accept db_conn; main() still passes None)
 
 ## Stretch Goals
 - [ ] Web UI for browsing results and exploring individual generals

@@ -23,6 +23,17 @@ tools:
   - db_insert
 
 params:
+  # This stage stays on Anthropic deliberately. Command attribution is the
+  # Octavian/Agrippa problem, the judgement the whole WAR methodology rests
+  # on, and it is the wrong place to economise: it is also far lower volume
+  # than extract, since only multi-commander sides need a call at all.
+  #
+  # claude-sonnet-5 is both newer and cheaper than the model below
+  # ($2/$10 per Mtok against $3/$15), but it rejects sampling parameters
+  # outright. Moving to it means deleting llm_temperature and relying on the
+  # structured output constraint for determinism, so it is a deliberate
+  # change to make and re-validate, not a drop-in swap.
+  llm_provider: anthropic
   llm_model: claude-sonnet-4-6
   llm_temperature: 0.0
 
