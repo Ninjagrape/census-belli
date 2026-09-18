@@ -21,7 +21,7 @@ extraction that was already paid for is worse.
 from __future__ import annotations
 
 import json
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import structlog
 
@@ -109,11 +109,14 @@ def find_completed_call(conn: Any, input_hash: str) -> dict[str, Any] | None:
     # psycopg returns JSONB as a dict; a stub or text column may return a string.
     if isinstance(stored, str):
         try:
-            return json.loads(stored)
+            decoded = json.loads(stored)
+            return decoded if isinstance(decoded, dict) else None
         except json.JSONDecodeError:
             logger.warning("llm_call_cache_row_unparseable", input_hash=input_hash[:12])
             return None
-    return stored if isinstance(stored, dict) else None
+    if isinstance(stored, dict):
+        return cast("dict[str, Any]", stored)
+    return None
 
 
 def log_call(

@@ -15,7 +15,7 @@ include .env
 export
 endif
 
-.PHONY: help install lint typecheck test db-up db-down db-reset db-schema db-shell db-wait
+.PHONY: help install lint typecheck test db-up db-down db-reset db-schema db-shell db-wait \n        db-migrate db-migrate-sql db-revision
 
 help:  ## Show available targets
 	grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -58,6 +58,15 @@ db-reset:  ## Destroy the volume and rebuild from schema (DESTRUCTIVE)
 	$(COMPOSE) down -v
 	$(MAKE) db-up
 	$(MAKE) db-schema
+
+db-migrate:  ## Apply Alembic migrations up to head
+	PYTHONIOENCODING=utf-8 $(PYTHON) -m alembic upgrade head
+
+db-migrate-sql:  ## Print the migration SQL without applying it
+	PYTHONIOENCODING=utf-8 $(PYTHON) -m alembic upgrade head --sql
+
+db-revision:  ## Create a migration: make db-revision m="add x"
+	PYTHONIOENCODING=utf-8 $(PYTHON) -m alembic revision -m "$(m)"
 
 db-shell:  ## Open psql against the running database
 	$(COMPOSE) exec $(DB_SERVICE) psql -U $${POSTGRES_USER:-general_war} -d $${POSTGRES_DB:-general_war}

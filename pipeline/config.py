@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import structlog
 import yaml
@@ -117,16 +117,20 @@ def load_agent_spec(
             "The orchestrator addresses stages by filename, so these must agree."
         )
 
+    # yaml.safe_load is typed Any; the isinstance check above established
+    # this is a mapping, so name that for the type checker.
+    spec = cast("dict[str, Any]", loaded)
+
     if overrides:
-        loaded = merge_overrides(loaded, overrides)
+        spec = merge_overrides(spec, overrides)
 
     logger.debug(
         "agent_spec_loaded",
         stage=stage,
-        checks=len(loaded.get("quality_checks") or []),
+        checks=len(spec.get("quality_checks") or []),
         overridden=sorted(overrides) if overrides else [],
     )
-    return loaded
+    return spec
 
 
 def merge_overrides(spec: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
@@ -232,7 +236,8 @@ def parse_set_overrides(pairs: list[str]) -> dict[str, Any]:
         if not key:
             raise SpecError(f"Override {pair!r} has an empty key")
         try:
-            parsed[key] = yaml.safe_load(raw)
+            value: Any = yaml.safe_load(raw)
         except yaml.YAMLError:
-            parsed[key] = raw
+            value = raw
+        parsed[key] = value
     return parsed

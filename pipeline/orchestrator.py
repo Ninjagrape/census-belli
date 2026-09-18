@@ -69,7 +69,9 @@ STAGE_ORDER = [
 
 # ─── Agent spec loading ──────────────────────────────────────────────────────
 
-def load_agent_spec(stage: str, overrides: dict | None = None) -> dict:
+def load_agent_spec(
+    stage: str, overrides: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Load the YAML agent spec for a pipeline stage.
 
     Delegates to pipeline.config so that spec validation and override
@@ -90,7 +92,7 @@ def load_agent_spec(stage: str, overrides: dict | None = None) -> dict:
 
 # ─── Quality gate runner ─────────────────────────────────────────────────────
 
-def run_quality_checks(spec: dict, db_conn: Any) -> list[QualityCheckResult]:
+def run_quality_checks(spec: dict[str, Any], db_conn: Any) -> list[QualityCheckResult]:
     """
     Run all quality checks defined in an agent spec.
 
@@ -111,7 +113,7 @@ def run_quality_checks(spec: dict, db_conn: Any) -> list[QualityCheckResult]:
 
 def run_stage(
     stage: str,
-    config_overrides: dict | None = None,
+    config_overrides: dict[str, Any] | None = None,
     db_conn: Any = None,
 ) -> StageResult:
     """
@@ -219,7 +221,7 @@ def run_stage(
 
 def run_pipeline(
     stages: list[str],
-    config_overrides: dict | None = None,
+    config_overrides: dict[str, Any] | None = None,
     stop_on_error: bool = True,
     db_conn: Any = None,
 ) -> list[StageResult]:

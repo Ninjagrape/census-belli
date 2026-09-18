@@ -64,6 +64,15 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 python_version = "3.11"
 strict = true
 
+# google-genai ships no py.typed marker, so its types are unavailable.
+# Scoped to that package rather than relaxing the global setting.
+[[tool.mypy.overrides]]
+module = ["google.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: needs a live PostgreSQL instance (make db-up); skipped otherwise",
+]
