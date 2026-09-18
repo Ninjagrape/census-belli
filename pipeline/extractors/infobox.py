@@ -98,9 +98,16 @@ _BASE_STRENGTH: Final[dict[str, str | None]] = {
 _BASE_CASUALTIES: Final[tuple[str, ...]] = ("casualties", "losses", "casualties and losses")
 
 _VARIANTS: Final[dict[str, InfoboxVariant]] = {
-    "land": InfoboxVariant(
-        name="land",
-        battle_type="field",
+    # "Infobox military conflict" and friends are Wikipedia's universal battle
+    # templates: Actium, Trafalgar and Midway all use the plain one. The
+    # template name therefore carries no evidence about the domain, so
+    # battle_type is left for classify rather than guessed as "field", which
+    # would silently label every naval and air battle a land engagement and
+    # corrupt the battle_type covariate in agents/model.yaml for exactly the
+    # commanders whose ranking depends on it.
+    "generic": InfoboxVariant(
+        name="generic",
+        battle_type=None,
         strength_fields=dict(_BASE_STRENGTH),
         casualty_fields=_BASE_CASUALTIES,
     ),
@@ -138,10 +145,10 @@ _VARIANTS: Final[dict[str, InfoboxVariant]] = {
 }
 
 _TEMPLATE_VARIANTS: Final[dict[str, str]] = {
-    "infobox military conflict": "land",
-    "infobox military operation": "land",
-    "infobox battle": "land",
-    "infobox war": "land",
+    "infobox military conflict": "generic",
+    "infobox military operation": "generic",
+    "infobox battle": "generic",
+    "infobox war": "generic",
     "infobox naval conflict": "naval",
     "infobox naval battle": "naval",
     "infobox naval engagement": "naval",

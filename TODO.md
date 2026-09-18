@@ -153,6 +153,15 @@
 - [ ] CSV/JSON export of final rankings
 
 ## Known constraints
+- Wikipedia's API rate-limits harder than `agents/crawl.yaml`'s
+  `rate_limit_wikipedia: 1.0`. A live smoke test of ~6 requests at 1.5s spacing
+  drew HTTP 429. Raise the interval, or add 429-aware backoff, before any real
+  crawl. Currently 429 is treated as a generic retryable failure.
+- [ ] `battle_type` must be inferred in classify. The generic
+  {{Infobox military conflict}} template carries no domain evidence, so extract
+  now leaves battle_type unset for it, which is almost every battle. Nothing
+  sets it yet, so the covariate is currently always NULL.
+
 - BC dates cannot round-trip through Python. `datetime.date` has MINYEAR == 1,
   so no pre-1 AD date can be constructed, bound as a parameter, or decoded from
   a result. Postgres stores them fine. Any stage reading `battles.date_start`

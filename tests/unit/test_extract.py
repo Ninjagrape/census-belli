@@ -275,7 +275,9 @@ def test_land_infobox_yields_two_sides_with_commanders_and_reports() -> None:
 
     assert extraction is not None
     assert [s.label for s in extraction.sides] == ["French Empire", "Russian Empire"]
-    assert extraction.facts.battle_type == "field"
+    # The generic template says nothing about domain, so battle_type is left
+    # for classify. See test_generic_template_does_not_assert_a_land_battle.
+    assert extraction.facts.battle_type is None
     assert extraction.facts.outcome_level == "decisive_victory"
     assert extraction.facts.victor == "French"
 
@@ -335,6 +337,46 @@ def test_naval_infobox_preserves_differing_scopes_within_one_field() -> None:
     by_scope = {(r.reported_value, r.scope) for r in antony.troop_reports}
     assert (120000.0, "on_paper") in by_scope
     assert (20000.0, "engaged") in by_scope
+
+
+def test_generic_template_does_not_assert_a_land_battle() -> None:
+    """The universal template must not label naval battles as land engagements.
+
+    Wikipedia uses {{Infobox military conflict}} for almost everything: Actium,
+    Trafalgar and Midway all use the plain template rather than a naval one,
+    and none of them carries a ships= or vessels= field to fall back on. An
+    earlier version mapped that template to a "land" variant asserting
+    battle_type="field", which labelled every naval battle a land engagement.
+
+    battle_type is a covariate in agents/model.yaml, so that error fell
+    precisely on the commanders whose ranking depends on it.
+    """
+    naval_article_using_the_generic_template = """
+    {{Infobox military conflict
+    | conflict = Battle of Actium
+    | partof = the Final War of the Roman Republic
+    | date = 2 September 31 BC
+    | place = Ionian Sea, near Actium
+    | result = Octavian victory
+    | combatant1 = Octavian's forces
+    | combatant2 = Forces of Antony and Cleopatra
+    | commander1 = [[Marcus Vipsanius Agrippa|Agrippa]]
+    | commander2 = [[Mark Antony]]
+    | strength1 = 400 ships, 19,000 marines
+    | strength2 = 290 ships, 20,000 marines
+    }}
+    """
+
+    extraction = parse_infobox(
+        naval_article_using_the_generic_template, source_ref="f", source_title="t"
+    )
+
+    assert extraction is not None
+    assert extraction.facts.battle_type is None, (
+        "the generic template carries no evidence of domain; guessing 'field' "
+        "mislabels every naval battle"
+    )
+    assert extraction.notes and "battle_type" in extraction.notes[0]
 
 
 def test_siege_variant_reads_its_garrison_field_and_leaves_battle_type_unset() -> None:
