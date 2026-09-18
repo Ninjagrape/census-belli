@@ -17,12 +17,13 @@ import argparse
 import importlib
 import sys
 import time
-from pathlib import Path
 from typing import Any
 
 import structlog
 import yaml
 
+from pipeline.config import SpecError, merge_overrides, parse_set_overrides
+from pipeline.config import load_agent_spec as _load_spec
 from pipeline.quality import (
     QualityCheckResult,
     QualityRunner,
@@ -30,11 +31,13 @@ from pipeline.quality import (
     StageResult,
     has_blocking_failure,
 )
+from pipeline.stages.base import StageConformanceError, check_conforms
 
 logger = structlog.get_logger()
 
 __all__ = [
     "STAGE_ORDER",
+    "SpecError",
     "QualityCheckResult",
     "Severity",
     "StageResult",
@@ -66,13 +69,23 @@ STAGE_ORDER = [
 
 # ─── Agent spec loading ──────────────────────────────────────────────────────
 
-def load_agent_spec(stage: str) -> dict:
-    """Load the YAML agent spec for a pipeline stage."""
-    spec_path = Path(f"agents/{stage}.yaml")
-    if not spec_path.exists():
-        raise FileNotFoundError(f"Agent spec not found: {spec_path}")
-    with open(spec_path) as f:
-        return yaml.safe_load(f)
+def load_agent_spec(stage: str, overrides: dict | None = None) -> dict:
+    """Load the YAML agent spec for a pipeline stage.
+
+    Delegates to pipeline.config so that spec validation and override
+    merging behave identically here and in the tooling commands.
+
+    Args:
+        stage: The stage name.
+        overrides: Parameter overrides to merge into the spec.
+
+    Returns:
+        The loaded spec.
+
+    Raises:
+        SpecError: If the spec is missing or malformed.
+    """
+    return _load_spec(stage, overrides)
 
 
 # ─── Quality gate runner ─────────────────────────────────────────────────────
@@ -123,15 +136,32 @@ def run_stage(
     on_failure = retry_policy.get("on_failure", "pause_and_alert")
 
     if config_overrides:
-        spec.setdefault("params", {}).update(config_overrides)
+        spec = merge_overrides(spec, config_overrides)
 
     for attempt in range(max_retries + 1):
         logger.info("stage_start", stage=stage, attempt=attempt + 1)
         start = time.time()
 
         try:
-            # Import the stage runner module dynamically
+            # Import the stage runner module dynamically, then check it
+            # satisfies the StageRunner contract before calling it. A stage
+            # with a mistyped or mis-signed run() should fail here, not after
+            # the upstream stages have already done hours of work.
             runner_module = importlib.import_module(f"pipeline.stages.{stage}")
+            try:
+                check_conforms(runner_module)
+            except StageConformanceError as exc:
+                # A broken contract is a code defect, not a transient fault.
+                # Retrying cannot fix it, so fail immediately with the reason.
+                logger.error("stage_contract_violation", stage=stage, error=str(exc))
+                return StageResult(
+                    stage=stage,
+                    success=False,
+                    duration_seconds=time.time() - start,
+                    error=str(exc),
+                    retries_used=attempt,
+                    on_failure=on_failure,
+                )
             runner_module.run(spec)
 
             duration = time.time() - start
@@ -269,6 +299,14 @@ def main() -> None:
         help="Path to a YAML config file with parameter overrides",
     )
     parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        dest="set_overrides",
+        help="Override a spec param, e.g. --set mcmc_samples=5000. Repeatable.",
+    )
+    parser.add_argument(
         "--no-stop-on-error",
         action="store_true",
         help="Continue running stages even if one fails quality checks",
@@ -277,14 +315,17 @@ def main() -> None:
 
     stages = [s.strip() for s in args.stages.split(",")]
 
-    config_overrides = None
+    config_overrides: dict[str, Any] = {}
     if args.config:
-        with open(args.config) as f:
-            config_overrides = yaml.safe_load(f)
+        with open(args.config, encoding="utf-8") as f:
+            config_overrides.update(yaml.safe_load(f) or {})
+    if args.set_overrides:
+        # --set wins over --config, being the more specific instruction.
+        config_overrides.update(parse_set_overrides(args.set_overrides))
 
     results = run_pipeline(
         stages=stages,
-        config_overrides=config_overrides,
+        config_overrides=config_overrides or None,
         stop_on_error=not args.no_stop_on_error,
     )
 

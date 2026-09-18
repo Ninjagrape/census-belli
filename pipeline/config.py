@@ -1,0 +1,238 @@
+"""
+Agent spec loading and override merging.
+
+Each pipeline stage is configured by ``agents/<stage>.yaml``. This module is
+the single place that reads them, so that stage code, the orchestrator and
+the tooling commands all see the same spec with the same overrides applied.
+
+Override precedence, lowest to highest:
+
+1. the spec file itself
+2. a config file passed with ``--config``
+3. individual ``--set key=value`` overrides on the command line
+
+Overrides land in the spec's ``params`` section unless the key is dotted, in
+which case it addresses a nested path from the spec root. This keeps the
+common case short (``--set mcmc_samples=5000``) while still allowing
+``--set retry_policy.max_stage_retries=0``.
+"""
+
+from __future__ import annotations
+
+import copy
+from pathlib import Path
+from typing import Any
+
+import structlog
+import yaml
+
+logger = structlog.get_logger()
+
+__all__ = [
+    "AGENTS_DIR",
+    "SpecError",
+    "available_stages",
+    "load_agent_spec",
+    "merge_overrides",
+    "parse_set_overrides",
+    "spec_path",
+]
+
+AGENTS_DIR = Path("agents")
+
+# Keys every spec must define. A spec missing these fails later in a less
+# obvious place, so it is worth catching at load time.
+_REQUIRED_KEYS = ("stage", "description")
+
+
+class SpecError(ValueError):
+    """Raised when an agent spec is missing, malformed, or inconsistent."""
+
+
+def spec_path(stage: str, agents_dir: Path | str = AGENTS_DIR) -> Path:
+    """Return the path to a stage's spec file.
+
+    Args:
+        stage: The stage name.
+        agents_dir: Directory holding the specs.
+
+    Returns:
+        The path, which is not guaranteed to exist.
+    """
+    return Path(agents_dir) / f"{stage}.yaml"
+
+
+def available_stages(agents_dir: Path | str = AGENTS_DIR) -> list[str]:
+    """List the stages that have a spec on disk.
+
+    Args:
+        agents_dir: Directory holding the specs.
+
+    Returns:
+        Sorted stage names.
+    """
+    return sorted(p.stem for p in Path(agents_dir).glob("*.yaml"))
+
+
+def load_agent_spec(
+    stage: str,
+    overrides: dict[str, Any] | None = None,
+    agents_dir: Path | str = AGENTS_DIR,
+) -> dict[str, Any]:
+    """Load a stage's agent spec, with overrides applied.
+
+    Args:
+        stage: The stage name, matching ``agents/<stage>.yaml``.
+        overrides: Values to merge in. Bare keys target ``params``; dotted
+            keys address a path from the spec root.
+        agents_dir: Directory holding the specs.
+
+    Returns:
+        The spec as a dict.
+
+    Raises:
+        SpecError: If the file is missing, is not a mapping, omits a required
+            key, or names a stage inconsistent with its filename.
+    """
+    path = spec_path(stage, agents_dir)
+    if not path.exists():
+        known = available_stages(agents_dir)
+        raise SpecError(f"Agent spec not found: {path}. Specs on disk: {known}")
+
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise SpecError(f"{path} is not valid YAML: {exc}") from exc
+
+    if not isinstance(loaded, dict):
+        raise SpecError(f"{path} must contain a mapping, got {type(loaded).__name__}")
+
+    missing = [k for k in _REQUIRED_KEYS if k not in loaded]
+    if missing:
+        raise SpecError(f"{path} is missing required key(s): {missing}")
+
+    if loaded["stage"] != stage:
+        raise SpecError(
+            f"{path} declares stage {loaded['stage']!r} but is named {stage!r}. "
+            "The orchestrator addresses stages by filename, so these must agree."
+        )
+
+    if overrides:
+        loaded = merge_overrides(loaded, overrides)
+
+    logger.debug(
+        "agent_spec_loaded",
+        stage=stage,
+        checks=len(loaded.get("quality_checks") or []),
+        overridden=sorted(overrides) if overrides else [],
+    )
+    return loaded
+
+
+def merge_overrides(spec: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    """Deep-merge overrides into a copy of a spec.
+
+    A bare key targets ``params``, since that is what almost every override
+    adjusts. A dotted key addresses a path from the spec root, so
+    ``retry_policy.max_stage_retries`` reaches outside params when needed.
+
+    The input spec is not mutated: stages may be re-run with different
+    overrides within one process, and a mutated spec would leak between runs.
+
+    Args:
+        spec: The loaded spec.
+        overrides: Values to merge in.
+
+    Returns:
+        A new spec with overrides applied.
+
+    Raises:
+        SpecError: If a dotted path traverses a non-mapping value.
+    """
+    merged = copy.deepcopy(spec)
+
+    for key, value in overrides.items():
+        if "." in key:
+            _set_path(merged, key.split("."), value, original=key)
+        else:
+            params = merged.setdefault("params", {})
+            if not isinstance(params, dict):
+                raise SpecError(
+                    f"Cannot apply override {key!r}: spec's params is "
+                    f"{type(params).__name__}, not a mapping"
+                )
+            _merge_value(params, key, value)
+
+    return merged
+
+
+def _merge_value(target: dict[str, Any], key: str, value: Any) -> None:
+    """Set one key, recursing when both sides are mappings.
+
+    Args:
+        target: The mapping to write into.
+        key: The key to set.
+        value: The value to set.
+    """
+    existing = target.get(key)
+    if isinstance(existing, dict) and isinstance(value, dict):
+        for sub_key, sub_value in value.items():
+            _merge_value(existing, sub_key, sub_value)
+    else:
+        target[key] = value
+
+
+def _set_path(root: dict[str, Any], path: list[str], value: Any, original: str) -> None:
+    """Set a value at a dotted path, creating intermediate mappings.
+
+    Args:
+        root: The spec to write into.
+        path: Path segments.
+        value: The value to set.
+        original: The original dotted key, for error messages.
+
+    Raises:
+        SpecError: If a segment traverses a non-mapping value.
+    """
+    node: dict[str, Any] = root
+    for segment in path[:-1]:
+        nxt = node.setdefault(segment, {})
+        if not isinstance(nxt, dict):
+            raise SpecError(
+                f"Cannot apply override {original!r}: {segment!r} is "
+                f"{type(nxt).__name__}, not a mapping"
+            )
+        node = nxt
+    _merge_value(node, path[-1], value)
+
+
+def parse_set_overrides(pairs: list[str]) -> dict[str, Any]:
+    """Parse ``key=value`` strings from the command line.
+
+    Values are parsed as YAML scalars, so ``true``, ``3``, ``0.9`` and
+    ``[a, b]`` arrive as the types the spec would have used. A value that
+    does not parse is kept as a string, which is what a user typing a bare
+    word almost always means.
+
+    Args:
+        pairs: Strings of the form ``key=value``.
+
+    Returns:
+        A mapping suitable for merge_overrides.
+
+    Raises:
+        SpecError: If an entry has no '=' or an empty key.
+    """
+    parsed: dict[str, Any] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise SpecError(f"Override {pair!r} is not of the form key=value")
+        key, _, raw = pair.partition("=")
+        key = key.strip()
+        if not key:
+            raise SpecError(f"Override {pair!r} has an empty key")
+        try:
+            parsed[key] = yaml.safe_load(raw)
+        except yaml.YAMLError:
+            parsed[key] = raw
+    return parsed
