@@ -26,7 +26,7 @@ Delegate these as individual tasks:
 After all 1.x tasks complete:
 - Verify: run `ruff check pipeline/` and `mypy pipeline/` — fix any issues
 - Verify: write and run tests/integration/test_db.py (stand up DB, apply schema, insert fixture data, query v_battle_overview)
-- Commit: "feat: project infrastructure"
+- Stop. Do not commit; report the phase complete and suggest the message "feat: project infrastructure" for the user to run.
 
 ### Phase 2: Data Collection (Crawl + Extract)
 These are the longest stages. Delegate each sub-module:
@@ -38,7 +38,7 @@ These are the longest stages. Delegate each sub-module:
 After 2.x tasks:
 - Verify: integration test with 5 known battles (Actium, Austerlitz, Cannae, Gettysburg, Stalingrad)
 - Verify: quality checks from agents/crawl.yaml and agents/extract.yaml pass on the test data
-- Commit: "feat: crawl and extract stages"
+- Stop. Do not commit; report the phase complete and suggest the message "feat: crawl and extract stages" for the user to run.
 
 ### Phase 3: Entity Resolution + Classification
 **Task 3.1** — "Implement pipeline/stages/resolve.py following agents/resolve.yaml. Three-pass approach: exact Wikidata match, fuzzy contextual match (rapidfuzz + era/polity overlap), LLM disambiguation for remainder. Write to generals, general_aliases, update battle_commanders.general_id. Log every resolution decision to data/processed/resolution_log.jsonl."
@@ -48,7 +48,7 @@ After 2.x tasks:
 After 3.x tasks:
 - Verify: Actium test case — Agrippa is field_commander, Octavian is sovereign, Agrippa's attribution_weight > 0.7
 - Verify: quality checks pass
-- Commit: "feat: resolve and classify stages"
+- Stop. Do not commit; report the phase complete and suggest the message "feat: resolve and classify stages" for the user to run.
 
 ### Phase 4: Statistical Pipeline (Reconcile + Impute + Model)
 **Task 4.1** — "Implement pipeline/stages/reconcile.py following agents/reconcile.yaml. Hierarchical source-bias model in PyMC: per-source log-bias and precision, ancient source prior with positive bias. Fit on battles with 3+ reports, apply to all. Write best estimates + CIs to battle_sides, calibrated biases to sources."
@@ -60,7 +60,7 @@ After 3.x tasks:
 After 4.x tasks:
 - Verify: model converges on a small synthetic dataset (tests/fixtures/synthetic_tournament.json)
 - Verify: convergence diagnostics pass (rhat < 1.02, ESS > 800, divergences < 10)
-- Commit: "feat: reconcile, impute, and model stages"
+- Stop. Do not commit; report the phase complete and suggest the message "feat: reconcile, impute, and model stages" for the user to run.
 
 ### Phase 5: Evaluation + Reporting
 **Task 5.1** — "Implement pipeline/stages/evaluate.py following agents/evaluate.yaml. Held-out 5-fold CV, Brier score, posterior predictive checks, sensitivity analysis (refit with each variant), expert ranking comparison, named sanity checks (Agrippa > Octavian, Belisarius > Justinian). Write evaluation_report.json and diagnostic plots."
@@ -69,7 +69,7 @@ After 4.x tasks:
 
 After 5.x tasks:
 - Verify: evaluation report is generated and all sanity checks pass
-- Commit: "feat: evaluate and report stages"
+- Stop. Do not commit; report the phase complete and suggest the message "feat: evaluate and report stages" for the user to run.
 
 ### Phase 6: Integration
 **Task 6.1** — "Write a comprehensive integration test in tests/integration/test_full_pipeline.py that runs the entire pipeline on a small fixture dataset (20 battles, 30 generals) and verifies: all tables are populated, quality checks pass for all stages, the model converges, rankings are produced with credible intervals, and the Agrippa > Octavian check passes."
@@ -78,13 +78,14 @@ After 5.x tasks:
 
 **Task 6.3** — "Set up GitHub Actions CI: lint (ruff), type check (mypy), unit tests, integration tests (with Postgres service container). Add badges to the README."
 
-Final commit: "feat: full pipeline integration, README, CI"
+Finally, stop and suggest the message "feat: full pipeline integration, README, CI" for the user to run. Do not commit.
 
 ## Orchestration Rules
 
 - Never proceed to the next phase until the current phase's verification steps pass.
-- If a sub-agent's output has lint or type errors, fix them before committing.
+- If a sub-agent's output has lint or type errors, fix them before reporting the phase complete.
 - If a test fails, diagnose whether it's a test issue or an implementation issue. Fix the root cause.
 - After each phase, run the full test suite to catch regressions: `pytest tests/ -v`
 - Keep TODO.md updated throughout. Check off items as they're completed.
-- Each commit should be atomic and pass all tests.
+- Each suggested commit should be atomic and pass all tests.
+- Never run `git commit` or `git push` yourself. The user commits.

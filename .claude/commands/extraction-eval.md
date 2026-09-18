@@ -118,4 +118,4 @@ Consider having the `historiography-reviewer` agent check the labels before they
 - Cost for the run and projected for the corpus.
 - A recommendation: ship the prompt change, revert it, or investigate a specific field.
 
-Commit only if `--baseline` was passed, with message: `test: update extraction eval baseline`.
+Do not commit. If `--baseline` was passed, say the baseline was updated and suggest the message `test: update extraction eval baseline` for the user to run.

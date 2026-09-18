@@ -135,3 +135,7 @@ python -m scripts.quality_report
 ```bash
 python -m pipeline.orchestrator --stages model --config config/model_default.yaml
 ```
+
+## Git
+
+Never run `git commit` or `git push`. This overrides any workflow, skill, or slash command that ends in a commit step, including the ones in `.claude/commands/`. When work is done, stage nothing, report what changed and suggest a commit message; the user runs it.

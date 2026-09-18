@@ -23,4 +23,4 @@ Create or update an agent spec for: $ARGUMENTS
 
 5. Quality checks must be concrete SQL queries that can run against the DB after the stage completes. Each needs a clear pass/fail threshold.
 
-6. Commit with message: "feat: add agent spec for $ARGUMENTS stage"
+6. Stop. Do not commit; report what changed and suggest the message "feat: add agent spec for $ARGUMENTS stage" for the user to run.

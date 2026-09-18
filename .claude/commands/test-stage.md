@@ -33,4 +33,4 @@ Write or update tests for: $ARGUMENTS
    pytest tests/ -v --cov=pipeline/stages/$ARGUMENTS --cov-report=term-missing
    ```
 
-9. Commit with message: "test: add tests for $ARGUMENTS stage"
+9. Stop. Do not commit; report what changed and suggest the message "test: add tests for $ARGUMENTS stage" for the user to run.

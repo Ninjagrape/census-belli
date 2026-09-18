@@ -24,4 +24,4 @@ $ARGUMENTS can be "all", a single stage name, or a comma-separated range like "c
    - If the evaluate stage ran, report held-out accuracy, calibration, and sensitivity analysis highlights
    - Update TODO.md with any new issues discovered during the run
 
-5. Commit any fixes made during the run with appropriate messages.
+5. Do not commit any fixes made during the run; list them and suggest commit messages for the user to run.

@@ -24,4 +24,4 @@ Run the pipeline stage: $ARGUMENTS
    - Report the quality check results
    - Summarise the output: how many records were produced, any warnings, what the next stage should expect
 
-5. If fixes were needed, commit with message: "fix: $ARGUMENTS stage — <brief description>"
+5. If fixes were needed, do not commit; report them and suggest the message "fix: $ARGUMENTS stage — <brief description>" for the user to run.

@@ -30,6 +30,6 @@ Follow this process exactly:
 
 8. Update TODO.md: check off all items completed for this stage.
 
-9. Commit with message: "feat: implement $ARGUMENTS pipeline stage"
+9. Stop. Do not commit; report what changed and suggest the message "feat: implement $ARGUMENTS pipeline stage" for the user to run.
 
 10. Summarise what you built, any design decisions you made, and flag anything that needs manual review or is blocked on another stage.
