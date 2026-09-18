@@ -1,0 +1,68 @@
+stage: reconcile
+description: >
+  Reconcile conflicting troop and casualty reports from multiple sources
+  into best estimates with confidence intervals. Uses a hierarchical
+  source-bias model: each source has a latent bias and precision,
+  learned from battles where many sources overlap, then applied to
+  battles with fewer sources.
+
+inputs:
+  - db: troop_reports, casualty_reports, sources
+
+outputs:
+  - db: battle_sides (est_troops_total, est_troops_total_lo/hi, est_casualties, est_casualties_lo/hi updated)
+  - db: sources (troop_bias_mu, troop_bias_sd updated)
+  - data/processed/reconciliation_report.json
+
+tools:
+  - pymc_fit            # fit the source-bias model
+  - db_update
+
+params:
+  # source-bias model priors
+  bias_prior_mu: 0.0                  # log-scale; 0 = no bias
+  bias_prior_sd: 1.0                  # weakly informative
+  ancient_source_bias_prior_mu: 0.3   # slight positive bias (inflation)
+  ancient_source_bias_prior_sd: 0.5
+  precision_prior_alpha: 2.0          # inverse-gamma shape
+  precision_prior_beta: 1.0
+
+  # what counts as "ancient" for the inflated prior
+  ancient_cutoff_year: 500
+
+  mcmc_samples: 2000
+  mcmc_chains: 4
+  mcmc_tune: 1000
+
+prompt: null   # this stage is a statistical model, no LLM needed
+
+quality_checks:
+  - name: model_convergence
+    check: "all rhat < 1.05 and ess_bulk > 400 for all parameters"
+    method: diagnostics_json
+    severity: error
+
+  - name: estimates_populated
+    check: >
+      SELECT COUNT(*) FILTER (WHERE est_troops_total IS NOT NULL)::float
+           / NULLIF(COUNT(*), 0)
+      FROM battle_sides bs
+      WHERE EXISTS (SELECT 1 FROM troop_reports tr WHERE tr.side_id = bs.side_id)
+    threshold: ">= 0.99"
+    severity: error
+    description: "Every side with at least one troop report should have a reconciled estimate"
+
+  - name: ci_width_reasonable
+    check: >
+      SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (
+        ORDER BY (est_troops_total_hi - est_troops_total_lo) / NULLIF(est_troops_total, 0)
+      )
+      FROM battle_sides
+      WHERE est_troops_total > 0
+    threshold: "< 2.0"
+    severity: warning
+    description: "Median relative CI width should be less than 200% of the estimate"
+
+retry_policy:
+  max_stage_retries: 1
+  on_failure: pause_and_alert

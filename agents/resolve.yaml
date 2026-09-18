@@ -1,0 +1,117 @@
+stage: resolve
+description: >
+  Entity resolution for commanders and battles. Link every extracted
+  commander mention to a canonical general_id (backed by a Wikidata entity
+  where possible). Merge duplicate battle records. Build the general_aliases
+  table. This stage uses a hybrid approach: deterministic matching first,
+  then LLM-assisted disambiguation for ambiguous cases.
+
+inputs:
+  - data/processed/commanders_raw.jsonl
+  - data/processed/battles.jsonl
+  - data/raw/wikidata/
+
+outputs:
+  - db: generals, general_aliases, battle_commanders (general_id populated)
+  - data/processed/resolution_log.jsonl    # audit trail of every merge/link decision
+
+tools:
+  - wikidata_sparql
+  - llm_disambiguate
+  - db_upsert
+  - fuzzy_match               # rapidfuzz for string similarity
+
+params:
+  fuzzy_threshold: 85          # minimum similarity score for candidate matches
+  llm_model: claude-sonnet-4-6
+  llm_temperature: 0.0
+
+steps:
+  # Step 1: deterministic — exact name match to Wikidata
+  - name: exact_wikidata_match
+    method: deterministic
+    description: >
+      For each unique commander name, query Wikidata for entities with
+      matching labels that are instances of "human" (Q5) and have
+      "military commander" (Q47064) or similar occupation. Exact matches
+      on the English label get linked automatically.
+
+  # Step 2: deterministic — fuzzy match + context
+  - name: fuzzy_contextual_match
+    method: deterministic
+    description: >
+      For unresolved names, run fuzzy matching against the generals table
+      and Wikidata candidates. Candidates must share at least one battle's
+      war/era/polity to be considered. Matches above the fuzzy_threshold
+      with matching context are linked automatically.
+
+  # Step 3: LLM-assisted — true ambiguity
+  - name: llm_disambiguation
+    method: llm
+    description: >
+      For remaining unresolved names (typically <5% of total), present
+      the LLM with the commander mention, its battle context, and the
+      top candidate entities. Ask it to choose or flag as genuinely new.
+
+prompt:
+  system: |
+    You are a military history entity resolution assistant. Given a
+    commander name extracted from a battle article and a list of candidate
+    Wikidata entities, determine which candidate (if any) is the correct
+    match. Consider:
+    - The time period and region of the battle
+    - The side/polity the commander fought for
+    - The commander's described rank or role
+    - Alternative name spellings, transliterations, regnal numbers
+
+    If none of the candidates match, respond with "NEW_ENTITY" and provide
+    the best canonical name. If the match is uncertain, respond with
+    "UNCERTAIN" and your best guess with a confidence score.
+
+  user_template: |
+    Commander mention: "{name}"
+    Battle: {battle_name} ({date}, {war})
+    Side: {side_label}
+    Role described: {apparent_role}
+    Context: "{role_evidence}"
+
+    Candidates:
+    {candidates_formatted}
+
+    Which candidate matches this commander? Respond with JSON:
+    {{"match": "<wikidata_id or NEW_ENTITY or UNCERTAIN>", "confidence": 0.0-1.0, "reasoning": "..."}}
+
+quality_checks:
+  - name: resolution_rate
+    check: >
+      SELECT COUNT(*) FILTER (WHERE general_id IS NOT NULL)::float
+           / NULLIF(COUNT(*), 0)
+      FROM battle_commanders
+    threshold: ">= 0.90"
+    severity: warning
+    description: "At least 90% of commander mentions should be resolved"
+
+  - name: no_duplicate_generals
+    check: >
+      SELECT COUNT(*) FROM (
+        SELECT wikidata_id, COUNT(*) as n
+        FROM generals
+        WHERE wikidata_id IS NOT NULL
+        GROUP BY wikidata_id
+        HAVING COUNT(*) > 1
+      ) t
+    threshold: "= 0"
+    severity: error
+
+  - name: alias_coverage
+    check: >
+      SELECT COUNT(DISTINCT general_id)::float / NULLIF(
+        (SELECT COUNT(*) FROM generals), 0)
+      FROM general_aliases
+    threshold: ">= 0.70"
+    severity: warning
+    description: "Most generals should have at least one alias entry"
+
+retry_policy:
+  max_stage_retries: 2
+  on_failure: pause_and_alert

@@ -1,0 +1,103 @@
+stage: evaluate
+description: >
+  Validate the model through held-out prediction, posterior predictive
+  checks, sensitivity analysis, and comparison against expert rankings.
+  Produces a comprehensive evaluation report.
+
+inputs:
+  - db: model_runs, general_skill_estimates, battle_war_details
+  - db: battles, battle_sides, battle_commanders
+  - config/expert_rankings.yaml           # curated expert top-50 lists for comparison
+  - config/sensitivity_specs.yaml         # alternative model specs to test
+
+outputs:
+  - data/processed/evaluation_report.json
+  - data/processed/sensitivity_results/
+  - data/processed/figures/               # diagnostic plots
+
+tools:
+  - pymc_ppc             # posterior predictive checks
+  - held_out_eval        # k-fold or leave-one-out on battles
+  - sensitivity_runner   # refit model with altered specs
+  - plot_diagnostics
+
+params:
+  held_out_folds: 5
+  sensitivity_variants:
+    - name: drop_low_quality
+      description: "Drop battles with data_quality_score < 0.3"
+      filter: "data_quality_score >= 0.3"
+
+    - name: observed_only
+      description: "No imputation, only observed troop data"
+      imputation: none
+
+    - name: flat_priors
+      description: "Use very wide priors on all parameters"
+      skill_prior_sd: 5.0
+      beta_force_prior_sd: 2.0
+
+    - name: equal_attribution
+      description: "Ignore command hierarchy, equal credit to all commanders"
+      attribution_method: equal
+
+    - name: field_commanders_only
+      description: "Only attribute to field_commander and subordinate roles"
+      exclude_roles: [sovereign, nominal]
+
+    - name: replacement_50th
+      description: "Set replacement level at median instead of 40th percentile"
+      replacement_level: percentile_50
+
+  # validation targets
+  expert_checks:
+    - general: Napoleon
+      expected_rank_range: [1, 3]
+    - general: Alexander the Great
+      expected_rank_range: [1, 15]
+    - general: Genghis Khan
+      expected_rank_range: [1, 20]
+    - general: Agrippa
+      expected_note: "Should rank higher than Octavian"
+    - general: Octavian
+      expected_note: "Should rank lower than Agrippa"
+    - general: Belisarius
+      expected_note: "Should rank higher than Justinian"
+
+prompt: null
+
+quality_checks:
+  - name: held_out_accuracy
+    check: "Held-out prediction accuracy (binary win/loss) above chance"
+    threshold: "> 0.55"
+    severity: warning
+
+  - name: calibration
+    check: "Predicted win probabilities are calibrated (Brier score < 0.25)"
+    method: brier_score
+    severity: warning
+
+  - name: ranking_stability
+    check: >
+      Top-20 generals should overlap by at least 12 across all sensitivity
+      variants (60% stability)
+    method: jaccard_overlap
+    severity: warning
+
+  - name: octavian_agrippa_check
+    check: >
+      SELECT gse_agrippa.rank < gse_octavian.rank
+      FROM general_skill_estimates gse_agrippa
+      JOIN generals g_agrippa ON g_agrippa.general_id = gse_agrippa.general_id
+        AND g_agrippa.canonical_name LIKE '%Agrippa%'
+      CROSS JOIN general_skill_estimates gse_octavian
+      JOIN generals g_octavian ON g_octavian.general_id = gse_octavian.general_id
+        AND g_octavian.canonical_name LIKE '%Octavian%'
+      WHERE gse_agrippa.run_id = gse_octavian.run_id
+    threshold: "= true"
+    severity: warning
+    description: "Agrippa should rank above Octavian if attribution is working"
+
+retry_policy:
+  max_stage_retries: 1
+  on_failure: complete_with_warnings

@@ -1,0 +1,32 @@
+# data (reproduced by running the pipeline)
+data/raw/
+data/processed/
+data/imputed/
+!data/**/.gitkeep
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# env
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# model artifacts
+*.nc          # arviz InferenceData
+*.pkl

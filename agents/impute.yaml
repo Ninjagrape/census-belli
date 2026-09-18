@@ -1,0 +1,74 @@
+stage: impute
+description: >
+  Multiple imputation for missing troop data. Generates N complete datasets,
+  each with plausible values drawn from a conditional model. The imputation
+  model conditions on era, polity, war, battle type, outcome, and any
+  available partial troop data. Missingness class from the classify stage
+  informs the imputation model specification.
+
+inputs:
+  - db: battles, battle_sides, troop_reports, missing_data_log
+  - config/imputation_priors.yaml     # era/polity priors from military history literature
+
+outputs:
+  - data/imputed/round_{n}/           # one complete dataset per imputation round
+  - db: missing_data_log (was_imputed, imputation_method, imputed_value, imputed_lo/hi updated)
+
+tools:
+  - pymc_mice           # MICE implementation in PyMC
+  - db_update
+
+params:
+  n_imputations: 10                   # number of complete datasets to generate
+  mice_iterations: 20                 # MICE burn-in iterations
+  mice_method: predictive_mean_matching   # PMM preserves distributional shape better than regression
+
+  # era-specific priors on army sizes (log-normal parameters)
+  # these are starting points, refined from config/imputation_priors.yaml
+  era_priors:
+    ancient:
+      log_mu: 9.2         # ~10,000 troops
+      log_sd: 1.5
+    medieval:
+      log_mu: 8.5         # ~5,000
+      log_sd: 1.8
+    early_modern:
+      log_mu: 9.9         # ~20,000
+      log_sd: 1.2
+    napoleonic:
+      log_mu: 10.5        # ~35,000
+      log_sd: 1.0
+    industrial:
+      log_mu: 11.0        # ~60,000
+      log_sd: 1.5
+    modern:
+      log_mu: 11.5        # ~100,000
+      log_sd: 2.0
+
+prompt: null   # statistical model, no LLM
+
+quality_checks:
+  - name: imputation_completeness
+    check: >
+      For each imputation round, verify zero NULLs in troop totals
+      for battles that were in scope
+    method: per_round_check
+    severity: error
+
+  - name: imputed_values_plausible
+    check: >
+      No imputed troop count below 50 or above 10,000,000
+    method: range_check
+    severity: error
+
+  - name: distributional_check
+    check: >
+      KS test: distribution of imputed values should not significantly
+      differ from distribution of observed values within same era
+    method: statistical_test
+    threshold: "p > 0.01"
+    severity: warning
+
+retry_policy:
+  max_stage_retries: 1
+  on_failure: pause_and_alert

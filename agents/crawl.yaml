@@ -1,0 +1,67 @@
+stage: crawl
+description: >
+  Fetch raw HTML and structured data from Wikipedia, Wikidata, DBpedia,
+  and cited external sources. Output is raw content; no parsing or
+  interpretation happens here.
+
+inputs:
+  - config/sources_seed.yaml        # seed URLs: Wikipedia battle list pages
+  - data/raw/crawl_state.json       # resume state from previous run (if any)
+
+outputs:
+  - data/raw/battles_html/          # one .html per battle article
+  - data/raw/wikidata/              # one .json per Wikidata entity
+  - data/raw/dbpedia/               # one .json per DBpedia resource
+  - data/raw/citations/             # fetched citation URLs, keyed by battle
+  - data/raw/crawl_state.json       # updated resume state
+  - db: crawl_log                   # one row per fetch attempt
+
+tools:
+  - httpx_fetch          # async HTTP client with rate limiting and retry
+  - robots_check         # check robots.txt before fetching
+  - wikidata_sparql      # run SPARQL queries against Wikidata
+  - db_insert            # insert rows into crawl_log
+
+params:
+  rate_limit_wikipedia: 1.0         # seconds between requests to en.wikipedia.org
+  rate_limit_other: 2.0             # seconds between requests to other domains
+  max_retries: 3
+  backoff_base: 2.0
+  respect_robots: true
+  user_agent: "GeneralWAR/0.1 (academic research; contact@example.com)"
+  # crawl depth: how many citation hops from a battle article
+  citation_depth: 1
+  # only fetch citations from these domains (others are logged but skipped)
+  citation_allow_domains:
+    - jstor.org
+    - doi.org
+    - books.google.com
+    - archive.org
+    - cambridge.org
+    - oxford.ac.uk
+    - britannica.com
+
+prompt: null  # crawl stage is deterministic, no LLM needed
+
+quality_checks:
+  - name: min_battles_crawled
+    check: "SELECT COUNT(DISTINCT battle_id) FROM crawl_log WHERE http_status = 200"
+    threshold: ">= 3000"
+    severity: error
+
+  - name: error_rate_below_threshold
+    check: >
+      SELECT COUNT(*) FILTER (WHERE http_status >= 400 OR http_status IS NULL)::float
+           / NULLIF(COUNT(*), 0)
+      FROM crawl_log
+    threshold: "< 0.10"
+    severity: warning
+
+  - name: wikidata_coverage
+    check: "SELECT COUNT(*) FROM crawl_log WHERE url LIKE '%wikidata%' AND http_status = 200"
+    threshold: ">= 1000"
+    severity: warning
+
+retry_policy:
+  max_stage_retries: 2
+  on_failure: pause_and_alert

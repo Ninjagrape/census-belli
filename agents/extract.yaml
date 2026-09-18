@@ -1,0 +1,181 @@
+stage: extract
+description: >
+  Parse raw HTML into structured battle records. Infoboxes are parsed
+  deterministically. Article body text and external sources use an LLM
+  extraction pass to pull troop numbers, commanders, terrain, outcomes,
+  and casualty figures that the infobox missed. Wikidata/DBpedia JSON
+  is mapped to the schema directly.
+
+inputs:
+  - data/raw/battles_html/
+  - data/raw/wikidata/
+  - data/raw/dbpedia/
+  - data/raw/citations/
+
+outputs:
+  - data/processed/battles.jsonl
+  - data/processed/commanders_raw.jsonl    # pre-resolution commander mentions
+  - data/processed/troop_reports.jsonl
+  - data/processed/casualty_reports.jsonl
+  - db: battles, battle_sides, troop_reports, casualty_reports (partial, pre-resolution)
+
+tools:
+  - mwparserfromhell_parse    # deterministic MediaWiki template parser
+  - llm_extract               # Anthropic API call with structured output
+  - wikidata_map              # map Wikidata JSON fields to schema columns
+  - db_upsert
+
+params:
+  llm_model: claude-sonnet-4-6
+  llm_temperature: 0.0
+  llm_max_tokens: 4096
+  batch_size: 50               # process this many articles per LLM batch
+  log_all_llm_calls: true
+
+prompt:
+  system: |
+    You are a military history data extraction assistant. Given a passage from
+    a battle article or an external source about a battle, extract structured
+    data into the JSON schema below.
+
+    Be conservative: only extract values explicitly stated in the text. If a
+    number is described as approximate ("about 30,000", "roughly 20,000"),
+    set is_estimate to true. If the text gives a range ("between 15,000 and
+    20,000"), extract both as separate reports with is_lower_bound and
+    is_upper_bound flags respectively.
+
+    Pay close attention to SCOPE: does the number refer to troops actually
+    engaged in this battle, total forces available in the theatre, or
+    nominal/on-paper strength? This distinction is critical and sources
+    often conflate them.
+
+    For commanders, extract every named person described as commanding,
+    leading, or directing forces. Note their apparent role: did they
+    command the whole army, a wing/division, a fleet, or were they present
+    in a political/sovereign capacity? Quote the key sentence supporting
+    your role classification in role_evidence.
+
+    For terrain, extract any mentions of geography, fortifications, weather,
+    or defensive positions.
+
+  output_schema:
+    type: object
+    properties:
+      battle_name:
+        type: string
+      commanders:
+        type: array
+        items:
+          type: object
+          properties:
+            name:
+              type: string
+            side:
+              type: string
+            apparent_role:
+              type: string
+              enum: [sovereign, supreme_commander, theatre_commander, field_commander, subordinate, nominal, unclear]
+            role_evidence:
+              type: string
+              description: "Direct quote from the text supporting the role classification"
+          required: [name, side, apparent_role]
+      troop_reports:
+        type: array
+        items:
+          type: object
+          properties:
+            side:
+              type: string
+            branch:
+              type: string
+              enum: [total, infantry, cavalry, artillery, naval, air, armour, irregular, other]
+            value:
+              type: number
+            scope:
+              type: string
+              enum: [engaged, available, theatre_strength, on_paper, unknown]
+            is_estimate:
+              type: boolean
+            is_upper_bound:
+              type: boolean
+            is_lower_bound:
+              type: boolean
+            context_quote:
+              type: string
+          required: [side, branch, value, scope]
+      casualty_reports:
+        type: array
+        items:
+          type: object
+          properties:
+            side:
+              type: string
+            casualty_type:
+              type: string
+              enum: [killed, wounded, captured, missing, total]
+            value:
+              type: number
+            is_estimate:
+              type: boolean
+          required: [side, casualty_type, value]
+      terrain:
+        type: array
+        items:
+          type: string
+      fortified:
+        type: boolean
+      weather:
+        type: string
+      outcome:
+        type: object
+        properties:
+          victor:
+            type: string
+          outcome_level:
+            type: string
+            enum: [decisive_victory, victory, pyrrhic_victory, indecisive]
+          evidence:
+            type: string
+    required: [battle_name]
+
+  user_template: |
+    Battle: {battle_name}
+    Source: {source_type} ({source_title})
+    ---
+    {text_passage}
+    ---
+    Extract all structured data from this passage. Return ONLY valid JSON matching the schema. If a field has no information in this passage, omit it.
+
+quality_checks:
+  - name: extraction_coverage
+    check: >
+      SELECT COUNT(*) FILTER (WHERE n_sources > 0)::float / NULLIF(COUNT(*), 0)
+      FROM battles
+    threshold: ">= 0.85"
+    severity: warning
+
+  - name: commander_extraction_rate
+    check: >
+      SELECT AVG(commander_count) FROM (
+        SELECT b.battle_id, COUNT(cr.id) as commander_count
+        FROM battles b
+        LEFT JOIN (SELECT DISTINCT battle_name, name as id FROM data.commanders_raw) cr
+          ON cr.battle_name = b.name
+        GROUP BY b.battle_id
+      ) t
+    threshold: ">= 2.0"
+    severity: warning
+    description: "Average commanders per battle should be at least 2 (one per side)"
+
+  - name: no_empty_extractions
+    check: >
+      SELECT COUNT(*) FROM crawl_log cl
+      WHERE cl.extraction_method = 'llm_extraction'
+        AND cl.fields_extracted = 0
+        AND cl.http_status = 200
+    threshold: "< 100"
+    severity: warning
+
+retry_policy:
+  max_stage_retries: 3
+  on_failure: continue_with_logging    # don't block the whole pipeline on one article

@@ -1,0 +1,66 @@
+# Seed URLs for the crawl stage.
+# These are the Wikipedia "Lists of battles" category pages that serve as
+# the entry point for discovering individual battle articles.
+
+wikipedia_battle_lists:
+  - https://en.wikipedia.org/wiki/Lists_of_battles
+  - https://en.wikipedia.org/wiki/List_of_battles_before_301
+  - https://en.wikipedia.org/wiki/List_of_battles_301%E2%80%931300
+  - https://en.wikipedia.org/wiki/List_of_battles_1301%E2%80%931800
+  - https://en.wikipedia.org/wiki/List_of_battles_1801%E2%80%931900
+  - https://en.wikipedia.org/wiki/List_of_battles_since_1901
+  # regional/thematic lists that catch battles the chronological lists miss
+  - https://en.wikipedia.org/wiki/List_of_battles_of_the_Mongol_Empire
+  - https://en.wikipedia.org/wiki/List_of_battles_involving_the_Ottoman_Empire
+  - https://en.wikipedia.org/wiki/List_of_battles_involving_China
+  - https://en.wikipedia.org/wiki/List_of_battles_involving_Japan
+  - https://en.wikipedia.org/wiki/List_of_battles_involving_India
+  - https://en.wikipedia.org/wiki/List_of_Roman_battles
+  - https://en.wikipedia.org/wiki/List_of_battles_involving_the_United_Kingdom
+  - https://en.wikipedia.org/wiki/List_of_naval_battles
+
+# Wikidata SPARQL queries to find battles not on Wikipedia lists
+wikidata_queries:
+  # All items that are instances of "battle" (Q178561)
+  all_battles: |
+    SELECT ?battle ?battleLabel ?date ?coord WHERE {
+      ?battle wdt:P31 wd:Q178561 .
+      OPTIONAL { ?battle wdt:P585 ?date . }
+      OPTIONAL { ?battle wdt:P625 ?coord . }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
+    }
+    LIMIT 50000
+
+  # Battles that are "part of" a specific war, catching linked battles
+  battles_by_war: |
+    SELECT ?battle ?battleLabel ?war ?warLabel WHERE {
+      ?battle wdt:P31 wd:Q178561 .
+      ?battle wdt:P361 ?war .
+      ?war wdt:P31 wd:Q198 .
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
+    }
+    LIMIT 50000
+
+  # All humans with "military commander" occupation who have battles
+  commanders_with_battles: |
+    SELECT ?person ?personLabel ?battle ?battleLabel WHERE {
+      ?person wdt:P31 wd:Q5 .
+      ?person wdt:P106 wd:Q47064 .
+      ?battle wdt:P710 ?person .
+      ?battle wdt:P31 wd:Q178561 .
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
+    }
+    LIMIT 100000
+
+# Structured external datasets to ingest
+external_datasets:
+  # Correlates of War project
+  - name: cow_interstate_wars
+    url: https://correlatesofwar.org/data-sets/COW-war/
+    format: csv
+    notes: "Interstate wars 1816-2007; provides belligerent troop counts"
+
+  # Wikipedia category pages for additional coverage
+  - name: wikipedia_sieges
+    url: https://en.wikipedia.org/wiki/Category:Sieges
+    type: category_crawl

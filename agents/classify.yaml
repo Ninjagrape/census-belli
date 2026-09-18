@@ -1,0 +1,180 @@
+stage: classify
+description: >
+  Two classification tasks in one stage.
+  (A) For each battle-commander pair, determine the command_role,
+      hierarchy_rank, reports_to relationship, and initial attribution_weight
+      using extracted role_evidence and article context.
+  (B) For each missing data field, classify the missingness mechanism
+      (MCAR, MAR, MNAR) to inform the imputation strategy.
+
+inputs:
+  - db: battle_commanders (with general_id resolved)
+  - db: battles, battle_sides
+  - data/raw/battles_html/       # re-read article text for context
+  - data/processed/troop_reports.jsonl
+
+outputs:
+  - db: battle_commanders (command_role, hierarchy_rank, reports_to_bc_id, attribution_weight updated)
+  - db: missing_data_log
+
+tools:
+  - llm_classify
+  - db_update
+  - db_insert
+
+params:
+  llm_model: claude-sonnet-4-6
+  llm_temperature: 0.0
+
+# ──── TASK A: COMMAND ROLE CLASSIFICATION ────────────────────────────────────
+
+command_role_prompt:
+  system: |
+    You are a military history analyst classifying command relationships.
+    Given a battle and its listed commanders on one side, determine:
+
+    1. Each commander's ROLE from this list:
+       - sovereign: head of state/monarch present but not directing tactics
+       - supreme_commander: overall strategic authority, may not direct the battle
+       - theatre_commander: commands the campaign, directs overall battle plan
+       - field_commander: directly commands the army/fleet/force in the engagement
+       - subordinate: commands a wing, division, corps, or squadron under another
+       - nominal: listed for political reasons, did not meaningfully command
+
+    2. The HIERARCHY: who reported to whom in this specific battle. The top
+       tactical commander has hierarchy_rank 0. Their direct reports have
+       rank 1, and so on.
+
+    3. An ATTRIBUTION WEIGHT (0.0 to 1.0) estimating how much of the
+       tactical outcome should be credited to this person. Weights for all
+       commanders on a side should sum to approximately 1.0. A field
+       commander who planned and executed the battle gets most of the weight.
+       A sovereign who was merely present gets 0.05-0.15. A subordinate
+       who commanded a crucial wing might get 0.2-0.4.
+
+    Base your classification on the article text provided. If the text does
+    not give enough information to distinguish roles, default to:
+    - If only one commander is listed: field_commander, weight 1.0
+    - If two are listed with no further context: split 0.6/0.4 to the
+      more senior by title, mark both as "unknown" role with low confidence
+    - Flag these for manual review
+
+    Specific patterns to watch for:
+    - A monarch "present at" or "accompanied" the army but a named general
+      "commanded" or "led" = sovereign + field_commander
+    - "X commanded the left/right wing under Y" = subordinate reports to Y
+    - "X directed the battle while Y remained at camp/on shore/in reserve"
+      = X is field_commander, Y is nominal or sovereign
+    - Roman consuls who alternated daily command: split equally as co-field_commanders
+
+  user_template: |
+    Battle: {battle_name} ({date})
+    Side: {side_label}
+
+    Commanders listed:
+    {commanders_formatted}
+
+    Extracted role evidence:
+    {role_evidence_formatted}
+
+    Full article excerpt (relevant sections):
+    {article_excerpt}
+
+    Classify each commander. Return JSON:
+    {{
+      "classifications": [
+        {{
+          "name": "...",
+          "command_role": "...",
+          "hierarchy_rank": 0,
+          "reports_to": null or "name of superior",
+          "attribution_weight": 0.0-1.0,
+          "confidence": 0.0-1.0,
+          "reasoning": "..."
+        }}
+      ],
+      "needs_review": true/false,
+      "review_reason": "..." or null
+    }}
+
+# ──── TASK B: MISSINGNESS CLASSIFICATION ─────────────────────────────────────
+
+missingness_prompt:
+  system: |
+    You are a statistician classifying missing data mechanisms in a historical
+    military dataset. For each missing field, determine whether the data is:
+
+    - MCAR (Missing Completely At Random): the probability of being missing
+      is unrelated to any observed or unobserved data. Example: a Wikipedia
+      editor simply hasn't gotten around to adding a troop number that
+      exists in accessible sources.
+
+    - MAR (Missing At Random): the probability of being missing depends on
+      observed variables but not on the missing value itself. Example:
+      battles from smaller conflicts tend to have less documentation, so
+      troop numbers are missing, but the missingness depends on "conflict
+      size" (observed) not on the troop numbers themselves.
+
+    - MNAR (Missing Not At Random): the probability of being missing
+      depends on the unobserved value itself. Example: troop numbers for
+      embarrassing defeats may be suppressed by the losing side's historians,
+      so the missingness depends on the outcome (partially observed) and
+      the magnitude of the defeat (related to the troop numbers themselves).
+
+    Use these heuristics:
+    - Ancient/medieval battles with no troop data at all: likely MNAR
+      (records lost because the battle was obscure, and obscurity correlates
+      with small scale)
+    - 18th-19th century European battles missing one side's numbers: likely
+      MAR (depends on which side kept better records)
+    - Modern battles missing air/naval breakdown: likely MCAR (infobox
+      template inconsistency)
+    - Battles where only the winner's numbers are known: likely MNAR
+      (losers' records destroyed or suppressed)
+
+  user_template: |
+    Battle: {battle_name} ({date}, {war}, {region})
+    Era: {era}
+    Missing field: {field_name}
+    What IS known about this battle:
+    {observed_fields_summary}
+
+    Classify the missingness mechanism. Return JSON:
+    {{"missingness_class": "mcar|mar|mnar", "confidence": 0.0-1.0, "reasoning": "..."}}
+
+quality_checks:
+  - name: all_commanders_classified
+    check: >
+      SELECT COUNT(*) FROM battle_commanders
+      WHERE command_role = 'unknown'
+    threshold: "< 200"
+    severity: warning
+    description: "Fewer than 200 commanders should remain unclassified"
+
+  - name: attribution_weights_sum
+    check: >
+      SELECT COUNT(*) FROM (
+        SELECT side_id, ABS(SUM(attribution_weight) - 1.0) as deviation
+        FROM battle_commanders
+        GROUP BY side_id
+        HAVING ABS(SUM(attribution_weight) - 1.0) > 0.15
+      ) t
+    threshold: "< 50"
+    severity: warning
+    description: "Attribution weights per side should sum close to 1.0"
+
+  - name: missing_data_all_logged
+    check: >
+      SELECT COUNT(*) FROM battle_sides bs
+      WHERE bs.est_troops_total IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM missing_data_log mdl
+          WHERE mdl.side_id = bs.side_id AND mdl.field_name = 'troop_total'
+        )
+    threshold: "= 0"
+    severity: error
+    description: "Every missing troop total must have a missing_data_log entry"
+
+retry_policy:
+  max_stage_retries: 2
+  on_failure: continue_with_logging
