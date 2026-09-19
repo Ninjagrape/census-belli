@@ -34,6 +34,7 @@ from pipeline.extractors.article import (
     payload_to_extraction,
     render_template,
 )
+from pipeline.extractors.dbpedia_mapper import dbpedia_date_to_literal, map_resource
 from pipeline.extractors.infobox import (
     INFOBOX_STRENGTH_DEFAULT_SCOPE,
     campaign_names,
@@ -97,7 +98,9 @@ __all__ = [
     "infer_branch",
     "infer_scope",
     "iter_batches",
+    "dbpedia_date_to_literal",
     "map_entity",
+    "map_resource",
     "merge_battle",
     "missing_fields",
     "normalise_label",

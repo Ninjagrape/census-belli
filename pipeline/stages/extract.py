@@ -27,6 +27,9 @@ Inputs, laid down by the crawl stage:
 - ``data/raw/wikidata/<QID>.json`` -- keyed by entity, not by article, so
   entities are joined back to their battle through their ``enwiki``
   sitelink.
+- ``data/raw/dbpedia/<Title>-<hash>.json`` -- the same stem as the
+  article, since DBpedia resources are keyed by Wikipedia title, so this
+  one needs no index to join.
 """
 
 from __future__ import annotations
@@ -50,6 +53,7 @@ from pipeline.extractors import (
     extract_from_passages,
     iter_batches,
     map_entity,
+    map_resource,
     merge_battle,
     parse_article_infobox,
     to_jsonable,
@@ -69,6 +73,7 @@ PROCESSED_ROOT: Final[Path] = Path("data/processed")
 _ARTICLE_DIR: Final[str] = "battles_html"
 _WIKIDATA_DIR: Final[str] = "wikidata"
 _CITATIONS_DIR: Final[str] = "citations"
+_DBPEDIA_DIR: Final[str] = "dbpedia"
 
 # Preferred first: mwparserfromhell reads templates, so a wikitext sibling
 # gives a better infobox than the rendered HTML the crawl stage stores.
@@ -92,6 +97,7 @@ class RawBattle:
     slug: str
     article_path: Path | None = None
     wikidata_path: Path | None = None
+    dbpedia_path: Path | None = None
     citation_paths: list[Path] = field(default_factory=list)
     title: str = ""
 
@@ -221,6 +227,14 @@ def discover_battles(raw_root: Path = RAW_ROOT) -> list[RawBattle]:
     if citations_dir.is_dir():
         for path in sorted(citations_dir.glob("*.jsonl")):
             battles.setdefault(path.stem, RawBattle(slug=path.stem)).citation_paths.append(path)
+
+    # DBpedia resources are keyed by Wikipedia title, and the crawl stage
+    # names them with the same rule as the article, so the filename stem is
+    # the whole join. No sitelink index is needed, unlike Wikidata below.
+    dbpedia_dir = raw_root / _DBPEDIA_DIR
+    if dbpedia_dir.is_dir():
+        for path in sorted(dbpedia_dir.glob("*.json")):
+            battles.setdefault(path.stem, RawBattle(slug=path.stem)).dbpedia_path = path
 
     wikidata_dir = raw_root / _WIKIDATA_DIR
     if wikidata_dir.is_dir():
@@ -468,6 +482,26 @@ def extract_battle(
             )
             if mapped is not None:
                 sources.append(mapped)
+
+    if battle.dbpedia_path is not None:
+        payload = _read_json(battle.dbpedia_path)
+        if payload is None:
+            failures.append(
+                ExtractionFailure(
+                    battle_name=battle.name,
+                    source_ref=str(battle.dbpedia_path),
+                    status="parse_error",
+                    error="dbpedia payload unreadable or not a JSON object",
+                )
+            )
+        else:
+            resource = map_resource(
+                payload,
+                source_ref=str(battle.dbpedia_path),
+                fallback_name=battle.name,
+            )
+            if resource is not None:
+                sources.append(resource)
 
     llm_result = _llm_sources(
         battle,

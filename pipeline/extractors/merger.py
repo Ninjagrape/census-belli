@@ -88,6 +88,21 @@ _REVIEWABLE_FIELDS: Final[frozenset[str]] = frozenset(
 # Fields whose absence blocks the model rather than merely weakening it.
 _REQUIRED_BATTLE_FIELDS: Final[tuple[str, ...]] = ("date_start", "location_name", "outcome_level")
 
+# Battle-level covariates in the model's linear predictor (agents/model.yaml:
+# beta_type, terrain, defensive advantage). Their absence weakens the fit
+# rather than blocking it, but impute has to know they were absent, so they are
+# logged with a note that distinguishes them from the required set above.
+#
+# Deliberately excludes weather, which is extracted and stored but read by no
+# stage. Logging every field that happens to be NULL would bury the missingness
+# that matters under a row per ancient battle for a field nothing consumes.
+#
+# battle_type is expected to be missing on most battles until classify infers
+# it: the generic infobox stopped asserting a type once it emerged that
+# Wikipedia uses that template for naval battles too. Those rows are the
+# standing record of that gap rather than a surprise.
+_COVARIATE_BATTLE_FIELDS: Final[tuple[str, ...]] = ("battle_type", "terrain", "fortified")
+
 # Common suffixes dropped when matching a side across sources, so the
 # infobox's "French Empire" and the body's "France" land on one side.
 _SIDE_SUFFIXES: Final[tuple[str, ...]] = (
@@ -438,6 +453,18 @@ def missing_fields(battle: BattleExtraction) -> list[MissingField]:
     for field_name in _REQUIRED_BATTLE_FIELDS:
         if getattr(battle.facts, field_name) is None:
             missing.append(MissingField(field_name=field_name, notes="no source reported it"))
+
+    for field_name in _COVARIATE_BATTLE_FIELDS:
+        value = getattr(battle.facts, field_name)
+        # An empty terrain list is an absence; fortified=False is an answer,
+        # so absence is tested explicitly rather than by truthiness.
+        if value is None or (isinstance(value, list) and not value):
+            missing.append(
+                MissingField(
+                    field_name=field_name,
+                    notes="model covariate; no source reported it",
+                )
+            )
 
     if len(battle.sides) < 2:
         missing.append(

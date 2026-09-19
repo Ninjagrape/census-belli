@@ -200,9 +200,17 @@ def test_missing_fields_are_logged_to_the_database(conn: Any) -> None:
         {"id": battle_id},
     ).fetchall()
 
-    # Wikidata gives no weather and the infobox gives no casualties for one
-    # side; either way, absence is recorded rather than imputed here.
-    assert rows, "missing fields must be logged, not silently dropped"
+    # Actium is a complete record apart from terrain: both sides carry troop
+    # reports, casualties, commanders and an outcome. Terrain is a covariate in
+    # the model's linear predictor, so its absence is logged rather than left
+    # to be silently read as "no terrain effect" downstream.
+    #
+    # Weather is absent here too and is deliberately *not* logged: no stage
+    # reads it, and a row per ancient battle for a field nothing consumes would
+    # bury the missingness that matters.
+    logged = {row[0] for row in rows}
+    assert "terrain" in logged, f"terrain absence must be logged, got {logged}"
+    assert "weather" not in logged, "weather is descriptive, not a model covariate"
 
 
 def test_extraction_coverage_gate_sql_is_valid(conn: Any) -> None:

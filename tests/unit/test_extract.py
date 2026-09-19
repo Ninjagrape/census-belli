@@ -32,10 +32,12 @@ from pipeline.extractors import (
     build_passages,
     campaign_names,
     clean_article_text,
+    dbpedia_date_to_literal,
     detect_variant,
     infer_scope,
     iter_batches,
     map_entity,
+    map_resource,
     merge_battle,
     parse_infobox,
     parse_infobox_html,
@@ -1163,3 +1165,189 @@ def test_a_stage_spec_without_a_prompt_is_rejected(spec: dict[str, Any]) -> None
     """The prompt is loaded from the spec; improvising one is not an option."""
     with pytest.raises(ValueError, match="prompt.system"):
         extract_stage.run({**spec, "prompt": None}, StageContext(dry_run=True))
+
+
+# ─── DBpedia mapper ──────────────────────────────────────────────────────────
+#
+# The fixture is the real Actium resource, captured from the live endpoint on
+# 2026-09-19 and trimmed to the one resource the mapper reads. handover.md 4.2
+# is the standing warning that a fixture written from the code's assumptions
+# proves only that the code agrees with itself, so this one was taken from the
+# thing it describes rather than composed.
+
+
+def dbpedia_fixture(name: str) -> dict[str, Any]:
+    """Read a DBpedia fixture payload.
+
+    Args:
+        name: Filename under tests/fixtures/extract.
+
+    Returns:
+        The decoded document.
+    """
+    decoded: dict[str, Any] = json.loads(_fixture(name))
+    return decoded
+
+
+def test_dbpedia_bc_dates_survive_as_postgres_literals() -> None:
+    """31 BC must not be forced through datetime.date, which cannot hold it.
+
+    DBpedia writes it as "-031-09-02": a leading minus and only three year
+    digits, which is why the parser cannot assume the four-digit ISO shape.
+    """
+    assert dbpedia_date_to_literal("-031-09-02") == ("0031-09-02 BC", "day")
+    assert dbpedia_date_to_literal("1805-10-21") == ("1805-10-21", "day")
+    assert dbpedia_date_to_literal("-0216-08-02") == ("0216-08-02 BC", "day")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "0000-01-01",  # there is no year zero
+        "not-a-date",
+        "1805-13-01",  # month out of range
+        "1805-10-32",  # day out of range
+        "",
+    ],
+)
+def test_an_unreadable_dbpedia_date_is_refused_not_guessed(raw: str) -> None:
+    """A wrong date is worse than none: every era covariate derives from it."""
+    assert dbpedia_date_to_literal(raw) == (None, None)
+
+
+def test_dbpedia_maps_the_facts_it_can_be_trusted_for() -> None:
+    """The curated scalars are the reason to read DBpedia at all."""
+    extraction = map_resource(
+        dbpedia_fixture("dbpedia_actium.json"),
+        source_ref="tests/fixtures/extract/dbpedia_actium.json",
+        subject="http://dbpedia.org/resource/Battle_of_Actium",
+    )
+
+    assert extraction is not None
+    assert extraction.provenance.source_type == "dbpedia"
+    assert extraction.provenance.extraction_method == "dbpedia_rdf"
+
+    facts = extraction.facts
+    assert facts.name == "Battle of Actium"
+    assert facts.date_start == "0031-09-02 BC"
+    assert facts.date_precision == "day"
+    assert facts.latitude is not None and 38.8 < facts.latitude < 39.0
+    assert facts.longitude is not None and 20.6 < facts.longitude < 20.8
+    assert facts.part_of == ["War of Actium"]
+    assert facts.victor == "Octavian victory"
+
+
+def test_dbpedia_never_invents_sides() -> None:
+    """The RDF flattens combatant1/combatant2, so any split would be a guess.
+
+    Actium's dbo:combatant is three entries for two sides, in no order:
+    Ptolemaic Egypt, Octavian's forces, Antony's forces. A commander put on
+    the wrong side is the error the model cannot see, because it fits one
+    skill parameter to a career including battles the general fought against.
+    """
+    extraction = map_resource(
+        dbpedia_fixture("dbpedia_actium.json"),
+        subject="http://dbpedia.org/resource/Battle_of_Actium",
+    )
+
+    assert extraction is not None
+    assert extraction.sides == []
+
+    # The evidence is not discarded, it is reported as unassigned so that a
+    # later stage can use it without mistaking it for side-level data.
+    notes = " ".join(extraction.notes)
+    assert "unassigned to sides" in notes
+    assert "Ptolemaic Egypt" in notes
+    assert "Cleopatra" in notes
+
+
+def test_dbpedia_leaves_outcome_level_to_a_stage_that_can_judge_it() -> None:
+    """"Octavian victory" says who won, not how decisively.
+
+    outcome_level is the model's five-level ordinal. Filling it from a two
+    word result string would put a fabricated gradation into the response
+    variable the whole ranking is fitted to.
+    """
+    extraction = map_resource(
+        dbpedia_fixture("dbpedia_actium.json"),
+        subject="http://dbpedia.org/resource/Battle_of_Actium",
+    )
+
+    assert extraction is not None
+    assert extraction.facts.outcome_level is None
+    assert extraction.facts.victor == "Octavian victory"
+
+
+def test_a_payload_with_no_battle_resource_is_none_not_an_error() -> None:
+    """A missing DBpedia twin is a property of the data, not a stage failure."""
+    assert map_resource({}, source_ref="empty") is None
+    assert map_resource({"http://example.com/thing": {}}, source_ref="foreign") is None
+
+
+def test_the_battle_resource_is_found_without_being_named() -> None:
+    """A document describes every entity the article links to, not just one."""
+    payload = dbpedia_fixture("dbpedia_actium.json")
+    payload["http://dbpedia.org/resource/Ionian_Sea"] = {
+        "http://www.w3.org/2000/01/rdf-schema#label": [
+            {"type": "literal", "value": "Ionian Sea", "lang": "en"}
+        ]
+    }
+
+    extraction = map_resource(payload, source_ref="unnamed")
+
+    assert extraction is not None
+    assert extraction.facts.name == "Battle of Actium"
+
+
+def test_a_dbpedia_file_is_joined_to_its_battle(tmp_path: Path) -> None:
+    """DBpedia resources are keyed by title, so the filename stem is the join.
+
+    Unlike Wikidata, which is keyed by Q-id and needs the enwiki sitelink index
+    to find its battle, the crawl stage names a DBpedia payload with the same
+    rule as the article. If that ever diverges, every DBpedia payload becomes a
+    battle of its own with no article, which would look like a corpus twice the
+    real size rather than like an error.
+    """
+    url = "https://en.wikipedia.org/wiki/Battle_of_Actium"
+    raw = tmp_path / "raw"
+    (raw / "battles_html").mkdir(parents=True)
+    (raw / "dbpedia").mkdir(parents=True)
+
+    (raw / "battles_html" / article_filename(url)).write_text(
+        "<title>Battle of Actium - Wikipedia</title>", encoding="utf-8"
+    )
+    (raw / "dbpedia" / article_filename(url, suffix=".json")).write_text(
+        _fixture("dbpedia_actium.json"), encoding="utf-8"
+    )
+
+    battles = extract_stage.discover_battles(raw)
+
+    assert len(battles) == 1, "the DBpedia file became a second battle"
+    assert battles[0].article_path is not None
+    assert battles[0].dbpedia_path is not None
+
+
+def test_dbpedia_reaches_the_merged_record(tmp_path: Path) -> None:
+    """Wiring the mapper in is only half of it; the merger has to see it.
+
+    Without this, a mapper that works in isolation can still contribute
+    nothing, which is exactly how the DBpedia gap stayed silent for as long as
+    it did: the crawler fetched the payloads and nothing read them.
+    """
+    url = "https://en.wikipedia.org/wiki/Battle_of_Actium"
+    raw = tmp_path / "raw"
+    (raw / "dbpedia").mkdir(parents=True)
+    (raw / "dbpedia" / article_filename(url, suffix=".json")).write_text(
+        _fixture("dbpedia_actium.json"), encoding="utf-8"
+    )
+
+    battle = extract_stage.discover_battles(raw)[0]
+    merged = extract_stage.extract_battle(
+        battle, None, system="s", template="t", schema={}
+    )
+
+    assert merged.facts.date_start == "0031-09-02 BC"
+    assert merged.facts.latitude is not None
+    # The unassigned-commander note must survive the merge: it is the record
+    # that DBpedia had commander data and that it was deliberately not used.
+    assert any("unassigned to sides" in note for note in merged.notes)

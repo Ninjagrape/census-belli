@@ -1,0 +1,1517 @@
+{
+ "http://dbpedia.org/resource/Battle_of_Actium": {
+  "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+   {
+    "type": "uri",
+    "value": "http://umbel.org/umbel/rc/Event"
+   },
+   {
+    "type": "uri",
+    "value": "http://umbel.org/umbel/rc/ConflictEvent"
+   },
+   {
+    "type": "uri",
+    "value": "http://www.ontologydesignpatterns.org/ont/dul/DUL.owl#Event"
+   },
+   {
+    "type": "uri",
+    "value": "http://www.wikidata.org/entity/Q1656682"
+   },
+   {
+    "type": "uri",
+    "value": "http://schema.org/Event"
+   },
+   {
+    "type": "uri",
+    "value": "http://www.w3.org/2003/01/geo/wgs84_pos#SpatialThing"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/ontology/Event"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/ontology/MilitaryConflict"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/ontology/SocietalEvent"
+   },
+   {
+    "type": "uri",
+    "value": "http://www.w3.org/2002/07/owl#Thing"
+   }
+  ],
+  "http://www.w3.org/2002/07/owl#sameAs": [
+   {
+    "type": "uri",
+    "value": "http://rdf.freebase.com/ns/m.01ky6"
+   },
+   {
+    "type": "uri",
+    "value": "http://br.dbpedia.org/resource/Emgann_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://id.dbpedia.org/resource/Pertempuran_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://eu.dbpedia.org/resource/Aktiumgo_gudua"
+   },
+   {
+    "type": "uri",
+    "value": "http://sl.dbpedia.org/resource/Bitka_pri_Akciju"
+   },
+   {
+    "type": "uri",
+    "value": "http://az.dbpedia.org/resource/Aksi_döyüşü"
+   },
+   {
+    "type": "uri",
+    "value": "http://de.dbpedia.org/resource/Schlacht_bei_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://pt.dbpedia.org/resource/Batalha_de_Áccio"
+   },
+   {
+    "type": "uri",
+    "value": "http://la.dbpedia.org/resource/Bellum_Actiacum"
+   },
+   {
+    "type": "uri",
+    "value": "http://www.wikidata.org/entity/Q160387"
+   },
+   {
+    "type": "uri",
+    "value": "http://bs.dbpedia.org/resource/Bitka_kod_Akcija"
+   },
+   {
+    "type": "uri",
+    "value": "http://azb.dbpedia.org/resource/آکسی_دؤیوشو"
+   },
+   {
+    "type": "uri",
+    "value": "http://es.dbpedia.org/resource/Batalla_de_Accio"
+   },
+   {
+    "type": "uri",
+    "value": "http://oc.dbpedia.org/resource/Batalha_d'Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://fy.dbpedia.org/resource/Slach_by_Aktium"
+   },
+   {
+    "type": "uri",
+    "value": "http://hu.dbpedia.org/resource/Actiumi_csata"
+   },
+   {
+    "type": "uri",
+    "value": "http://ar.dbpedia.org/resource/معركة_أكتيوم"
+   },
+   {
+    "type": "uri",
+    "value": "http://pl.dbpedia.org/resource/Bitwa_pod_Akcjum"
+   },
+   {
+    "type": "uri",
+    "value": "http://fi.dbpedia.org/resource/Aktionin_taistelu"
+   },
+   {
+    "type": "uri",
+    "value": "http://mn.dbpedia.org/resource/Актиумын_тулалдаан"
+   },
+   {
+    "type": "uri",
+    "value": "http://ia.dbpedia.org/resource/Battalia_de_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://ja.dbpedia.org/resource/アクティウムの海戦"
+   },
+   {
+    "type": "uri",
+    "value": "http://ca.dbpedia.org/resource/Batalla_d'Àccium"
+   },
+   {
+    "type": "uri",
+    "value": "http://he.dbpedia.org/resource/קרב_אקטיום"
+   },
+   {
+    "type": "uri",
+    "value": "http://sr.dbpedia.org/resource/Битка_код_Акцијума"
+   },
+   {
+    "type": "uri",
+    "value": "http://vi.dbpedia.org/resource/Trận_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://is.dbpedia.org/resource/Orrustan_við_Actíum"
+   },
+   {
+    "type": "uri",
+    "value": "http://zh.dbpedia.org/resource/亞克興戰役"
+   },
+   {
+    "type": "uri",
+    "value": "http://simple.dbpedia.org/resource/Battle_of_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://cy.dbpedia.org/resource/Brwydr_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://war.dbpedia.org/resource/Aragway_ha_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://ka.dbpedia.org/resource/აქციუმის_ბრძოლა"
+   },
+   {
+    "type": "uri",
+    "value": "http://uk.dbpedia.org/resource/Битва_при_Акції"
+   },
+   {
+    "type": "uri",
+    "value": "http://yago-knowledge.org/resource/Battle_of_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://ms.dbpedia.org/resource/Pertempuran_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://jv.dbpedia.org/resource/Paprangan_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://it.dbpedia.org/resource/Battaglia_di_Azio"
+   },
+   {
+    "type": "uri",
+    "value": "http://sco.dbpedia.org/resource/Battle_o_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://th.dbpedia.org/resource/ยุทธนาวีที่อักติอูง"
+   },
+   {
+    "type": "uri",
+    "value": "http://da.dbpedia.org/resource/Søslaget_ved_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://lt.dbpedia.org/resource/Akcijaus_mūšis"
+   },
+   {
+    "type": "uri",
+    "value": "https://global.dbpedia.org/id/aaBn"
+   },
+   {
+    "type": "uri",
+    "value": "http://sh.dbpedia.org/resource/Bitka_kod_Akcija"
+   },
+   {
+    "type": "uri",
+    "value": "http://nl.dbpedia.org/resource/Slag_bij_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://tr.dbpedia.org/resource/Aktium_Muharebesi"
+   },
+   {
+    "type": "uri",
+    "value": "http://lv.dbpedia.org/resource/Kauja_pie_Akcijas"
+   },
+   {
+    "type": "uri",
+    "value": "http://sw.cyc.com/concept/Mx4rJ0wgL_p3SsW7vijhMuzCRA"
+   },
+   {
+    "type": "uri",
+    "value": "http://el.dbpedia.org/resource/Ναυμαχία_του_Ακτίου"
+   },
+   {
+    "type": "uri",
+    "value": "http://hr.dbpedia.org/resource/Bitka_kod_Akcija"
+   },
+   {
+    "type": "uri",
+    "value": "http://ko.dbpedia.org/resource/악티움_해전"
+   },
+   {
+    "type": "uri",
+    "value": "http://fa.dbpedia.org/resource/نبرد_آکتیوم"
+   },
+   {
+    "type": "uri",
+    "value": "http://ru.dbpedia.org/resource/Сражение_при_Акциуме"
+   },
+   {
+    "type": "uri",
+    "value": "http://sv.dbpedia.org/resource/Slaget_vid_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://uz.dbpedia.org/resource/Actium_jangi"
+   },
+   {
+    "type": "uri",
+    "value": "http://ro.dbpedia.org/resource/Bătălia_de_la_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Battle_of_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://mk.dbpedia.org/resource/Битка_кај_Акциум"
+   },
+   {
+    "type": "uri",
+    "value": "http://no.dbpedia.org/resource/Slaget_ved_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://af.dbpedia.org/resource/Slag_van_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://bg.dbpedia.org/resource/Битка_при_Акциум"
+   },
+   {
+    "type": "uri",
+    "value": "http://sk.dbpedia.org/resource/Bitka_pri_Actiu"
+   },
+   {
+    "type": "uri",
+    "value": "http://hy.dbpedia.org/resource/Ակցիումի_ճակատամարտ"
+   },
+   {
+    "type": "uri",
+    "value": "http://et.dbpedia.org/resource/Aktioni_lahing"
+   },
+   {
+    "type": "uri",
+    "value": "http://eo.dbpedia.org/resource/Batalo_de_Aktio"
+   },
+   {
+    "type": "uri",
+    "value": "http://fr.dbpedia.org/resource/Bataille_d'Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://arz.dbpedia.org/resource/معركة_اكتيوم"
+   },
+   {
+    "type": "uri",
+    "value": "http://cs.dbpedia.org/resource/Bitva_u_Actia"
+   }
+  ],
+  "http://xmlns.com/foaf/0.1/name": [
+   {
+    "type": "literal",
+    "value": "Battle of Actium",
+    "lang": "en"
+   }
+  ],
+  "http://www.w3.org/2000/01/rdf-schema#label": [
+   {
+    "type": "literal",
+    "value": "معركة أكتيوم",
+    "lang": "ar"
+   },
+   {
+    "type": "literal",
+    "value": "亞克興戰役",
+    "lang": "zh"
+   },
+   {
+    "type": "literal",
+    "value": "Schlacht bei Actium",
+    "lang": "de"
+   },
+   {
+    "type": "literal",
+    "value": "Bataille d'Actium",
+    "lang": "fr"
+   },
+   {
+    "type": "literal",
+    "value": "アクティウムの海戦",
+    "lang": "ja"
+   },
+   {
+    "type": "literal",
+    "value": "Slag bij Actium",
+    "lang": "nl"
+   },
+   {
+    "type": "literal",
+    "value": "Ναυμαχία του Ακτίου",
+    "lang": "el"
+   },
+   {
+    "type": "literal",
+    "value": "Pertempuran Actium",
+    "lang": "in"
+   },
+   {
+    "type": "literal",
+    "value": "Aktiumgo gudua",
+    "lang": "eu"
+   },
+   {
+    "type": "literal",
+    "value": "Battle of Actium",
+    "lang": "en"
+   },
+   {
+    "type": "literal",
+    "value": "악티움 해전",
+    "lang": "ko"
+   },
+   {
+    "type": "literal",
+    "value": "Bitva u Actia",
+    "lang": "cs"
+   },
+   {
+    "type": "literal",
+    "value": "Batalha de Áccio",
+    "lang": "pt"
+   },
+   {
+    "type": "literal",
+    "value": "Slaget vid Actium",
+    "lang": "sv"
+   },
+   {
+    "type": "literal",
+    "value": "Bitwa pod Akcjum",
+    "lang": "pl"
+   },
+   {
+    "type": "literal",
+    "value": "Battaglia di Azio",
+    "lang": "it"
+   },
+   {
+    "type": "literal",
+    "value": "Batalo de Aktio",
+    "lang": "eo"
+   },
+   {
+    "type": "literal",
+    "value": "Сражение при Акциуме",
+    "lang": "ru"
+   },
+   {
+    "type": "literal",
+    "value": "Битва при Акції",
+    "lang": "uk"
+   },
+   {
+    "type": "literal",
+    "value": "Batalla de Accio",
+    "lang": "es"
+   },
+   {
+    "type": "literal",
+    "value": "Batalla d'Àccium",
+    "lang": "ca"
+   }
+  ],
+  "http://purl.org/dc/terms/subject": [
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Roman_Epirus"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Ancient_Acarnania"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Naval_battles_of_the_Hellenistic_period"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Augustus"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:1st-century_BC_battles"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:1st_century_BC_in_the_Roman_Republic"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Naval_battles_involving_the_Ptolemaic_Kingdom"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:31_BC"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Caesarion"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Cleopatra"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:1st_century_BC_in_Egypt"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:War_of_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:30s_BC_conflicts"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:21st_century_in_Muscat,_Oman"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Naval_battles_involving_the_Roman_Republic"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:21st_century_in_Geneva"
+   }
+  ],
+  "http://www.w3.org/2004/02/skos/core#exactMatch": [
+   {
+    "type": "uri",
+    "value": "http://globalwordnet.org/ili/i42058"
+   }
+  ],
+  "http://www.w3.org/2003/01/geo/wgs84_pos#lat": [
+   {
+    "type": "literal",
+    "value": 38.92499923706055,
+    "datatype": "http://www.w3.org/2001/XMLSchema#float"
+   }
+  ],
+  "http://www.w3.org/2003/01/geo/wgs84_pos#long": [
+   {
+    "type": "literal",
+    "value": 20.72500038146973,
+    "datatype": "http://www.w3.org/2001/XMLSchema#float"
+   }
+  ],
+  "http://xmlns.com/foaf/0.1/depiction": [
+   {
+    "type": "uri",
+    "value": "http://commons.wikimedia.org/wiki/Special:FilePath/M_Antonius.jpg"
+   },
+   {
+    "type": "uri",
+    "value": "http://commons.wikimedia.org/wiki/Special:FilePath/Battle_of_Actium-en.svg"
+   },
+   {
+    "type": "uri",
+    "value": "http://commons.wikimedia.org/wiki/Special:FilePath/Augustus_Statue.jpg"
+   },
+   {
+    "type": "uri",
+    "value": "http://commons.wikimedia.org/wiki/Special:FilePath/Ballistae_on_roman_ship.jpg"
+   },
+   {
+    "type": "uri",
+    "value": "http://commons.wikimedia.org/wiki/Special:FilePath/Cleopatra_VII,_marble,_Vatican_Museums,_Pius-Clementine_Museum,_Room_of_the_Greek_Cross_2.jpg"
+   },
+   {
+    "type": "uri",
+    "value": "http://commons.wikimedia.org/wiki/Special:FilePath/Octavian's_campsite_memorial_at_Actium_02.jpg"
+   },
+   {
+    "type": "uri",
+    "value": "http://commons.wikimedia.org/wiki/Special:FilePath/Actium_Cameo.jpg"
+   },
+   {
+    "type": "uri",
+    "value": "http://commons.wikimedia.org/wiki/Special:FilePath/IAN_0212_d_Anville_1734_Battle_of_Actium.jpg"
+   },
+   {
+    "type": "uri",
+    "value": "http://commons.wikimedia.org/wiki/Special:FilePath/Medinaceli_Actium_reliefs_06.jpg"
+   },
+   {
+    "type": "uri",
+    "value": "http://commons.wikimedia.org/wiki/Special:FilePath/Castro_Battle_of_Actium.jpg"
+   }
+  ],
+  "http://www.w3.org/ns/prov#wasDerivedFrom": [
+   {
+    "type": "uri",
+    "value": "http://en.wikipedia.org/wiki/Battle_of_Actium?oldid=1303588423&ns=0"
+   }
+  ],
+  "http://www.georss.org/georss/point": [
+   {
+    "type": "literal",
+    "value": "38.925 20.725"
+   }
+  ],
+  "http://dbpedia.org/ontology/wikiPageWikiLink": [
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Octavia_the_Younger"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Plancus"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Titus_Statilius_Taurus"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Ephesus"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Quintus_Dellius"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Augustus"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Battle_of_Alexandria_(30_BC)"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Second_Triumvirate"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Princeps"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:30s_BC_conflicts"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Donations_of_Alexandria"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/King_of_Armenia"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Death_of_Cleopatra"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Liburna"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:1st_century_BC_in_Egypt"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Cleopatra"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/File:M_Antonius.jpg"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/File:Ballistae_on_roman_ship.JPG"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/File:Augustus_Statue.JPG"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Baroque"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Corcyra"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/War_of_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Marcus_Lurius"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Roman_Republican_civil_wars"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Asp_(reptile)"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Gaius_Sosius"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Lucius_Gellius_Poplicola"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Egypt_(Roman_province)"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Ambracian_Gulf"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Altar_of_Victory"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Liberators'_civil_war"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/File:Cleopatra_VII,_marble,_Vatican_Museums,_Pius-Clementine_Museum,_Room_of_the_Greek_Cross_2.jpg"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Ionian_Sea"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Ancient_Acarnania"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Naval_battles_of_the_Hellenistic_period"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Gulf_of_Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Roman–Dalmatae_Wars"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Master_of_the_Horse"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/King_of_Kings"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Random_House"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Cleopatra"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Antony_and_Cleopatra"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/File:IAN_0212_d_Anville_1734_Battle_of_Actium.jpg"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Nicopolis"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Galley"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Corfu"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Routledge"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Roman_triumph"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Naval_warfare"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:1st_century_BC_in_the_Roman_Republic"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Naval_battles_of_the_Roman_Republic"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Blockade"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Gnaeus_Domitius_Ahenobarbus_(consul_32_BC)"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Hellenistic_Period"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Insteia_gens"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Diadem"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Marcus_Aemilius_Lepidus_(triumvir)"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Julius_Caesar"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Military_Heritage"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Epirus"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Marcus_Vipsanius_Agrippa"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Actium"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Cavalry"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Alexandria"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Laureys_a_Castro"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Patras"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Ptolemaic_Kingdom"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Marcus_Antonius_Antyllus"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Roman_Republic"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Corinth"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Mark_Antony"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Publius_Canidius_Crassus"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Lucius_Arruntius_(consul_22_BC)"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Augustus"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Caesarion"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Naval_battles_involving_the_Ptolemaic_Kingdom"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:Roman_Epirus"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Greece"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Octavia_gens"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Adriatic_Sea"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Peloponnese"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Harpax"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Bronze"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Caesarion"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Samos"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Quadrireme"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Methoni,_Messenia"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Augustus_(title)"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Tarentum_(Campus_Martius)"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Consul"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:1st-century_BC_battles"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Quinquereme"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Assassination_of_Julius_Caesar"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Dead_water"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Imperium"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Marcus_Agrippa"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Sextus_Pompeius"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Anachronistic"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Roman_Empire"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/File:Battle_of_Actium-en.svg"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Category:31_BC"
+   }
+  ],
+  "http://dbpedia.org/ontology/wikiPageExternalLink": [
+   {
+    "type": "uri",
+    "value": "http://luna.cas.usf.edu/~murray/actium/brochure.html"
+   },
+   {
+    "type": "uri",
+    "value": "https://archive.org/details/augustus00anth"
+   },
+   {
+    "type": "uri",
+    "value": "https://books.google.com/books%3Fid=sqopAAAAYAAJ%7Ctitle=A"
+   },
+   {
+    "type": "uri",
+    "value": "https://books.google.com/books%3Fid=sqopAAAAYAAJ&pg=PA781"
+   },
+   {
+    "type": "uri",
+    "value": "https://web.archive.org/web/20140228091630/http:/www.livius.org/aa-ac/actium/actium.html"
+   },
+   {
+    "type": "uri",
+    "value": "https://penelope.uchicago.edu/Thayer/E/Roman/Texts/Cassius_Dio/50*.html"
+   },
+   {
+    "type": "uri",
+    "value": "http://droppdf.com/files/rF04b/actium31.pdf"
+   },
+   {
+    "type": "uri",
+    "value": "https://archive.org/details/alexandertoactiu0000gree%7Curl-access=registration%7Cpublisher=University"
+   },
+   {
+    "type": "uri",
+    "value": "https://web.archive.org/web/20191223022058/http:/droppdf.com/files/rF04b/actium31.pdf"
+   },
+   {
+    "type": "uri",
+    "value": "https://books.google.com/books%3Fid=zSU_AQAAIAAJ&q=Antony+intended+to+move+the+capital+to+alexandria"
+   },
+   {
+    "type": "uri",
+    "value": "https://www.livius.org/aa-ac/actium/actium.html"
+   },
+   {
+    "type": "uri",
+    "value": "https://books.google.com/books%3Fid=vyMrMh8BuY4C&q=Antony+intended+to+move+the+capital+to+alexandria"
+   }
+  ],
+  "http://dbpedia.org/ontology/description": [
+   {
+    "type": "literal",
+    "value": "zeeslag bij Actium tussen Marcus Antonius samen met Cleopatra en Octavianus",
+    "lang": "nl"
+   },
+   {
+    "type": "literal",
+    "value": "ναυμαχία",
+    "lang": "el"
+   },
+   {
+    "type": "literal",
+    "value": "31 BCE decisive confrontation of the Final War of the Roman Republic",
+    "lang": "en"
+   },
+   {
+    "type": "literal",
+    "value": "Trận đánh quyết định của cuộc nội chiến giữa Octavius và Antonius",
+    "lang": "vi"
+   },
+   {
+    "type": "literal",
+    "value": "bitwa morska (31 p.n.e.)",
+    "lang": "pl"
+   },
+   {
+    "type": "literal",
+    "value": "로마 공화국 최후의 전쟁의 결정적 대결",
+    "lang": "ko"
+   },
+   {
+    "type": "literal",
+    "value": "artikel daftar Wikimedia",
+    "lang": "in"
+   },
+   {
+    "type": "literal",
+    "value": "taistelu Octaviuksen ja Antoniuksen joukkojen välillä antiikin Roomassa 31 eaa.",
+    "lang": "fi"
+   },
+   {
+    "type": "literal",
+    "value": "antike Schlacht",
+    "lang": "de"
+   },
+   {
+    "type": "literal",
+    "value": "bataille navale de la dernière guerre civile de la République romaine",
+    "lang": "fr"
+   },
+   {
+    "type": "literal",
+    "value": "קרב ימי בין אגוסטוס קיסר למרקוס אנטוניוס",
+    "lang": "iw"
+   },
+   {
+    "type": "literal",
+    "value": "battalja navali tal-Gwerra Finali tar-Repubblika Rumana",
+    "lang": "mt"
+   },
+   {
+    "type": "literal",
+    "value": "Conflito armado",
+    "lang": "pt"
+   },
+   {
+    "type": "literal",
+    "value": "battaglia navale combattuta tra Marco Antonio e Ottaviano Augusto",
+    "lang": "it"
+   },
+   {
+    "type": "literal",
+    "value": "enfrentamiento armado entre Augusto y Marco Antonio",
+    "lang": "es"
+   },
+   {
+    "type": "literal",
+    "value": "معركة بين المملكة البطلمية و الجمهورية الرومانية",
+    "lang": "ar"
+   },
+   {
+    "type": "literal",
+    "value": "enfrontament entre Octavi i Marc Antoni l'any 31 aC",
+    "lang": "ca"
+   },
+   {
+    "type": "literal",
+    "value": "морское сражение между флотами Древнего Рима",
+    "lang": "ru"
+   }
+  ],
+  "http://dbpedia.org/ontology/thumbnail": [
+   {
+    "type": "uri",
+    "value": "http://commons.wikimedia.org/wiki/Special:FilePath/Medinaceli_Actium_reliefs_06.jpg?width=300"
+   }
+  ],
+  "http://dbpedia.org/property/wikiPageUsesTemplate": [
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Augustus"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Coord"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Further"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Egypt_topics"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Citation"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Infobox_military_conflict"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Cite_book"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:EB1911_poster"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Authority_control"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Googlebooks"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Webarchive"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Source_attribution"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Citation_needed"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Reflist"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Sfn"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Short_description"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Library_resources_box"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:ISSN"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Template:Ancient_seafaring"
+   }
+  ],
+  "http://dbpedia.org/property/date": [
+   {
+    "type": "literal",
+    "value": "2014-02-28",
+    "datatype": "http://www.w3.org/2001/XMLSchema#date"
+   },
+   {
+    "type": "literal",
+    "value": "-031-09-02",
+    "datatype": "http://www.w3.org/2001/XMLSchema#date"
+   }
+  ],
+  "http://dbpedia.org/property/imageSize": [
+   {
+    "type": "literal",
+    "value": 300,
+    "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+   }
+  ],
+  "http://dbpedia.org/property/wordnet_type": [
+   {
+    "type": "uri",
+    "value": "http://www.w3.org/2006/03/wn/wn20/instances/synset-war-noun-1"
+   }
+  ],
+  "http://dbpedia.org/property/caption": [
+   {
+    "type": "literal",
+    "value": "Detail of the naval battle from an early 1st-century relief commemorating Actium",
+    "lang": "en"
+   }
+  ],
+  "http://dbpedia.org/property/url": [
+   {
+    "type": "uri",
+    "value": "https://web.archive.org/web/20140228091630/http:/www.livius.org/aa-ac/actium/actium.html"
+   }
+  ],
+  "http://dbpedia.org/property/mapType": [
+   {
+    "type": "literal",
+    "value": "Greece#Mediterranean#Europe",
+    "lang": "en"
+   }
+  ],
+  "http://dbpedia.org/property/partof": [
+   {
+    "type": "literal",
+    "value": "the War of Actium",
+    "lang": "en"
+   }
+  ],
+  "http://dbpedia.org/property/place": [
+   {
+    "type": "literal",
+    "value": "Ionian Sea, near the promontory of Actium in Greece",
+    "lang": "en"
+   }
+  ],
+  "http://dbpedia.org/property/commander": [
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Lucius_Gellius_Poplicola"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Gaius_Sosius"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Marcus_Lurius"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Cleopatra"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Lucius_Arruntius_(consul_22_BC)"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Mark_Antony"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Marcus_Vipsanius_Agrippa"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Augustus"
+   }
+  ],
+  "http://dbpedia.org/ontology/place": [
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Ionian_Sea"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Greece"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Actium"
+   }
+  ],
+  "http://dbpedia.org/ontology/causalties": [
+   {
+    "type": "literal",
+    "value": "About 2,500 killed"
+   }
+  ],
+  "http://dbpedia.org/ontology/combatant": [
+   {
+    "type": "literal",
+    "value": "Ptolemaic Egypt"
+   },
+   {
+    "type": "literal",
+    "value": "Octavian's forces"
+   },
+   {
+    "type": "literal",
+    "value": "Antony's forces"
+   }
+  ],
+  "http://dbpedia.org/ontology/commander": [
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Marcus_Lurius"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Lucius_Gellius_Poplicola"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Gaius_Sosius"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Cleopatra"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Lucius_Arruntius_(consul_22_BC)"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Mark_Antony"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Marcus_Vipsanius_Agrippa"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Augustus"
+   }
+  ],
+  "http://dbpedia.org/ontology/date": [
+   {
+    "type": "literal",
+    "value": "-031-09-02",
+    "datatype": "http://www.w3.org/2001/XMLSchema#date"
+   }
+  ],
+  "http://dbpedia.org/ontology/isPartOfMilitaryConflict": [
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/War_of_Actium"
+   }
+  ],
+  "http://dbpedia.org/ontology/result": [
+   {
+    "type": "literal",
+    "value": "Octavian victory"
+   }
+  ],
+  "http://dbpedia.org/ontology/strength": [
+   {
+    "type": "literal",
+    "value": "20,000–70,000 infantry on ships"
+   },
+   {
+    "type": "literal",
+    "value": "250–500 largergalleys"
+   },
+   {
+    "type": "literal",
+    "value": "16,000 infantry on ships"
+   },
+   {
+    "type": "literal",
+    "value": "2,000 archers"
+   },
+   {
+    "type": "literal",
+    "value": "30–50 transports"
+   },
+   {
+    "type": "literal",
+    "value": "250–400galleys"
+   },
+   {
+    "type": "literal",
+    "value": "3,000 archers"
+   }
+  ],
+  "http://dbpedia.org/property/casualties": [
+   {
+    "type": "literal",
+    "value": "About 2,500 killed",
+    "lang": "en"
+   },
+   {
+    "type": "literal",
+    "value": "Over 5,000 killed",
+    "lang": "en"
+   },
+   {
+    "type": "literal",
+    "value": 250,
+    "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+   }
+  ],
+  "http://dbpedia.org/property/combatant": [
+   {
+    "type": "literal",
+    "value": "Octavian's forces",
+    "lang": "en"
+   },
+   {
+    "type": "literal",
+    "value": "Antony's forces",
+    "lang": "en"
+   },
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Ptolemaic_Kingdom"
+   }
+  ],
+  "http://dbpedia.org/property/conflict": [
+   {
+    "type": "literal",
+    "value": "Battle of Actium",
+    "lang": "en"
+   }
+  ],
+  "http://dbpedia.org/property/strength": [
+   {
+    "type": "literal",
+    "value": 16000,
+    "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+   },
+   {
+    "type": "literal",
+    "value": 3000,
+    "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+   },
+   {
+    "type": "literal",
+    "value": 20000,
+    "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+   },
+   {
+    "type": "literal",
+    "value": 30,
+    "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+   },
+   {
+    "type": "literal",
+    "value": 250,
+    "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+   },
+   {
+    "type": "literal",
+    "value": 2000,
+    "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+   }
+  ],
+  "http://purl.org/linguistics/gold/hypernym": [
+   {
+    "type": "uri",
+    "value": "http://dbpedia.org/resource/Confrontation"
+   }
+  ],
+  "http://xmlns.com/foaf/0.1/isPrimaryTopicOf": [
+   {
+    "type": "uri",
+    "value": "http://en.wikipedia.org/wiki/Battle_of_Actium"
+   }
+  ],
+  "http://www.w3.org/2003/01/geo/wgs84_pos#geometry": [
+   {
+    "type": "literal",
+    "value": "POINT(20.72500038147 38.924999237061)",
+    "datatype": "http://www.openlinksw.com/schemas/virtrdf#Geometry"
+   }
+  ],
+  "http://dbpedia.org/property/result": [
+   {
+    "type": "literal",
+    "value": "Octavian victory",
+    "lang": "en"
+   }
+  ],
+  "http://dbpedia.org/property/mapSize": [
+   {
+    "type": "literal",
+    "value": 300,
+    "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+   }
+  ]
+ }
+}

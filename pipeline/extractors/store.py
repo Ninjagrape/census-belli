@@ -21,7 +21,7 @@ from sqlalchemy import text
 
 from pipeline.extractors.records import BattleExtraction, Provenance, SideExtraction
 
-__all__ = ["ExtractWriteCounts", "write_battle"]
+__all__ = ["ExtractWriteCounts", "source_id", "write_battle"]
 
 logger = structlog.get_logger()
 
@@ -171,7 +171,7 @@ class ExtractWriteCounts:
         }
 
 
-def _source_id(conn: Any, provenance: Provenance, cache: dict[tuple[str, str], int]) -> int:
+def source_id(conn: Any, provenance: Provenance, cache: dict[tuple[str, str], int]) -> int:
     """Find or create the ``sources`` row a claim should hang off.
 
     Args:
@@ -314,7 +314,7 @@ def write_battle(
                 _INSERT_TROOP,
                 {
                     "side_id": side_id,
-                    "source_id": _source_id(conn, report.provenance, cache),
+                    "source_id": source_id(conn, report.provenance, cache),
                     "branch": report.branch,
                     "reported_value": report.reported_value,
                     "scope": report.scope,
@@ -333,7 +333,7 @@ def write_battle(
                 _INSERT_CASUALTY,
                 {
                     "side_id": side_id,
-                    "source_id": _source_id(conn, casualty.provenance, cache),
+                    "source_id": source_id(conn, casualty.provenance, cache),
                     "casualty_type": casualty.casualty_type,
                     "reported_value": casualty.reported_value,
                     "is_estimate": casualty.is_estimate,
