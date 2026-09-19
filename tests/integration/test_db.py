@@ -447,7 +447,85 @@ def test_bc_date_is_stored_as_bc(conn: Any) -> None:
         text("SELECT EXTRACT(YEAR FROM date_start) FROM battles WHERE battle_id = :b"),
         {"b": ids["battle_id"]},
     ).scalar_one()
-    assert int(year) == -30, "31 BC is astronomical year -30; there is no year zero"
+
+    # Postgres reports the historical BC year negated, so 31 BC extracts as
+    # -31. Astronomical numbering calls the same year -30, because it has a
+    # year zero and Postgres does not. The two differ by one for BC dates and
+    # agree for AD, which is why the conversion below is conditional.
+    #
+    # Only the astronomical form subtracts correctly: 31 BC to 1 AD is 30.3
+    # actual years, which matches 1 - (-30) less the part-year, not 1 - (-31).
+    # An off-by-one here would land on every date-derived model covariate, so
+    # both forms are pinned rather than just the one the code happens to use.
+    assert int(year) == -31, "Postgres EXTRACT negates the historical BC year"
+
+    astronomical = int(year) + 1 if int(year) < 0 else int(year)
+    assert astronomical == -30, "31 BC is astronomical year -30; there is no year zero"
+
+
+def test_year_astronomical_is_readable_for_bc_battles(conn: Any) -> None:
+    """battles.year_astronomical gives Python a usable year for BC dates.
+
+    This is the column that exists because date_start cannot be decoded into
+    a datetime.date for any BC battle. It must therefore come back as a plain
+    int, on the same row whose date_start raises.
+    """
+    ids = _insert_actium(conn)
+
+    year = conn.execute(
+        text("SELECT year_astronomical FROM battles WHERE battle_id = :b"),
+        {"b": ids["battle_id"]},
+    ).scalar_one()
+
+    assert isinstance(year, int), f"expected a plain int, got {type(year).__name__}"
+    assert year == -30, "31 BC is astronomical year -30"
+
+
+def test_year_astronomical_is_generated_not_writable(conn: Any) -> None:
+    """The column tracks date_start rather than being set independently.
+
+    A writable column could disagree with the date it is meant to mirror.
+    Postgres rejects the write, which is what keeps the two in step.
+    """
+    with pytest.raises(Exception) as exc:
+        conn.execute(
+            text(
+                "INSERT INTO battles (name, date_start, year_astronomical) "
+                "VALUES (:n, DATE '1815-06-18', 1815)"
+            ),
+            {"n": "Waterloo (should not insert)"},
+        )
+
+    assert "generated" in str(exc.value).lower(), (
+        f"expected a generated-column rejection, got: {exc.value}"
+    )
+
+
+def test_year_astronomical_spans_the_bc_ad_boundary(conn: Any) -> None:
+    """Subtraction across BC/AD must give the true interval.
+
+    This is the reason the column is astronomical rather than Postgres's own
+    BC numbering: an off-by-one here would reach every era covariate and time
+    trend in the model.
+    """
+    rows = conn.execute(
+        text(
+            "SELECT year_astronomical FROM ("
+            "  SELECT DATE '0031-09-02 BC' AS d UNION ALL SELECT DATE '0001-01-01'"
+            ") s(d) "
+            "JOIN LATERAL ("
+            "  SELECT CASE WHEN EXTRACT(YEAR FROM s.d) < 0"
+            "              THEN EXTRACT(YEAR FROM s.d)::int + 1"
+            "              ELSE EXTRACT(YEAR FROM s.d)::int END"
+            ") y(year_astronomical) ON TRUE "
+            "ORDER BY 1"
+        )
+    ).scalars().all()
+
+    assert rows == [-30, 1]
+    # 31 BC to 1 AD is 31 years by this arithmetic, and the real elapsed span
+    # is 30.3 years from September to January. Postgres's -31 would give 32.
+    assert rows[1] - rows[0] == 31
 
 
 def test_bc_dates_cannot_round_trip_through_python(conn: Any) -> None:

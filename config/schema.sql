@@ -179,6 +179,23 @@ CREATE TABLE battles (
     date_end        DATE,
     date_precision  TEXT DEFAULT 'day',    -- 'day', 'month', 'year', 'decade', 'century'
 
+    -- Astronomical year of date_start, as a plain integer.
+    --
+    -- date_start itself is unreadable from Python for any BC battle:
+    -- datetime.date has MINYEAR == 1, so a BC date cannot be constructed or
+    -- decoded, and the corpus is heavily ancient. This column is the readable
+    -- projection, and being generated it cannot drift from the date it mirrors.
+    --
+    -- Astronomical, not Postgres's own numbering: EXTRACT reports 31 BC as
+    -- -31, but astronomical numbering calls it -30 because it has a year zero.
+    -- Only the astronomical form subtracts correctly (31 BC to 1 AD is 30
+    -- years, not 32), which is what any era covariate or time trend needs.
+    year_astronomical INT GENERATED ALWAYS AS (
+        CASE WHEN EXTRACT(YEAR FROM date_start) < 0
+             THEN EXTRACT(YEAR FROM date_start)::int + 1
+             ELSE EXTRACT(YEAR FROM date_start)::int END
+    ) STORED,
+
     -- spatial
     latitude        DOUBLE PRECISION,
     longitude       DOUBLE PRECISION,
@@ -204,6 +221,7 @@ CREATE TABLE battles (
 CREATE INDEX idx_battles_war      ON battles (war_id);
 CREATE INDEX idx_battles_campaign ON battles (campaign_id);
 CREATE INDEX idx_battles_date     ON battles (date_start);
+CREATE INDEX idx_battles_year     ON battles (year_astronomical);
 CREATE INDEX idx_battles_quality  ON battles (data_quality_score);
 
 

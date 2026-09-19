@@ -217,11 +217,28 @@ def apply_schema(
             logger.info("schema_already_applied", path=str(path))
             return False
 
-        # exec_driver_sql hands the file to psycopg as one script. text() would
-        # treat it as a single parameterised statement and choke on the ':'
-        # in casts and range types.
-        conn.exec_driver_sql(sql)
-        conn.commit()
+        # The file goes to psycopg as one script via a raw cursor with no
+        # parameter argument at all. text() would choke on the ':' in casts
+        # and range types, and exec_driver_sql still passes an empty parameter
+        # set, which makes psycopg parse '%' as a placeholder -- schema.sql
+        # has five, all in '95% CI' comments.
+        #
+        # The commit goes to the driver connection rather than to conn: the
+        # raw cursor's work is invisible to SQLAlchemy's transaction tracking,
+        # so after the drop_existing branch has already committed, conn.commit()
+        # finds no active transaction and silently does nothing, and the DDL is
+        # then rolled back on close.
+        driver_conn = conn.connection.driver_connection
+        if driver_conn is None:  # pragma: no cover - a live connection always has one
+            raise DatabaseConfigError(
+                "Connection exposes no driver connection; cannot apply the schema."
+            )
+        raw_cursor = driver_conn.cursor()
+        try:
+            raw_cursor.execute(sql)
+        finally:
+            raw_cursor.close()
+        driver_conn.commit()
 
     logger.info("schema_applied", path=str(path), bytes=len(sql))
     return True
