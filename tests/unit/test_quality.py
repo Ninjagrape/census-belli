@@ -7,6 +7,7 @@ these assertions would have passed vacuously against it except by accident.
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,19 @@ class StubConnection:
         self._value = value
         self._raises = raises
         self.executed: list[Any] = []
+        self.savepoints = 0
+
+    def begin_nested(self) -> AbstractContextManager[None]:
+        """Stand in for SQLAlchemy's SAVEPOINT context manager.
+
+        The runner wraps every check in one so a failing statement cannot abort
+        the transaction the later checks depend on. Rollback has no meaning
+        against a stub, so this only records that a savepoint was taken; the
+        isolation itself is proven against a real database in
+        tests/integration/test_quality_gates.py.
+        """
+        self.savepoints += 1
+        return nullcontext()
 
     def execute(self, statement: Any) -> _StubResult:
         self.executed.append(statement)

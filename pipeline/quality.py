@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 import re
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
@@ -202,6 +203,14 @@ class Connection(Protocol):
 
     def execute(self, statement: Any) -> ScalarResult: ...
 
+    def begin_nested(self) -> AbstractContextManager[Any]:
+        """Open a SAVEPOINT, rolled back if the block raises.
+
+        Part of the protocol because gate isolation depends on it: a check whose
+        SQL fails must not abort the transaction the remaining checks run in.
+        """
+        ...
+
 
 def _to_statement(sql: str) -> Any:
     """Wrap raw SQL for execution.
@@ -382,7 +391,13 @@ class QualityRunner:
             )
 
         try:
-            actual = self._conn.execute(_to_statement(sql)).scalar()
+            # Each check runs inside its own SAVEPOINT. Postgres aborts the
+            # whole transaction on a failed statement, so without this one bad
+            # check makes every later check in the same run report "current
+            # transaction is aborted" instead of its own result -- a single
+            # broken gate silently invalidates every gate after it.
+            with self._conn.begin_nested():
+                actual = self._conn.execute(_to_statement(sql)).scalar()
         except Exception as exc:
             logger.error("quality_check_sql_failed", name=name, error=str(exc))
             return QualityCheckResult(

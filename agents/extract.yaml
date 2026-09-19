@@ -161,18 +161,23 @@ quality_checks:
     threshold: ">= 0.85"
     severity: warning
 
-  - name: commander_extraction_rate
+  - name: sides_per_battle
+    # This gate used to count battle_commanders. That table has a NOT NULL
+    # general_id and the extract stage writes no rows to it -- commander
+    # mentions wait in data/processed/commanders_raw.jsonl until resolve has
+    # canonical generals to point at -- so the gate could only ever report 0
+    # here. It now measures battle_sides, which extract does write, and the
+    # commanders-per-battle version lives in agents/resolve.yaml.
     check: >
-      SELECT AVG(commander_count) FROM (
-        SELECT b.battle_id, COUNT(cr.id) as commander_count
+      SELECT AVG(side_count) FROM (
+        SELECT b.battle_id, COUNT(s.side_id) AS side_count
         FROM battles b
-        LEFT JOIN (SELECT DISTINCT battle_name, name as id FROM data.commanders_raw) cr
-          ON cr.battle_name = b.name
+        LEFT JOIN battle_sides s ON s.battle_id = b.battle_id
         GROUP BY b.battle_id
       ) t
     threshold: ">= 2.0"
     severity: warning
-    description: "Average commanders per battle should be at least 2 (one per side)"
+    description: "A battle has at least two sides; fewer means the infobox parse thinned it"
 
   - name: no_empty_extractions
     check: >

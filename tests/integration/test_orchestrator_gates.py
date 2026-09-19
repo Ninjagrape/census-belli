@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 import types
+from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 
 import pytest
@@ -43,6 +44,16 @@ class ScriptedConnection:
     def __init__(self, values: list[Any]) -> None:
         self._values = list(values)
         self.calls = 0
+
+    def begin_nested(self) -> AbstractContextManager[None]:
+        """Stand in for SQLAlchemy's SAVEPOINT context manager.
+
+        The runner opens one per check so a failing statement cannot abort the
+        transaction the later checks need. There is no real transaction to
+        protect here; the isolation itself is proven against a live database in
+        tests/integration/test_quality_gates.py.
+        """
+        return nullcontext()
 
     def execute(self, statement: Any) -> _StubResult:
         value = self._values[self.calls] if self.calls < len(self._values) else 0
