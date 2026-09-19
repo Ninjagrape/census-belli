@@ -24,6 +24,7 @@ import asyncio
 import functools
 import json
 from collections.abc import Callable, Coroutine
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -447,6 +448,83 @@ async def test_retries_stop_at_the_configured_maximum() -> None:
     assert result.error == "HTTP 500"
     assert result.attempts == 4
     assert sleeper.calls == [2.0, 4.0, 8.0]
+
+
+@sync
+async def test_a_429_waits_as_long_as_the_server_asked() -> None:
+    """Wikipedia's Retry-After beats the formula, which would answer 29s with 2s.
+
+    This is the defect handover.md 5.2 recorded on the crawl side and 14.4 on
+    the LLM side: blind doubling spends every attempt inside a window the
+    limit was never going to lift in.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, text="slow down", headers={"Retry-After": "29"})
+
+    sleeper = RecordingSleep()
+    async with make_client(handler) as client:
+        target = make_fetcher(client, sleep=sleeper, max_retries=2)
+        result = await target.fetch(ARTICLE_URL)
+
+    assert result.status == 429
+    assert sleeper.calls == [29.0, 29.0]
+
+
+@sync
+async def test_a_retry_after_shorter_than_the_backoff_does_not_shorten_it() -> None:
+    """The header raises the wait, never lowers it: the backoff is still a floor."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, text="busy", headers={"Retry-After": "1"})
+
+    sleeper = RecordingSleep()
+    async with make_client(handler) as client:
+        target = make_fetcher(client, sleep=sleeper, max_retries=2)
+        await target.fetch(ARTICLE_URL)
+
+    assert sleeper.calls == [2.0, 4.0]
+
+
+@sync
+async def test_an_absurd_retry_after_is_capped_not_slept_through() -> None:
+    """A crawl of thousands of pages cannot block an hour on one of them."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, text="come back tomorrow", headers={"Retry-After": "86400"})
+
+    sleeper = RecordingSleep()
+    async with make_client(handler) as client:
+        target = make_fetcher(client, sleep=sleeper, max_retries=1)
+        await target.fetch(ARTICLE_URL)
+
+    assert sleeper.calls == [fetcher.MAX_SERVER_BACKOFF_S]
+
+
+def test_retry_after_reads_both_forms_rfc_9110_allows() -> None:
+    """Wikimedia sends seconds from the API limiter and a date from the CDN."""
+    now = datetime(2026, 10, 21, 7, 28, 0, tzinfo=UTC)
+
+    def response(headers: dict[str, str]) -> httpx.Response:
+        return httpx.Response(429, headers=headers)
+
+    assert fetcher.retry_after_seconds(response({"Retry-After": "29"})) == 29.0
+    assert (
+        fetcher.retry_after_seconds(
+            response({"Retry-After": "Wed, 21 Oct 2026 07:28:30 GMT"}), now=now
+        )
+        == 30.0
+    )
+    # A date already past means retry now, which is an answer and not the
+    # same as no header at all.
+    assert (
+        fetcher.retry_after_seconds(
+            response({"Retry-After": "Wed, 21 Oct 2026 07:27:00 GMT"}), now=now
+        )
+        == 0.0
+    )
+    assert fetcher.retry_after_seconds(response({})) is None
+    assert fetcher.retry_after_seconds(response({"Retry-After": "soon"})) is None
 
 
 @sync

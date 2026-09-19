@@ -6,6 +6,7 @@ import pytest
 
 from pipeline.llm.base import CallStatus, LLMRequest, request_hash
 from pipeline.llm.capabilities import accepts_temperature, estimate_cost, traits_for
+from pipeline.llm.gemini_client import _retry_after_seconds
 from pipeline.llm.parsing import parse_structured, strip_code_fence
 from pipeline.llm.retry import TransientLLMError, with_backoff
 
@@ -250,3 +251,97 @@ def test_only_ok_avoids_manual_review():
     assert CallStatus.REFUSAL.needs_review is True
     assert CallStatus.TRUNCATED.needs_review is True
     assert CallStatus.API_ERROR.needs_review is True
+
+
+# ─── Server-suggested retry delays ───────────────────────────────────────────
+
+
+def test_a_named_retry_delay_beats_the_computed_backoff(monkeypatch):
+    # Blind backoff answers "retry in 29s" with about 2.5s, fails again, and
+    # burns every remaining attempt on a limit that was never going to lift.
+    # A free-tier Gemini key did exactly that on 2026-09-19, and it looked
+    # like a hang rather than a quota error.
+    slept: list[float] = []
+    monkeypatch.setattr("pipeline.llm.retry.time.sleep", slept.append)
+
+    attempts = {"n": 0}
+
+    def operation() -> str:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise TransientLLMError("rate limited", retry_after=29.0)
+        return "ok"
+
+    result, count = with_backoff(operation, max_retries=2, base_delay=2.0)
+
+    assert result == "ok"
+    assert count == 2
+    assert slept == [29.0]
+
+
+def test_a_named_delay_is_capped(monkeypatch):
+    # Waiting is only worth it if the wait is plausible. Beyond the ceiling
+    # the limit is better reported than slept through.
+    slept: list[float] = []
+    monkeypatch.setattr("pipeline.llm.retry.time.sleep", slept.append)
+
+    def operation() -> str:
+        raise TransientLLMError("rate limited", retry_after=99999.0)
+
+    with pytest.raises(TransientLLMError):
+        with_backoff(operation, max_retries=1, base_delay=2.0)
+
+    assert slept and slept[0] <= 120.0
+
+
+def test_a_shorter_named_delay_does_not_shorten_the_backoff(monkeypatch):
+    slept: list[float] = []
+    monkeypatch.setattr("pipeline.llm.retry.time.sleep", slept.append)
+
+    def operation() -> str:
+        raise TransientLLMError("blip", retry_after=0.1)
+
+    with pytest.raises(TransientLLMError):
+        with_backoff(operation, max_retries=1, base_delay=2.0)
+
+    assert slept and slept[0] >= 2.0
+
+
+def test_no_named_delay_leaves_the_backoff_alone(monkeypatch):
+    slept: list[float] = []
+    monkeypatch.setattr("pipeline.llm.retry.time.sleep", slept.append)
+
+    def operation() -> str:
+        raise TransientLLMError("no hint given")
+
+    with pytest.raises(TransientLLMError):
+        with_backoff(operation, max_retries=1, base_delay=2.0)
+
+    assert slept and 2.0 <= slept[0] <= 3.0
+
+
+class _ErrorWithHeaders(Exception):
+    """An SDK error carrying a Retry-After header."""
+
+    def __init__(self, message: str, headers: dict[str, str]) -> None:
+        super().__init__(message)
+        self.response_headers = headers
+
+
+def test_retry_after_is_read_from_the_header_when_present():
+    error = _ErrorWithHeaders("429 too many requests", {"Retry-After": "42"})
+    assert _retry_after_seconds(error) == 42.0
+
+
+def test_retry_after_is_read_from_geminis_prose_when_there_is_no_header():
+    # Gemini states the delay in the message body rather than only a header.
+    error = Exception(
+        "Error code: 429 - {'error': {'message': 'Rate limit exceeded for model "
+        "gemini-3.8-flash (limit: 20 requests per day on Free Tier). "
+        "Please retry in 29s or upgrade your tier.'}}"
+    )
+    assert _retry_after_seconds(error) == 29.0
+
+
+def test_retry_after_is_none_when_nothing_says_so():
+    assert _retry_after_seconds(Exception("500 internal error")) is None

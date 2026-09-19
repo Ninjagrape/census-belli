@@ -11,11 +11,21 @@ failure, a 404 or a robots.txt disallow is a *property of the crawl*: it is
 returned as a :class:`FetchResult` carrying the reason, logged, and recorded
 in ``crawl_log``. A missing or nonsensical configuration value is a *bug* and
 raises immediately.
+
+**A host that says when to come back is obeyed.** Wikipedia answers a crawl
+that is going too fast with 429 and a ``Retry-After``; blind exponential
+backoff answers that with two seconds, fails again, and spends every
+remaining attempt on a limit that was never going to lift. A smoke test of
+six requests at 1.5s spacing drew a 429 on 2026-09-18, so this is the
+expected path on any real crawl rather than an edge case. The same defect was
+found and fixed on the LLM side in ``pipeline/llm/retry.py``; this is the
+crawl half of it.
 """
 
 from __future__ import annotations
 
 import asyncio
+import email.utils
 import hashlib
 import time
 from collections.abc import Awaitable, Callable, Mapping
@@ -29,12 +39,14 @@ import structlog
 
 __all__ = [
     "DEFAULT_TIMEOUT_S",
+    "MAX_SERVER_BACKOFF_S",
     "FetchResult",
     "Fetcher",
     "RateLimiter",
     "RobotsPolicy",
     "content_hash",
     "host_of",
+    "retry_after_seconds",
 ]
 
 logger = structlog.get_logger()
@@ -46,6 +58,12 @@ DEFAULT_TIMEOUT_S = 30.0
 # Statuses worth another attempt: the server is overloaded or rate limiting,
 # not telling us the resource is wrong.
 _RETRYABLE_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+# A host that names its own delay may exceed the computed backoff, within
+# reason: the point of waiting at all is that the wait is long enough to
+# work. Beyond this the limit is better reported than slept through, because
+# a crawl of thousands of pages cannot afford to block on one of them.
+MAX_SERVER_BACKOFF_S = 120.0
 
 SleepFn = Callable[[float], Awaitable[None]]
 ClockFn = Callable[[], float]
@@ -112,6 +130,46 @@ def utc_now() -> datetime:
         The current UTC time.
     """
     return datetime.now(UTC)
+
+
+def retry_after_seconds(
+    response: httpx.Response, *, now: datetime | None = None
+) -> float | None:
+    """Read a response's ``Retry-After`` header as a delay in seconds.
+
+    RFC 9110 allows either form, and Wikimedia sends both depending on which
+    layer refuses the request: an integer seconds count from the API rate
+    limiter, an HTTP-date from the CDN.
+
+    Args:
+        response: The response that asked us to come back later.
+        now: The moment to measure an HTTP-date against; defaults to the
+            current UTC time. Injected so tests need no real clock.
+
+    Returns:
+        The delay in seconds, or None when the header is absent or
+        unreadable. A date already in the past reads as 0.0, which is an
+        answer -- retry now -- and not the same as no header at all.
+    """
+    raw = response.headers.get("Retry-After")
+    if raw is None or not raw.strip():
+        return None
+
+    value = raw.strip()
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+
+    try:
+        when = email.utils.parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        logger.debug("retry_after_unparseable", value=value[:64])
+        return None
+
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return max(0.0, (when - (now or utc_now())).total_seconds())
 
 
 class RateLimiter:
@@ -395,6 +453,7 @@ class Fetcher:
         attempts = 0
         status: int | None = None
         error: str | None = None
+        server_delay: float | None = None
 
         for attempt in range(self._max_retries + 1):
             await self._limiter.acquire(url)
@@ -405,6 +464,7 @@ class Fetcher:
                 )
             except httpx.HTTPError as exc:
                 status = None
+                server_delay = None
                 error = f"{type(exc).__name__}: {exc}"
             else:
                 status = response.status_code
@@ -427,11 +487,28 @@ class Fetcher:
                         fetched_at=utc_now(),
                     )
                 error = f"HTTP {status}"
+                server_delay = retry_after_seconds(response)
 
             if attempt < self._max_retries:
                 delay = self._backoff_base * (2.0**attempt)
+
+                # A host that names its own delay knows better than the
+                # formula. Blind doubling answers "retry in 29s" with 2s,
+                # fails, and burns every remaining attempt on a limit that
+                # was never going to lift inside the backoff chain -- which
+                # is exactly what a 429 from Wikipedia does.
+                honoured = server_delay is not None and server_delay > delay
+                if honoured and server_delay is not None:
+                    delay = min(server_delay, MAX_SERVER_BACKOFF_S)
+
                 logger.warning(
-                    "fetch_retry", url=url, attempt=attempts, error=error, backoff_s=delay
+                    "fetch_retry",
+                    url=url,
+                    attempt=attempts,
+                    status=status,
+                    error=error,
+                    backoff_s=round(delay, 1),
+                    server_suggested=honoured,
                 )
                 await self._sleep(delay)
 

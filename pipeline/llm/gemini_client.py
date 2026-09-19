@@ -26,8 +26,9 @@ the refusal and truncation branches against a live key before trusting them.
 from __future__ import annotations
 
 import os
+import re
 import time
-from typing import Any
+from typing import Any, Final
 
 import structlog
 
@@ -54,11 +55,45 @@ logger = structlog.get_logger()
 
 _API_KEY_ENV = "GEMINI_API_KEY"
 
+# Every request carries this ceiling. Without one the SDK waits indefinitely,
+# and a single stalled call hangs the whole stage: the retry loop below never
+# runs, because a request that never returns never raises. Seen for real on
+# 2026-09-19, when one resolve disambiguation blocked a run until it was
+# killed from outside.
+DEFAULT_TIMEOUT_S: Final[float] = 90.0
+
 # Statuses that mean "try again": request timeout, conflict, rate limit.
 _TRANSIENT_STATUSES = frozenset({408, 409, 429})
+
+# Gemini reports its rate limit in prose -- "Please retry in 29s." -- rather
+# than only in a header, so the delay is read from whichever is available.
+_RETRY_AFTER_RE: Final = re.compile(r"retry in (\d+(?:\.\d+)?)\s*s", re.IGNORECASE)
 # Statuses that mean the credentials or the model name are wrong, which every
 # subsequent call in the batch would hit identically.
 _CONFIG_STATUSES = frozenset({401, 403, 404})
+
+
+def _retry_after_seconds(error: Exception) -> float | None:
+    """Read the delay a provider asked us to wait, if it named one.
+
+    Args:
+        error: The SDK exception.
+
+    Returns:
+        Seconds, or None when no delay was supplied. Both the standard
+        ``Retry-After`` header and Gemini's prose form are accepted.
+    """
+    headers = getattr(error, "response_headers", None) or getattr(error, "headers", None)
+    if isinstance(headers, dict):
+        for key, value in headers.items():
+            if str(key).lower() == "retry-after":
+                try:
+                    return float(str(value))
+                except (TypeError, ValueError):
+                    break
+
+    match = _RETRY_AFTER_RE.search(str(error))
+    return float(match.group(1)) if match else None
 
 
 class _PermanentCallError(Exception):
@@ -84,6 +119,7 @@ class GeminiClient:
         *,
         max_retries: int = DEFAULT_MAX_RETRIES,
         base_delay: float = DEFAULT_BASE_DELAY,
+        timeout_s: float = DEFAULT_TIMEOUT_S,
         thinking_level: str | None = None,
     ) -> None:
         """
@@ -92,6 +128,8 @@ class GeminiClient:
         Args:
             model: Exact model identifier, e.g. ``"gemini-3.8-flash"``.
             max_retries: Retries after the initial attempt for transient failures.
+            timeout_s: Ceiling on one request. A stalled call must fail so the
+                retry policy can see it; without a timeout it simply hangs.
             base_delay: Seconds for the first backoff, doubling thereafter.
             thinking_level: Optional reasoning depth passed through in
                 ``generation_config``. Leave unset for mechanical extraction.
@@ -122,7 +160,22 @@ class GeminiClient:
                 "as GEMINI_API_KEY=... using a key from https://aistudio.google.com/apikey"
             )
 
-        self._client = genai.Client(api_key=api_key)
+        # http_options carries the timeout in milliseconds. Older SDKs did not
+        # accept it, so fall back rather than refuse to build a client that
+        # would otherwise work -- but say so, because an untimed client can
+        # hang a stage.
+        try:
+            self._client = genai.Client(
+                api_key=api_key,
+                http_options={"timeout": int(timeout_s * 1000)},
+            )
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "gemini_client_timeout_unsupported",
+                error=str(exc),
+                consequence="a stalled request will block this stage indefinitely",
+            )
+            self._client = genai.Client(api_key=api_key)
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         """
@@ -195,7 +248,10 @@ class GeminiClient:
                 # No HTTP status at all is typically a transport failure.
                 raise TransientLLMError(f"transport error: {e}") from e
             if status in _TRANSIENT_STATUSES or status >= 500:
-                raise TransientLLMError(f"retryable error {status}: {e}") from e
+                raise TransientLLMError(
+                    f"retryable error {status}: {e}",
+                    retry_after=_retry_after_seconds(e),
+                ) from e
 
             raise _PermanentCallError(f"request rejected ({status}): {e}") from e
 

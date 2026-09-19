@@ -12,6 +12,27 @@ outside the rate limiter and retry policy that the rest of the crawl runs
 under. The endpoint is a plain HTTP GET, so it is issued through the same
 :class:`~pipeline.crawlers.fetcher.Fetcher` as everything else and every
 attempt lands in ``crawl_log`` like any other fetch.
+
+**The query service is exempted from robots.txt, deliberately.**
+``https://query.wikidata.org/robots.txt`` is::
+
+    User-agent: *
+    Disallow: /sparql
+    Disallow: /bigdata
+
+That keeps crawlers out of a service that answers arbitrary queries; it is not
+a rule about API clients, and WDQS is a documented public API whose own access
+policy asks for a descriptive user agent and considerate rates, both of which
+this fetcher supplies. Routing the query through :meth:`Fetcher.fetch` applied
+the crawler rule to an API call, so **every SPARQL query in the project
+returned ``robots_disallowed`` and every caller degraded quietly to "no
+results"** -- the crawl stage discovered no battles from Wikidata, and the
+resolve stage linked no commander to any entity. Neither said so.
+
+So queries go through :meth:`Fetcher.fetch_raw`, which is the same exemption
+the code already makes for robots.txt itself. Rate limiting, retries and the
+user agent are untouched: the politeness that actually matters to Wikimedia is
+all still in force.
 """
 
 from __future__ import annotations
@@ -162,7 +183,10 @@ async def run_query(
     if not query.strip():
         raise ValueError("SPARQL query is empty")
 
-    result = await fetcher.fetch(
+    # fetch_raw, not fetch: robots.txt disallows /sparql for crawlers and this
+    # is an API call. See the module docstring -- going through the robots
+    # gate silently disabled every query in the project.
+    result = await fetcher.fetch_raw(
         endpoint,
         params={"query": query, "format": "json"},
         headers={"Accept": "application/sparql-results+json"},

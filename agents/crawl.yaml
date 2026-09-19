@@ -23,7 +23,10 @@ tools:
   - db_insert            # insert rows into crawl_log
 
 params:
-  rate_limit_wikipedia: 1.0         # seconds between requests to en.wikipedia.org
+  # A live smoke test of ~6 requests at 1.5s spacing drew HTTP 429, so 1.0 was
+  # measurably too fast. 2.0 leaves the Retry-After path in fetcher.py as the
+  # backstop rather than the normal case.
+  rate_limit_wikipedia: 2.0         # seconds between requests to en.wikipedia.org
   rate_limit_other: 2.0             # seconds between requests to other domains
   max_retries: 3
   backoff_base: 2.0

@@ -6,6 +6,13 @@ from a 2 second base. Both vendor SDKs retry some failures internally, so
 this wrapper is configured to cover what they do not: it counts attempts
 across the whole call so that a stage's log shows the true number of round
 trips, and it treats only transient conditions as retryable.
+
+**A rate limiter that says when to come back is obeyed.** Blind exponential
+backoff answers "retry in 29s" with 2.5 seconds, fails again, and burns every
+remaining attempt on a limit that was never going to lift -- which is what a
+free-tier Gemini key did on 2026-09-19, turning a quota error into what looked
+like a hang. When a provider supplies a delay, :class:`TransientLLMError`
+carries it and it wins over the computed one.
 """
 
 from __future__ import annotations
@@ -25,6 +32,10 @@ DEFAULT_MAX_RETRIES = 3
 DEFAULT_BASE_DELAY = 2.0
 # Cap so a long backoff chain cannot stall a batch for minutes on one record.
 _MAX_DELAY = 30.0
+# A provider that names its own delay may exceed that cap, within reason: the
+# point of waiting at all is that the wait is long enough to work. Beyond this
+# the limit is better reported than slept through.
+_MAX_SERVER_DELAY = 120.0
 
 T = TypeVar("T")
 
@@ -35,7 +46,21 @@ class TransientLLMError(Exception):
 
     Provider clients translate their SDK's exceptions into this so the retry
     policy stays vendor-neutral.
+
+    Attributes:
+        retry_after: Seconds the provider asked us to wait, when it said so.
+            None means it did not, and the computed backoff applies.
     """
+
+    def __init__(self, *args: object, retry_after: float | None = None) -> None:
+        """Create the error.
+
+        Args:
+            *args: Passed to ``Exception``.
+            retry_after: The provider's own suggested delay, in seconds.
+        """
+        super().__init__(*args)
+        self.retry_after = retry_after
 
 
 def with_backoff(
@@ -78,11 +103,20 @@ def with_backoff(
             # Jitter so that a batch hitting a rate limit does not resynchronise
             # every worker onto the same retry instant.
             delay = min(base_delay * (2**attempt) + random.uniform(0, 1), _MAX_DELAY)
+
+            # A provider that named a delay knows better than the formula.
+            suggested = getattr(e, "retry_after", None)
+            honoured = False
+            if suggested is not None and suggested > delay:
+                delay = min(float(suggested), _MAX_SERVER_DELAY)
+                honoured = True
+
             logger.warning(
                 "llm_call_retrying",
                 attempt=attempt + 1,
                 max_attempts=max_retries + 1,
                 delay_seconds=round(delay, 1),
+                server_suggested=honoured,
                 error=str(e),
                 **log_context,
             )
