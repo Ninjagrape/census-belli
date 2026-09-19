@@ -23,6 +23,30 @@ tools:
 
 params:
   fuzzy_threshold: 85          # minimum similarity score for candidate matches
+  # How far the best candidate must beat the runner-up to be accepted without
+  # asking the LLM. Two entities scoring within this of each other are
+  # usually a father and a son.
+  ambiguity_margin: 6
+
+  # Where candidates come from: 'sparql' queries the live Wikidata endpoint,
+  # 'local' indexes the entity JSON already under data/raw/wikidata, 'none'
+  # resolves everything as a new entity. 'local' and 'none' need no network.
+  candidate_source: sparql
+  sparql_batch_size: 25        # names per query; the endpoint times out on large ones
+  max_names_per_group: 3       # surface forms of one person to ask about
+  rate_limit_sparql: 2.0       # seconds between queries; stricter than the article API
+  respect_robots: true
+
+  # Duplicate battle detection. The stage reports suspected pairs to
+  # data/processed/duplicate_battles.jsonl and never merges them: merging two
+  # battle rows re-parents their sides, troop reports and commanders, and a
+  # wrong merge destroys the outcome data the model is fitted to.
+  battle_duplicate_threshold: 92    # name similarity, after "Battle of" is stripped
+  battle_duplicate_year_slack: 1    # years apart two records of one battle may be
+
+  processed_root: data/processed
+  raw_root: data/raw
+
   # Gemini serves this stage too. Most resolution is SPARQL plus rapidfuzz;
   # the LLM only breaks ties the fuzzy matcher leaves ambiguous, so the
   # judgement asked of it is narrow and well bounded.
@@ -85,15 +109,40 @@ prompt:
     Which candidate matches this commander? Respond with JSON:
     {{"match": "<wikidata_id or NEW_ENTITY or UNCERTAIN>", "confidence": 0.0-1.0, "reasoning": "..."}}
 
+  # The stage loads this at run time and hands it to the LLM layer, which
+  # validates every response against it. A Q-id cannot be constrained to the
+  # candidates actually offered, so the stage checks that separately and
+  # treats an unoffered id as a refusal to match.
+  output_schema:
+    type: object
+    required: [match, confidence]
+    properties:
+      match:
+        type: string
+        description: "A Wikidata Q-id, or NEW_ENTITY, or UNCERTAIN"
+      confidence:
+        type: number
+        minimum: 0.0
+        maximum: 1.0
+      reasoning:
+        type: string
+
 quality_checks:
   - name: resolution_rate
+    # battle_commanders.general_id is NOT NULL, so counting non-null ids in
+    # that table divides written rows by written rows and reports 1.0 however
+    # many mentions the stage lost. The real denominator is written rows plus
+    # the mentions resolve could not place, which it records in
+    # missing_data_log under commander_general_id.
     check: >
-      SELECT COUNT(*) FILTER (WHERE general_id IS NOT NULL)::float
-           / NULLIF(COUNT(*), 0)
-      FROM battle_commanders
+      SELECT (SELECT COUNT(*) FROM battle_commanders)::float
+           / NULLIF(
+               (SELECT COUNT(*) FROM battle_commanders)
+             + (SELECT COUNT(*) FROM missing_data_log
+                 WHERE field_name = 'commander_general_id'), 0)
     threshold: ">= 0.90"
     severity: warning
-    description: "At least 90% of commander mentions should be resolved"
+    description: "At least 90% of commander mentions should reach battle_commanders"
 
   - name: no_duplicate_generals
     check: >
@@ -107,7 +156,37 @@ quality_checks:
     threshold: "= 0"
     severity: error
 
+  - name: wikidata_link_rate
+    # The honest measure of "backed by a Wikidata entity where possible".
+    # Unlike alias_coverage this one can fail: a general with no Q-id is a
+    # corpus-local identity that no later run can reconcile against anything.
+    check: >
+      SELECT COUNT(*) FILTER (WHERE wikidata_id IS NOT NULL)::float
+           / NULLIF(COUNT(*), 0)
+      FROM generals
+    threshold: ">= 0.60"
+    severity: warning
+    description: "Most resolved generals should carry a Wikidata id"
+
+  - name: commanders_per_battle
+    # Moved here from agents/extract.yaml, where it counted a table the
+    # extract stage does not write and so could only ever report 0.
+    check: >
+      SELECT AVG(commander_count) FROM (
+        SELECT b.battle_id, COUNT(bc.bc_id) AS commander_count
+        FROM battles b
+        LEFT JOIN battle_commanders bc ON bc.battle_id = b.battle_id
+        GROUP BY b.battle_id
+      ) t
+    threshold: ">= 2.0"
+    severity: warning
+    description: "Average commanders per battle should be at least 2 (one per side)"
+
   - name: alias_coverage
+    # Near-vacuous by construction: the stage writes a primary alias for
+    # every general it creates, so this reads about 1.0 on any run that wrote
+    # anything. Kept because it does still catch the alias write failing
+    # outright, not because a pass means the aliases are good.
     check: >
       SELECT COUNT(DISTINCT general_id)::float / NULLIF(
         (SELECT COUNT(*) FROM generals), 0)
