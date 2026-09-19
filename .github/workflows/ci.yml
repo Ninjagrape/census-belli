@@ -1,0 +1,177 @@
+# Continuous integration for General WAR.
+#
+# The one decision worth explaining: **the test job runs a real PostgreSQL.**
+#
+# Half this project's code is SQL or talks to a database, and its integration
+# tests skip rather than fail when DATABASE_URL is unset -- by design, so the
+# suite stays runnable on a machine without Postgres. The cost is that a green
+# run with every integration test skipped looks almost identical to a green run
+# with none, and handover.md records two occasions where that hid a real
+# defect: apply_schema() had never once applied the schema, and a quality gate
+# divided a column by itself and read 1.0 forever. A CI without a database
+# would reproduce exactly that blind spot, so this one provisions postgres:15
+# and then *asserts that nothing skipped*.
+#
+# What CI deliberately does not do is touch the network. tests/integration/
+# test_crawl_live.py makes real requests to Wikipedia and DBpedia; it is gated
+# on GENERAL_WAR_LIVE_CRAWL, which is never set here. Running it on every push
+# would put this project's traffic on a third party's servers at the mercy of
+# how often anyone commits.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # schema.sql uses box-drawing characters in its section headers, which a
+  # non-UTF-8 console cannot encode. See handover.md 5.3.
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  lint:
+    name: Lint and type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff
+        run: ruff check pipeline/ tests/ alembic/
+
+      - name: mypy --strict
+        run: python -m mypy pipeline/
+
+  test:
+    name: Tests against PostgreSQL
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: general_war
+          POSTGRES_PASSWORD: general_war
+          POSTGRES_DB: general_war
+        ports:
+          - 5432:5432
+        # Without the health check the job races the database and the
+        # integration tests skip, which is the exact failure this job exists
+        # to prevent.
+        options: >-
+          --health-cmd "pg_isready -U general_war"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg://general_war:general_war@localhost:5432/general_war
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Confirm the database is actually reachable
+        # Asserted before pytest rather than inferred from its output. A
+        # connection failure here is a red job; the same failure discovered
+        # inside pytest is a green job with silent skips.
+        run: |
+          python - <<'PY'
+          from sqlalchemy import text
+          from pipeline.db import get_engine
+          with get_engine().connect() as conn:
+              print(conn.execute(text("SELECT version()")).scalar_one())
+          PY
+
+      - name: Apply schema
+        run: python -m pipeline.db --apply-schema
+
+      - name: Run the suite
+        # -m "not live" keeps the opt-in network tests out. -ra reports the
+        # reason for anything skipped, so a silent skip cannot hide.
+        run: >-
+          python -m pytest tests/ -v -ra
+          -m "not live"
+          --cov=pipeline --cov-report=term-missing
+
+      - name: Fail if any integration test skipped
+        # The whole point of the service container above. A skip here means
+        # the database was not reached, and the run proved far less than it
+        # appears to.
+        run: |
+          python -m pytest tests/ -q -m "not live" --no-header > pytest-summary.txt 2>&1 || true
+          tail -5 pytest-summary.txt
+          if grep -qE "[1-9][0-9]* skipped" pytest-summary.txt; then
+            echo "::error::Tests skipped despite a live database. DATABASE_URL is not reaching them."
+            exit 1
+          fi
+
+  migrations:
+    name: Alembic round-trip
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: general_war
+          POSTGRES_PASSWORD: general_war
+          POSTGRES_DB: general_war
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U general_war"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg://general_war:general_war@localhost:5432/general_war
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Upgrade, downgrade, upgrade again
+        # Every schema change has to land in both config/schema.sql and an
+        # Alembic migration, because the integration fixtures call
+        # apply_schema() and never run Alembic. This job proves the migration
+        # half works; the test job above proves the schema.sql half does.
+        run: |
+          alembic upgrade head
+          alembic downgrade -1
+          alembic upgrade head

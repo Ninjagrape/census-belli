@@ -20,6 +20,7 @@ common case short (``--set mcmc_samples=5000``) while still allowing
 from __future__ import annotations
 
 import copy
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -30,15 +31,117 @@ logger = structlog.get_logger()
 
 __all__ = [
     "AGENTS_DIR",
+    "DEFAULT_ENV_FILE",
     "SpecError",
     "available_stages",
     "load_agent_spec",
+    "load_env",
     "merge_overrides",
     "parse_set_overrides",
     "spec_path",
 ]
 
 AGENTS_DIR = Path("agents")
+DEFAULT_ENV_FILE = Path(".env")
+
+
+def load_env(path: Path | str = DEFAULT_ENV_FILE, *, override: bool = False) -> list[str]:
+    """Load environment variables from a ``.env`` file, if one exists.
+
+    Nothing in this project read ``.env`` before this function existed. The
+    file was written and documented in ``.env.example``, but consumed only by
+    a docker-compose setup that is not used on the development machine, so
+    ``DATABASE_URL`` and the API keys had to be exported by hand -- which
+    surprised two sessions running and left the integration suite skipping
+    silently rather than failing loudly.
+
+    An already-exported variable wins by default. A shell that set
+    ``DATABASE_URL`` deliberately, or a CI runner injecting a secret, must not
+    be quietly overridden by a file left in the working tree.
+
+    Args:
+        path: The env file to read. A missing file is not an error: the
+            deployed case is real environment variables and no file at all.
+        override: Let file values replace variables already in the
+            environment. Off by default, for the reason above.
+
+    Returns:
+        The names of the variables this call set, for logging. **Never the
+        values** -- this file holds real API keys, and the project's rule is
+        that a secret is confirmed as set, never printed.
+    """
+    env_path = Path(path)
+    if not env_path.is_file():
+        logger.debug("env_file_absent", path=str(env_path))
+        return []
+
+    try:
+        from dotenv import dotenv_values
+    except ImportError:
+        logger.warning(
+            "dotenv_not_installed",
+            path=str(env_path),
+            hint="pip install python-dotenv, or export the variables yourself",
+        )
+        return []
+
+    try:
+        values = dotenv_values(env_path, encoding=_env_encoding(env_path))
+    except (OSError, UnicodeDecodeError) as exc:
+        # An unreadable .env must not take the run down. The variables may
+        # well be exported already, and a stack trace from inside dotenv
+        # tells the reader nothing about which file or why.
+        logger.warning(
+            "env_file_unreadable",
+            path=str(env_path),
+            error=f"{type(exc).__name__}: {exc}",
+            hint="re-save it as UTF-8, or export the variables yourself",
+        )
+        return []
+
+    applied: list[str] = []
+    for key, value in values.items():
+        if value is None or (key in os.environ and not override):
+            continue
+        os.environ[key] = value
+        applied.append(key)
+
+    logger.info("env_file_loaded", path=str(env_path), variables=sorted(applied))
+    return applied
+
+
+def _env_encoding(path: Path) -> str:
+    """Guess an env file's encoding from its byte-order mark.
+
+    PowerShell's ``>`` redirection and ``Set-Content`` without
+    ``-Encoding utf8`` write UTF-16-LE with a BOM, and the ``.env`` on this
+    project's development machine is exactly that. ``python-dotenv`` assumes
+    UTF-8 and raises ``UnicodeDecodeError`` on the first byte, which reads as
+    "dotenv is broken" rather than "this file is UTF-16".
+
+    Args:
+        path: The env file.
+
+    Returns:
+        An encoding name for ``dotenv_values``. Falls back to UTF-8, which is
+        what the file should be, when there is no BOM or it cannot be read.
+    """
+    try:
+        head = path.read_bytes()[:4]
+    except OSError:
+        return "utf-8"
+
+    # "utf-16" rather than "utf-16-le": the explicit-endianness codecs keep
+    # the BOM as a character, which then rides along on the first key name and
+    # produces a variable called "﻿GEMINI_API_KEY" that nothing reads.
+    if head.startswith(b"\xff\xfe\x00\x00"):
+        return "utf-32"
+    if head.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return "utf-16"
+    if head.startswith(b"\xef\xbb\xbf"):
+        # utf-8-sig strips the BOM; plain utf-8 would leave it on the first key.
+        return "utf-8-sig"
+    return "utf-8"
 
 # Keys every spec must define. A spec missing these fails later in a less
 # obvious place, so it is worth catching at load time.

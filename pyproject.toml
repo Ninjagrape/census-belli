@@ -37,6 +37,9 @@ dependencies = [
     # utilities
     "pyyaml>=6.0",
     "structlog>=24.1",
+    # Nothing read .env until pipeline.config.load_env existed; the file was
+    # written, documented, and consumed only by an unused docker-compose.
+    "python-dotenv>=1.0",
     "click>=8.1",
     "tqdm>=4.66",
 
@@ -49,8 +52,12 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
     "ruff>=0.5",
     "mypy>=1.10",
+    "pre-commit>=3.7",
+    # Stubs mypy --strict needs to type the YAML and jsonschema boundaries.
+    "types-PyYAML>=6.0",
 ]
 
 [tool.ruff]
@@ -75,4 +82,5 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: needs a live PostgreSQL instance (make db-up); skipped otherwise",
+    "live: makes real requests to a third party; opt in with GENERAL_WAR_LIVE_CRAWL=1",
 ]

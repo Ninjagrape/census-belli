@@ -22,8 +22,10 @@ from typing import Any
 import structlog
 import yaml
 
-from pipeline.config import SpecError, merge_overrides, parse_set_overrides
+from pipeline.config import SpecError, load_env, merge_overrides, parse_set_overrides
 from pipeline.config import load_agent_spec as _load_spec
+from pipeline.db import DatabaseConfigError, get_connection, get_engine
+from pipeline.logging_config import configure as configure_logging
 from pipeline.quality import (
     QualityCheckResult,
     QualityRunner,
@@ -287,6 +289,14 @@ def run_pipeline(
 # ─── CLI ─────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    """Run the pipeline from the command line.
+
+    Loads ``.env``, configures logging, opens a database connection and runs
+    the requested stages. The connection is the point: the quality gates are
+    SQL, and without one every gate reported "No database connection
+    available to run this check" rather than its verdict, which made a CLI
+    run unable to tell a passing stage from a failing one.
+    """
     parser = argparse.ArgumentParser(description="General WAR pipeline orchestrator")
     parser.add_argument(
         "--stages",
@@ -313,7 +323,27 @@ def main() -> None:
         action="store_true",
         help="Continue running stages even if one fails quality checks",
     )
+    parser.add_argument(
+        "--no-db",
+        action="store_true",
+        help=(
+            "Run without a database connection. Every SQL quality gate then "
+            "fails as unrunnable rather than passing, so this is for "
+            "inspecting stage mechanics, not for a real run."
+        ),
+    )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default=None,
+        help="DEBUG, INFO, WARNING, ERROR or CRITICAL. Defaults to $LOG_LEVEL, then INFO.",
+    )
     args = parser.parse_args()
+
+    # Order matters: .env may carry LOG_LEVEL and DATABASE_URL, so it has to
+    # be read before logging is configured and before the engine is built.
+    load_env()
+    configure_logging(level=args.log_level)
 
     stages = [s.strip() for s in args.stages.split(",")]
 
@@ -325,11 +355,32 @@ def main() -> None:
         # --set wins over --config, being the more specific instruction.
         config_overrides.update(parse_set_overrides(args.set_overrides))
 
-    results = run_pipeline(
-        stages=stages,
-        config_overrides=config_overrides or None,
-        stop_on_error=not args.no_stop_on_error,
-    )
+    def run(db_conn: Any) -> list[StageResult]:
+        return run_pipeline(
+            stages=stages,
+            config_overrides=config_overrides or None,
+            stop_on_error=not args.no_stop_on_error,
+            db_conn=db_conn,
+        )
+
+    if args.no_db:
+        logger.warning("running_without_database", consequence="every SQL gate will fail")
+        results = run(None)
+    else:
+        try:
+            engine = get_engine()
+        except DatabaseConfigError as exc:
+            # A missing DATABASE_URL is a configuration bug, not a data
+            # condition. Continuing would run every stage and then report
+            # nine identical gate failures, burying the actual cause.
+            logger.error("database_not_configured", error=str(exc))
+            sys.exit(2)
+
+        try:
+            with get_connection(engine=engine) as conn:
+                results = run(conn)
+        finally:
+            engine.dispose()
 
     # Exit with non-zero if any stage failed
     if any(not r.success for r in results):

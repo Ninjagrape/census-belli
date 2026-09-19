@@ -1,0 +1,76 @@
+# Pre-commit hooks for General WAR.
+#
+#     pip install -e ".[dev]" && pre-commit install
+#
+# These are the checks cheap enough to run on every commit. The test suite is
+# not among them: it needs a live PostgreSQL, and a hook that fails on a
+# machine without one would simply be disabled by the first person it
+# inconvenienced. CI runs the suite against a real database instead.
+#
+# The detect-private-key and no-env-file hooks are not decoration. This
+# repository has a real .env holding live API keys, and CLAUDE.md's standing
+# rule is to verify nothing credential-shaped is staged before every commit.
+# A hook enforces that more reliably than remembering to.
+
+default_language_version:
+  python: python3.11
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-yaml
+        # The agent specs are YAML and the pipeline loads them at run time, so
+        # a malformed one fails a stage rather than a parse.
+      - id: check-toml
+      - id: check-json
+      - id: end-of-file-fixer
+        exclude: ^tests/fixtures/
+      - id: trailing-whitespace
+        # Fixtures are recorded from live sources; reformatting them would
+        # make them stop describing what they were captured from.
+        exclude: ^tests/fixtures/
+      - id: check-added-large-files
+        args: [--maxkb=512]
+        # Crawled data is produced by the pipeline and never committed.
+        exclude: ^data/
+      - id: detect-private-key
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        exclude: ^tests/fixtures/
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(pipeline|tests|alembic|scripts)/
+      - id: ruff-format
+        files: ^(pipeline|tests|alembic|scripts)/
+        # Not yet applied to the existing tree. Enable once the formatting
+        # pass has been made as its own commit, so it does not land mixed in
+        # with behaviour changes.
+        stages: [manual]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        # The project is mypy --strict clean and handover.md 9 asks for it to
+        # stay that way; it has caught several Any leaks.
+        files: ^pipeline/
+        args: [--strict, --ignore-missing-imports]
+        additional_dependencies:
+          - types-PyYAML
+          - structlog>=24.1
+
+  - repo: local
+    hooks:
+      - id: no-env-file
+        name: refuse to commit a .env
+        # .gitignore already excludes it, but `git add -f` does not care and
+        # neither does a rename. This file holds live keys.
+        entry: .env must never be committed; it holds live API keys
+        language: fail
+        files: (^|/)\.env$
