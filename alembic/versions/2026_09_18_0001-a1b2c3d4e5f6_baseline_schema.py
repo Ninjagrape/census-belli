@@ -76,6 +76,37 @@ def _schema_sql() -> str:
     return sql
 
 
+def _execute_script(conn: sa.Connection, sql: str) -> None:
+    """Run a multi-statement SQL script as one script.
+
+    ``exec_driver_sql`` still hands psycopg an empty parameter set, which makes
+    it parse the '%' in schema.sql's '95% CI' comments as a placeholder and
+    fail. The raw cursor takes no parameter argument at all, so nothing is
+    parsed. ``pipeline.db.apply_schema`` does the same thing for the same
+    reason.
+
+    The cursor shares the connection Alembic is running in, so the DDL lands in
+    Alembic's transaction and is committed with the version stamp. Committing
+    the driver connection here would split the two.
+
+    Args:
+        conn: The connection Alembic bound this migration to.
+        sql: The script to execute.
+
+    Raises:
+        RuntimeError: If the connection exposes no driver connection.
+    """
+    driver_conn = conn.connection.driver_connection
+    if driver_conn is None:  # pragma: no cover - a live connection always has one
+        raise RuntimeError("Connection exposes no driver connection; cannot apply the schema.")
+
+    cursor = driver_conn.cursor()
+    try:
+        cursor.execute(sql)
+    finally:
+        cursor.close()
+
+
 def upgrade() -> None:
     """Create the base schema."""
     if context.is_offline_mode():
@@ -93,9 +124,7 @@ def upgrade() -> None:
         # revision is all that remains, which Alembic does for us.
         return
 
-    # The file is a script of many statements; exec_driver_sql passes it
-    # through rather than treating it as one parameterised statement.
-    conn.exec_driver_sql(_schema_sql())
+    _execute_script(conn, _schema_sql())
 
 
 def downgrade() -> None:

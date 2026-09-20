@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "general-war"
 version = "0.1.0"
@@ -59,6 +63,13 @@ dev = [
     # Stubs mypy --strict needs to type the YAML and jsonschema boundaries.
     "types-PyYAML>=6.0",
 ]
+
+# Without this, setuptools' flat-layout auto-discovery sees agents/, config/,
+# data/, models/ and alembic/ alongside pipeline/, refuses to guess, and the
+# install fails before a single check runs. pipeline is the only importable
+# package; scripts/ and models/ are run from a checkout, not installed.
+[tool.setuptools.packages.find]
+include = ["pipeline*"]
 
 [tool.ruff]
 target-version = "py311"

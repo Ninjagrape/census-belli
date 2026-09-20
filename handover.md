@@ -6,7 +6,7 @@ Read `CLAUDE.md` first for what the project *is*. This file covers what state it
 
 `CLAUDE.md` points every session here, and asks you to update this file before you finish. Keep it current: a stale handover is worse than none, because the next agent will trust it. If you change the state of the project, change §1, §6 and §7 to match.
 
-Last updated: 2026-09-20. Uncommitted changes on top of `432be68` (see §11, §15).
+Last updated: 2026-09-20. Working tree clean at `8c714de` plus the CI fixes in §16.
 
 ---
 
@@ -1295,3 +1295,76 @@ suite against a real PostgreSQL and fails if any test skips.
 Add opt-in live tests against Wikipedia and against an LLM provider. The crawl
 ones pass; the LLM ones are unrun, blocked on a free-tier quota.
 ```
+
+---
+
+## 16. CI had never run a single check, 2026-09-20
+
+All three jobs failed on the first push that triggered them (`8c714de`), and
+neither failure was in the code the jobs exist to check.
+
+### 16.1 `pip install -e ".[dev]"` could not build the package
+
+`pyproject.toml` had no `[build-system]` table and no package configuration, so
+pip fell back to setuptools' flat-layout auto-discovery. Discovery found
+`agents/`, `alembic/`, `config/`, `data/`, `models/` and `pipeline/` side by
+side, refused to guess which was the package, and exited:
+
+```
+error: Multiple top-level packages discovered in a flat-layout:
+['data', 'agents', 'config', 'models', 'alembic', 'pipeline'].
+```
+
+Every job dies at its Install step, which is why the lint job failed in eight
+seconds -- too fast to have run ruff. Nothing downstream of the install had
+ever executed in CI. The fix declares the backend and pins discovery to
+`pipeline*`; `scripts/` and `models/` are empty placeholder packages run from a
+checkout, not installed.
+
+This never showed up locally because the editable install predates the
+directories that broke discovery. `pip install -e . --dry-run` reproduces it in
+a second, and is worth running after adding any top-level directory.
+
+### 16.2 The baseline migration hit the `%` bug all over again
+
+With the install fixed, `alembic upgrade head` failed on exactly the defect
+§4.3 records against `apply_schema()`:
+
+```
+psycopg.ProgrammingError: incomplete placeholder: '%';
+```
+
+`upgrade()` applied `config/schema.sql` through `conn.exec_driver_sql()`, under
+a comment asserting that exec_driver_sql "passes it through rather than
+treating it as one parameterised statement". It does not -- it still hands
+psycopg an empty parameter set, and the five `95% CI` comments in schema.sql
+are parsed as placeholders. The same wrong belief was fixed in `pipeline/db.py`
+and left standing in the migration.
+
+The migration now uses a raw driver cursor, as `apply_schema()` does. It does
+**not** commit the driver connection the way `apply_schema()` must: the cursor
+shares Alembic's connection, so the DDL belongs to Alembic's transaction and is
+committed with the version stamp. Committing here would split the two.
+
+### 16.3 Verified
+
+Against the live database on this machine, on two scratch databases created and
+dropped for the purpose:
+
+- `alembic upgrade head` -> `downgrade -1` -> `upgrade head` on an empty
+  database, then confirmed 20 tables exist and `battles.year_astronomical` is
+  present. A version stamp committed over rolled-back DDL is the §4.4 failure
+  mode and would otherwise look identical to success.
+- `python -m pipeline.db --apply-schema` on a second empty database: 19 tables.
+- `ruff check`, `mypy --strict` (49 files), and `pytest -m "not live"` with
+  DATABASE_URL set: 410 passed, 10 deselected, **0 skipped**, so the CI step
+  that fails the run on any skip has nothing to trip over.
+
+### 16.4 What is still unverified, and the drift behind it
+
+CI runs Python 3.11 and resolves `anthropic>=1.0` to 1.7.0. This machine runs
+Python 3.14 with anthropic 0.111.0 installed, which does not satisfy the
+project's own constraint. So the `mypy --strict` result reported above is a
+result for anthropic 0.x, and `pipeline/llm/anthropic_client.py` is the one
+module where the two could legitimately disagree. If the lint job fails again,
+look there first rather than assuming the discovery fix regressed.
