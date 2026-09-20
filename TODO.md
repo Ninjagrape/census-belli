@@ -143,13 +143,37 @@ against Postgres, including the enum casts and the text-array column.
 - [x] Query coverage: entities matched by alias were being discarded after
       the query found them, which is why "Duke of Wellington" returned
       nothing. Fixed by selecting ?name. See handover.md 14.1.
-- [ ] Exact-literal lookup still cannot reach a commander whose common name is
-      neither their Wikidata label nor an alias (Horatio Nelson, Q83235).
-      Needs a label search (wbsearchentities or SPARQL CONTAINS) rather than
-      VALUES-based literal matching. See handover.md 14.7.
+- [x] Exact-literal lookup could not reach Horatio Nelson (Q83235). **The
+      diagnosis in 14.7 was wrong** — he has no `en` label at all; the name
+      lives on his **`mul`** label, Wikidata's multilingual code, onto which
+      person labels have been migrating since 2024. The lookup asked only for
+      `"..."@en`. Fixed by asking in both tags and setting the label service to
+      `"en,mul"`; verified live 2026-09-20, and Nelson now links
+      deterministically with no LLM call. See handover.md 16.1.
+- [ ] Label search (wbsearchentities / SPARQL CONTAINS): **deferred, not
+      dropped.** Its premise is refuted by the above, and it would fire only on
+      zero-candidate names — where its hit is usually the *sole* candidate and
+      `matcher.py` skips the ambiguity-margin test, auto-linking at ~0.62
+      confidence exactly where evidence is weakest. Probed live it is noisy
+      (paintings, pubs, a racehorse). The residual class is unmeasured; the
+      gold set below should size it before anything is built. See handover.md 16.6.
 - [ ] **Blocker for any real run: the Gemini key is free tier, 20 requests per
-      day.** Neither resolve nor extract can process a corpus on it. Needs a
-      paid tier or a different provider for the bulk stages. See handover.md 14.5.
+      day.** Stated properly: 3,000 battles x ~2-4 passages each is 6,000-12,000
+      extract calls, so **300-600 days**. The project cannot run. The blocker is
+      the *request cap*, not cost — the one measured call was $0.0014, putting
+      the corpus at order $50-200 — so any paid tier removes it. See handover.md 16.8.
+      - [ ] Provider **batch APIs** (Anthropic Message Batches, Gemini batch
+            mode) in `pipeline/llm/`: independent requests, one async job, ~half
+            price, one call per passage preserved so `request_hash` caching and
+            `llm_calls` logging are untouched. Correlate on `request_hash` as the
+            `custom_id` — results return out of order and can partially fail.
+            **Not** cramming many battles into one prompt, which stays rejected.
+      - [ ] ~50-battle **cost pilot** on both providers to replace the estimate
+            with a measurement, reusing the extrapolation in
+            `.claude/commands/extraction-eval.md` section 5.
+      - [ ] Resolve the spec conflict it settles: `CLAUDE.md` names
+            claude-sonnet-4-6 for extraction, `agents/extract.yaml` sets
+            gemini-3.8-flash, `agents/classify.yaml` uses Anthropic.
 - [x] Exact match linker (name -> Wikidata ID)
 - [x] Fuzzy match with context (rapidfuzz + lifespan gate + polity tiebreak)
       - the date gate does the real work: a candidate who was not alive cannot
@@ -171,10 +195,26 @@ against Postgres, including the enum casts and the text-array column.
       - 18 integration tests plus an end-to-end run of resolve.run() against
         live Postgres. Agrippa / Marcus Vipsanius Agrippa across two battles.
 - [ ] Tune fuzzy_threshold, ambiguity_margin and battle_duplicate_threshold
-      against hand-labelled data. First measurement taken 2026-09-19 on an
-      8-commander spot check: 5 correct, 0 wrong, 3 missed, and the misses
-      were query coverage rather than threshold choice. tests/fixtures/gold/
-      still does not exist. See handover.md 13.4.
+      against hand-labelled data. Re-measured live 2026-09-20 after the mul fix
+      on an 8-commander spot check: Nelson, Wellington, Napoleon, Agrippa and
+      Scipio all link deterministically, Yi Sun-sin correctly defers to the LLM,
+      and both Hannibal cases defer rather than link. **Zero wrong links**,
+      which is the number that matters. Still a spot check, not a gold set.
+      - [ ] `tests/fixtures/gold/resolve/` — `mentions.jsonl` (mention + battle
+            context + expected qid, verdict one of linked/new/ambiguous_ok/
+            placeholder), `battle_pairs.jsonl`, and `candidates/` holding cached
+            raw SPARQL bodies so the sweep is deterministic and offline.
+            Every expected qid looked up live, never remembered; MANIFEST.md to
+            state plainly that it is agent-labelled and unreviewed.
+      - [ ] `scripts/resolve_sweep.py` + `.claude/commands/resolve-eval.md`.
+            **Spends zero LLM quota** — build it with `LazyService(None)` so the
+            LLM path is structurally unreachable, and report `ambiguous` as a
+            projected cost column rather than paying for it. Minimise *wrong*
+            links first; a false merge is undetectable downstream.
+      Design is in the approved plan; see handover.md 16.7.
+- [ ] `tests/integration/test_resolve_live.py` — live regression tests that
+      would catch Wikidata migrating Nelson's label back, and pin that no
+      candidate label is ever Q-id shaped. Gated on GENERAL_WAR_LIVE_CRAWL=1.
 
 ## Stage 4: Reconcile (pipeline/stages/reconcile.py)
 - [ ] Source-bias model specification in PyMC

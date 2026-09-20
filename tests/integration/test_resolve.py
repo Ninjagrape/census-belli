@@ -224,13 +224,68 @@ def _scalar(conn: Connection, sql: str, **params: Any) -> Any:
 # ─── Writing ─────────────────────────────────────────────────────────────────
 
 
+def test_a_qid_is_never_published_as_a_generals_name(conn: Connection) -> None:
+    # The label service answers with the bare Q-id when it has no label in the
+    # languages asked for, and that string used to flow through
+    # Decision.canonical_name into generals and into the primary alias row.
+    # The candidate lookup fixes it upstream; this is the last boundary before
+    # it becomes published data, so it is checked again rather than trusted.
+    _seed_battle(conn)
+    _write(
+        conn,
+        _identity("Q83235", qid="Q83235", mentions=[_mention("Horatio Nelson")]),
+    )
+
+    name = _scalar(
+        conn,
+        "SELECT canonical_name FROM generals WHERE wikidata_id = :qid",
+        qid="Q83235",
+    )
+    assert name == "Horatio Nelson"
+
+    qid_shaped_primaries = _scalar(
+        conn,
+        "SELECT COUNT(*) FROM general_aliases a JOIN generals g USING (general_id) "
+        "WHERE g.wikidata_id = :qid AND a.is_primary AND a.alias_name ~ '^Q[0-9]+$'",
+        qid="Q83235",
+    )
+    assert qid_shaped_primaries == 0
+
+
+def test_a_renamed_general_keeps_exactly_one_primary_alias(conn: Connection) -> None:
+    # generals.canonical_name is rewritten unconditionally on a re-run, and the
+    # mul fix renames anyone previously stored under a bare Q-id. _write_aliases
+    # only inserts, and general_aliases has no constraint on is_primary, so the
+    # old primary row would otherwise survive beside the new one.
+    _seed_battle(conn)
+    mentions = [_mention("Horatio Nelson")]
+    _write(conn, _identity("Nelson", qid="Q83235", mentions=mentions))
+    _write(conn, _identity("Horatio Nelson", qid="Q83235", mentions=mentions))
+
+    primaries = _scalar(
+        conn,
+        "SELECT COUNT(*) FROM general_aliases a JOIN generals g USING (general_id) "
+        "WHERE g.wikidata_id = :qid AND a.is_primary",
+        qid="Q83235",
+    )
+    assert primaries == 1
+
+    primary_name = _scalar(
+        conn,
+        "SELECT a.alias_name FROM general_aliases a JOIN generals g USING (general_id) "
+        "WHERE g.wikidata_id = :qid AND a.is_primary",
+        qid="Q83235",
+    )
+    assert primary_name == "Horatio Nelson"
+
+
 def test_a_resolved_commander_reaches_battle_commanders(conn: Connection) -> None:
     _seed_battle(conn)
     counts = _write(
         conn,
         _identity(
             "Marcus Vipsanius Agrippa",
-            qid="Q167846",
+            qid="Q48174",
             mentions=[_mention("Agrippa", evidence="Agrippa commanded the fleet")],
             aliases=["Agrippa"],
         ),
@@ -245,7 +300,7 @@ def test_a_resolved_commander_reaches_battle_commanders(conn: Connection) -> Non
             "SELECT g.wikidata_id FROM generals g "
             "JOIN battle_commanders bc USING (general_id) LIMIT 1",
         )
-        == "Q167846"
+        == "Q48174"
     )
     assert (
         _scalar(conn, "SELECT role_evidence FROM battle_commanders LIMIT 1")
@@ -258,7 +313,7 @@ def test_years_active_comes_back_as_the_astronomical_year(conn: Connection) -> N
     # written from the astronomical year, so it reads back as -30 and agrees
     # with battles.year_astronomical.
     _seed_battle(conn)
-    _write(conn, _identity("Agrippa", qid="Q167846", mentions=[_mention("Agrippa")]))
+    _write(conn, _identity("Agrippa", qid="Q48174", mentions=[_mention("Agrippa")]))
 
     assert _scalar(conn, "SELECT lower(years_active) FROM generals") == BATTLE_YEAR
     assert _scalar(conn, "SELECT year_astronomical FROM battles") == BATTLE_YEAR
@@ -268,7 +323,7 @@ def test_running_twice_converges_rather_than_duplicating(conn: Connection) -> No
     _seed_battle(conn)
     identity = _identity(
         "Marcus Vipsanius Agrippa",
-        qid="Q167846",
+        qid="Q48174",
         mentions=[_mention("Agrippa")],
         aliases=["Agrippa"],
     )
@@ -287,7 +342,7 @@ def test_a_rerun_does_not_undo_the_classify_stage(conn: Connection) -> None:
     # which is what the extract writer does for troop reports -- would discard
     # that silently, so the upsert must leave a decided role alone.
     _seed_battle(conn)
-    identity = _identity("Agrippa", qid="Q167846", mentions=[_mention("Agrippa")])
+    identity = _identity("Agrippa", qid="Q48174", mentions=[_mention("Agrippa")])
     _write(conn, identity)
 
     conn.execute(
@@ -307,7 +362,7 @@ def test_two_sources_naming_one_commander_make_one_row(conn: Connection) -> None
         conn,
         _identity(
             "Agrippa",
-            qid="Q167846",
+            qid="Q48174",
             mentions=[
                 _mention("Agrippa", evidence="short"),
                 _mention("Agrippa", evidence="a much longer account of the command"),
@@ -339,7 +394,7 @@ def test_a_name_collision_never_hijacks_a_wikidata_backed_row(conn: Connection) 
 def test_a_mention_whose_battle_is_absent_is_counted_not_invented(conn: Connection) -> None:
     # No battle was seeded. Writing one here would produce a battle with
     # commanders and no troops, which nothing downstream could interpret.
-    counts = _write(conn, _identity("Agrippa", qid="Q167846", mentions=[_mention("Agrippa")]))
+    counts = _write(conn, _identity("Agrippa", qid="Q48174", mentions=[_mention("Agrippa")]))
 
     assert counts.commanders_written == 0
     assert counts.battles_not_in_db == 1
@@ -477,7 +532,7 @@ def test_every_resolve_gate_executes_against_the_real_schema(conn: Connection) -
     # §4.1 and §11.4 of handover.md are both this failure: a gate whose SQL
     # names something the schema does not have, which can only ever error.
     _seed_battle(conn)
-    _write(conn, _identity("Agrippa", qid="Q167846", mentions=[_mention("Agrippa")]))
+    _write(conn, _identity("Agrippa", qid="Q48174", mentions=[_mention("Agrippa")]))
 
     results = _gates(conn)
     assert set(results) == {
@@ -498,7 +553,7 @@ def test_the_resolution_rate_gate_can_actually_fail(conn: Connection) -> None:
     # rows and read 1.0 however many mentions the stage lost. This one has a
     # denominator that grows when resolution fails.
     _seed_battle(conn)
-    _write(conn, _identity("Agrippa", qid="Q167846", mentions=[_mention("Agrippa")]))
+    _write(conn, _identity("Agrippa", qid="Q48174", mentions=[_mention("Agrippa")]))
     assert _gates(conn)["resolution_rate"].actual_value == pytest.approx(1.0)
 
     log_unresolved(
@@ -516,7 +571,7 @@ def test_the_resolution_rate_gate_can_actually_fail(conn: Connection) -> None:
 
 def test_the_duplicate_generals_gate_catches_a_split_entity(conn: Connection) -> None:
     _seed_battle(conn)
-    _write(conn, _identity("Agrippa", qid="Q167846", mentions=[_mention("Agrippa")]))
+    _write(conn, _identity("Agrippa", qid="Q48174", mentions=[_mention("Agrippa")]))
     assert _gates(conn)["no_duplicate_generals"].passed
 
     # generals.wikidata_id is UNIQUE, so the schema already refuses the
@@ -524,5 +579,5 @@ def test_the_duplicate_generals_gate_catches_a_split_entity(conn: Connection) ->
     # stops it happening, the gate says so if the constraint is ever relaxed.
     with pytest.raises(IntegrityError):
         conn.execute(
-            text("INSERT INTO generals (canonical_name, wikidata_id) VALUES ('Other', 'Q167846')")
+            text("INSERT INTO generals (canonical_name, wikidata_id) VALUES ('Other', 'Q48174')")
         )

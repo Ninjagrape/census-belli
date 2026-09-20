@@ -25,6 +25,7 @@ written rows by written rows and report 100% however much the stage lost.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Final
 
 import structlog
@@ -43,6 +44,10 @@ __all__ = [
 ]
 
 logger = structlog.get_logger()
+
+# A bare Wikidata item id. Never a person's name, and the last thing that
+# should ever reach generals.canonical_name -- see _publishable_name.
+_QID_SHAPE: Final[re.Pattern[str]] = re.compile(r"Q\d+")
 
 # The one ``missing_data_log.field_name`` this stage owns. Resolve clears
 # every row carrying it before writing, so nothing else may use it.
@@ -96,9 +101,28 @@ _UPDATE_GENERAL = text(
 )
 
 _FIND_ALIASES = text("SELECT alias_name FROM general_aliases WHERE general_id = :general_id")
+
+# generals.canonical_name is rewritten unconditionally on a re-run, so a
+# general can be renamed -- which is exactly what the mul fix does to anyone
+# previously stored under a bare Q-id. _write_aliases only ever *inserts*, and
+# general_aliases has no constraint on is_primary (config/schema.sql), so the
+# old primary row would survive beside the new one and the general would have
+# two. Clear the flag before writing rather than discover it in the data.
+_CLEAR_PRIMARY_ALIAS = text(
+    "UPDATE general_aliases SET is_primary = FALSE "
+    "WHERE general_id = :general_id AND is_primary"
+)
 _INSERT_ALIAS = text(
     "INSERT INTO general_aliases (general_id, alias_name, source_id, is_primary) "
     "VALUES (:general_id, :alias_name, :source_id, :is_primary)"
+)
+
+# A renamed general's new canonical name is often already on file as an
+# ordinary alias, so promoting the existing row is the common path, not the
+# rare one. Without this the general would end a re-run with no primary at all.
+_SET_PRIMARY_ALIAS = text(
+    "UPDATE general_aliases SET is_primary = TRUE "
+    "WHERE general_id = :general_id AND alias_name = :alias_name"
 )
 
 _UPSERT_COMMANDER = text(
@@ -202,7 +226,7 @@ def _general_params(identity: Identity) -> dict[str, Any]:
     """
     year_lo, year_hi = _years_active(identity)
     return {
-        "canonical_name": identity.canonical_name,
+        "canonical_name": _publishable_name(identity),
         "wikidata_id": identity.qid,
         "wikipedia_url": identity.wikipedia_url or None,
         "nationality": identity.nationality or None,
@@ -210,6 +234,49 @@ def _general_params(identity: Identity) -> dict[str, Any]:
         "year_hi": year_hi,
         "notes": f"resolved by {identity.method} (confidence {identity.confidence:.2f})",
     }
+
+
+def _publishable_name(identity: Identity) -> str:
+    """The name to publish for an identity, refusing a bare Wikidata id.
+
+    The candidate lookup already replaces a Q-id-shaped label
+    (:func:`pipeline.resolvers.candidates._preferred_name`), so reaching here
+    means something upstream produced one by a route nobody predicted -- which
+    is how the defect arrived the first time. This is the last boundary before
+    the name becomes published data, so it is checked again rather than
+    trusted.
+
+    Args:
+        identity: The resolved person.
+
+    Returns:
+        The canonical name, or the group's display name when the canonical
+        name is a bare item id.
+    """
+    name = (identity.canonical_name or "").strip()
+    if not _QID_SHAPE.fullmatch(name):
+        return identity.canonical_name
+
+    # The surface forms the corpus actually saw are the honest fallback: they
+    # are what a source wrote, rather than anything derived from Wikidata, so
+    # they cannot carry the same defect.
+    candidates: list[str] = []
+    for group in identity.groups:
+        candidates.append(group.display_name)
+        candidates.extend(group.surface_forms)
+    candidates.extend(identity.aliases)
+    fallback = next(
+        (c.strip() for c in candidates if c and c.strip() and not _QID_SHAPE.fullmatch(c.strip())),
+        "",
+    )
+
+    logger.error(
+        "general_canonical_name_was_a_qid",
+        canonical_name=name,
+        qid=identity.qid,
+        used=fallback or name,
+    )
+    return fallback or name
 
 
 def _upsert_general(conn: Any, identity: Identity) -> int:
@@ -257,10 +324,21 @@ def _write_aliases(conn: Any, identity: Identity, general_id: int, source: int |
         How many alias rows were written.
     """
     known = {str(row[0]) for row in conn.execute(_FIND_ALIASES, {"general_id": general_id})}
+    primary = _publishable_name(identity)
+
+    # Exactly one primary, whatever the row already said. A re-run can rename a
+    # general, and inserting alone would leave the old primary standing.
+    conn.execute(_CLEAR_PRIMARY_ALIAS, {"general_id": general_id})
 
     written = 0
-    for alias in [identity.canonical_name, *identity.aliases]:
-        if not alias or alias in known:
+    for alias in [primary, *identity.aliases]:
+        if not alias:
+            continue
+        if alias in known:
+            if alias == primary:
+                conn.execute(
+                    _SET_PRIMARY_ALIAS, {"general_id": general_id, "alias_name": alias}
+                )
             continue
         conn.execute(
             _INSERT_ALIAS,
@@ -268,7 +346,7 @@ def _write_aliases(conn: Any, identity: Identity, general_id: int, source: int |
                 "general_id": general_id,
                 "alias_name": alias,
                 "source_id": source,
-                "is_primary": alias == identity.canonical_name,
+                "is_primary": alias == primary,
             },
         )
         known.add(alias)

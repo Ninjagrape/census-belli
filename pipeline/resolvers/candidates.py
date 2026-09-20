@@ -32,6 +32,7 @@ returns is wrapped in :class:`PrefetchedCandidateSource`.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any, Final, Protocol
@@ -62,6 +63,10 @@ __all__ = [
 
 logger = structlog.get_logger()
 
+# A bare item id, which the label service returns in place of a label it could
+# not resolve. Never a name, and must never be published as one.
+_QID_SHAPE: Final[re.Pattern[str]] = re.compile(r"Q\d+")
+
 _Q_HUMAN: Final[str] = "Q5"
 _P_INSTANCE_OF: Final[str] = "P31"
 _P_BIRTH: Final[str] = "P569"
@@ -77,6 +82,21 @@ DEFAULT_BATCH_SIZE: Final[int] = 25
 # measured on an eight-name batch that was 90 rows and 30 seconds, against 36
 # rows and 1.9 seconds aggregated -- the same 35 people either way. At corpus
 # scale the difference is between usable and not.
+
+# Which language tags a name is asked about, in preference order.
+#
+# "mul" is not decoration. Wikidata introduced the multilingual language code
+# in 2024 and has been migrating person labels onto it ever since, because a
+# name spelled the same in every language does not need one label per
+# language. Horatio Nelson (Q83235) has **no en label at all**: his labels are
+# en-gb "Horatio Nelson, 1st Viscount Nelson" and mul "Horatio Nelson". An
+# en-only literal cannot see him, and handover 14.6 mistook that for him
+# genuinely lacking the name. Every commander whose label has migrated is
+# invisible to an en-only lookup, and the class grows as the migration runs.
+#
+# The same list drives the label service, so the tags asked about and the tags
+# a label can come back in cannot drift apart.
+_NAME_LANGUAGE_TAGS: Final[tuple[str, ...]] = ("en", "mul")
 
 # Escaped into a SPARQL string literal; a name carrying a quote or a newline
 # would otherwise end the literal early and change the query.
@@ -119,11 +139,25 @@ SELECT ?name ?person ?personLabel ?personDescription ?birth ?death
     ?articleUrl schema:about ?person ;
                 schema:isPartOf <https://en.wikipedia.org/> .
   }}
-  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{languages}" . }}
 }}
 GROUP BY ?name ?person ?personLabel ?personDescription ?birth ?death
-LIMIT 400
+LIMIT {limit}
 """
+
+# The two country/occupation FILTERs above stay English-only on purpose. They
+# are tiebreaks that never make a match (matcher._tiebreak_bonus), and they are
+# the multi-valued joins whose cross-product cost handover 14.2 thirty seconds
+# a batch. Widening them would grow the GROUP_CONCAT inputs for no decision
+# value. Do not "finish" the mul migration into them.
+
+# Rows, not people: one person yields a row per matched name, and GROUP BY
+# groups literals by value *and* language tag, so an entity matching under both
+# "X"@en and "X"@mul takes two of these. Truncation is silent at the endpoint
+# and would make a batch's candidate set depend on which rows happened to come
+# back, against a matcher that breaks ties on Q-id precisely so a re-run orders
+# them identically. fetch_candidates warns when a result reaches this.
+_QUERY_ROW_LIMIT: Final[int] = 1000
 
 
 class CandidateLookupError(RuntimeError):
@@ -285,21 +319,36 @@ def _claim_year(entity: dict[str, Any], prop: str) -> int | None:
     return None
 
 
-def _english(block: Any) -> str:
-    """Read the English value out of a labels or descriptions block.
+def _preferred_text(block: Any) -> str:
+    """Read a labels or descriptions block in the languages this project reads.
+
+    Tries :data:`_NAME_LANGUAGE_TAGS` in order, then any regional English
+    variant. Reading ``en`` alone dropped every ``mul``-only person from the
+    local index outright -- not mislabelled, absent -- which would have left
+    the offline source blind to exactly the class the SPARQL path was fixed
+    for. Nelson is the worked example: his labels are ``en-gb`` and ``mul``.
 
     Args:
         block: The entity's ``labels`` or ``descriptions`` mapping.
 
     Returns:
-        The English string, or an empty string.
+        The first value found, or an empty string.
     """
     if not isinstance(block, dict):
         return ""
-    english = block.get("en")
-    if not isinstance(english, dict):
-        return ""
-    return str(english.get("value") or "")
+
+    for tag in _NAME_LANGUAGE_TAGS:
+        entry = block.get(tag)
+        if isinstance(entry, dict) and entry.get("value"):
+            return str(entry["value"])
+
+    # A regional variant is a last resort, not a preference: "en-gb" holds
+    # Nelson's full styled form where "mul" holds the name people use.
+    for tag, entry in sorted(block.items()):
+        if str(tag).startswith("en-") and isinstance(entry, dict) and entry.get("value"):
+            return str(entry["value"])
+
+    return ""
 
 
 def person_candidates(payload: dict[str, Any]) -> list[Candidate]:
@@ -324,16 +373,22 @@ def person_candidates(payload: dict[str, Any]) -> list[Candidate]:
             continue
 
         qid = str(entity.get("id") or "")
-        label = _english(entity.get("labels"))
+        label = _preferred_text(entity.get("labels"))
         if not qid or not label:
             continue
 
+        # Aliases from every language asked about, because the bare form a
+        # commander is usually called by is as likely to sit under "mul" as
+        # under "en", and an alias is the matcher's exact-match key.
         aliases: list[str] = []
         alias_block = entity.get("aliases")
         if isinstance(alias_block, dict):
-            for item in alias_block.get("en", []) or []:
-                if isinstance(item, dict) and item.get("value"):
-                    aliases.append(str(item["value"]))
+            for tag in _NAME_LANGUAGE_TAGS:
+                for item in alias_block.get(tag, []) or []:
+                    if isinstance(item, dict) and item.get("value"):
+                        value = str(item["value"])
+                        if value not in aliases:
+                            aliases.append(value)
 
         wikipedia_url = ""
         sitelinks = entity.get("sitelinks")
@@ -346,7 +401,7 @@ def person_candidates(payload: dict[str, Any]) -> list[Candidate]:
             Candidate(
                 qid=qid,
                 label=label,
-                description=_english(entity.get("descriptions")),
+                description=_preferred_text(entity.get("descriptions")),
                 aliases=tuple(aliases),
                 birth_year=_claim_year(entity, _P_BIRTH),
                 death_year=_claim_year(entity, _P_DEATH),
@@ -429,20 +484,37 @@ class LocalCandidateSource:
         return list(found.values())
 
 
-def _sparql_literal(value: str) -> str:
-    """Render a name as an English-tagged SPARQL string literal.
+def _escape_sparql(value: str) -> str:
+    """Escape a name for use inside a SPARQL string literal.
 
     Args:
         value: A surface form.
 
     Returns:
-        The literal, e.g. ``'"Horatio Nelson"@en'``, with quotes, backslashes
-        and newlines escaped so a name cannot terminate the literal early.
+        The name with quotes, backslashes and newlines escaped, so a name
+        carrying any of them cannot terminate the literal early and change
+        the shape of the query.
     """
     escaped = value
     for char, replacement in _SPARQL_ESCAPES:
         escaped = escaped.replace(char, replacement)
-    return f'"{escaped}"@en'
+    return escaped
+
+
+def _sparql_literals(value: str) -> tuple[str, ...]:
+    """Render a name as one tagged SPARQL literal per language asked about.
+
+    Args:
+        value: A surface form.
+
+    Returns:
+        One literal per tag in :data:`_NAME_LANGUAGE_TAGS`, e.g.
+        ``('"Horatio Nelson"@en', '"Horatio Nelson"@mul')``. Both are needed:
+        Wikidata literals are language-tagged, and a name that has migrated to
+        a ``mul`` label does not exist under ``@en`` at all.
+    """
+    escaped = _escape_sparql(value)
+    return tuple(f'"{escaped}"@{tag}' for tag in _NAME_LANGUAGE_TAGS)
 
 
 def _iso_to_literal(value: str) -> str:
@@ -479,6 +551,55 @@ def _iso_to_literal(value: str) -> str:
     day = day if day.isdigit() and day != "00" else "01"
     literal = f"{int(year):04d}-{month}-{day}"
     return f"{literal} BC" if negative else literal
+
+
+def _looks_like_qid(value: str) -> bool:
+    """Whether a string is a bare Wikidata item id rather than a name.
+
+    Args:
+        value: A candidate label.
+
+    Returns:
+        True for ``"Q83235"`` and the like. The shape is tested rather than
+        the value compared against the entity's own id: what matters is that
+        it is not a name, not which entity it happens to name.
+    """
+    return _QID_SHAPE.fullmatch(value.strip()) is not None
+
+
+def _preferred_name(label: str, names: set[str], qid: str) -> str:
+    """Choose a usable label, given one the label service may have failed on.
+
+    Args:
+        label: The label as the endpoint reported it.
+        names: The requested names this entity actually matched.
+        qid: The entity id, used only as a last resort.
+
+    Returns:
+        The reported label when it is a real name. Otherwise the longest name
+        the entity matched on -- the fullest form available, tie-broken by
+        sort order so a re-run picks the same one -- and failing that the
+        Q-id, which is logged because it should be unreachable: every row of
+        this query exists because a requested literal matched.
+    """
+    if not _looks_like_qid(label):
+        return label
+
+    usable = sorted(
+        (n for n in names if n.strip() and not _looks_like_qid(n)),
+        key=lambda n: (-len(n), n),
+    )
+    if usable:
+        logger.warning(
+            "sparql_candidate_label_was_a_qid",
+            qid=qid,
+            used=usable[0],
+            matched=sorted(names),
+        )
+        return usable[0]
+
+    logger.warning("sparql_candidate_label_was_a_qid_with_no_name", qid=qid)
+    return qid
 
 
 def _merge_rows(rows: Iterable[dict[str, str]]) -> list[tuple[Candidate, set[str]]]:
@@ -536,8 +657,16 @@ def _merge_rows(rows: Iterable[dict[str, str]]) -> list[tuple[Candidate, set[str
 
     results: list[tuple[Candidate, set[str]]] = []
     for qid, entry in merged.items():
-        label = str(entry["label"])
         names: set[str] = entry["names"]
+        # The label service answers with the bare Q-id when it finds no label
+        # in the languages asked for. That string must not be mistaken for a
+        # name: it becomes a fuzzy matching key, and on a link it is what
+        # Decision.canonical_name carries into generals.canonical_name and the
+        # primary general_aliases row. A general published as "Q83235" is
+        # exactly the kind of silent corruption this project cannot detect
+        # downstream. Shape-matched rather than compared to this entity's own
+        # id, because the point is that it is not a name.
+        label = _preferred_name(str(entry["label"]), names, qid)
         results.append(
             (
                 Candidate(
@@ -655,7 +784,11 @@ async def fetch_candidates(
         for name in batch:
             by_name.setdefault(name, [])
 
-        query = _LABEL_QUERY.format(names=" ".join(_sparql_literal(n) for n in batch))
+        query = _LABEL_QUERY.format(
+            names=" ".join(literal for name in batch for literal in _sparql_literals(name)),
+            languages=",".join(_NAME_LANGUAGE_TAGS),
+            limit=_QUERY_ROW_LIMIT,
+        )
         result = await run_query(fetcher, query)
 
         if not result.ok or not result.text:
@@ -669,7 +802,19 @@ async def fetch_candidates(
             )
             continue
 
-        candidates = _merge_rows(parse_sparql_bindings(result.text))
+        rows = parse_sparql_bindings(result.text)
+        if len(rows) >= _QUERY_ROW_LIMIT:
+            # Silent truncation would make the candidate set depend on which
+            # rows the endpoint happened to return, which is neither stable
+            # across re-runs nor visible in the result.
+            logger.warning(
+                "sparql_candidate_batch_truncated",
+                names=len(batch),
+                rows=len(rows),
+                limit=_QUERY_ROW_LIMIT,
+            )
+
+        candidates = _merge_rows(rows)
         indexed = 0
         requested = {fold(name): name for name in batch}
         for candidate, matched_names in candidates:
