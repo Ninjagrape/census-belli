@@ -1360,11 +1360,38 @@ dropped for the purpose:
   DATABASE_URL set: 410 passed, 10 deselected, **0 skipped**, so the CI step
   that fails the run on any skip has nothing to trip over.
 
+### 16.3b And then the lint job failed on an undeclared stub
+
+Run 2 got past the install (47s of it) and died on:
+
+```
+pipeline/llm/parsing.py:100: error: Library stubs not installed for "jsonschema"
+```
+
+`types-jsonschema` was installed on this machine and was never declared. The
+dev extras carried a comment naming "the YAML and jsonschema boundaries" and
+then listed only `types-PyYAML`, so the comment described an intent the file
+did not implement, and every local `mypy --strict` run passed on a stub CI
+would never install. Now declared.
+
+Same shape as §16.1: the development machine has something CI does not, and
+nothing compared the two. An audit of every third-party import in `pipeline/`,
+`tests/` and `alembic/` against the declared dependencies found no other gap,
+so this class should now be closed for imports. Stub packages are the half that
+is easy to miss, because they are invisible at runtime and only mypy wants
+them.
+
 ### 16.4 What is still unverified, and the drift behind it
 
 CI runs Python 3.11 and resolves `anthropic>=1.0` to 1.7.0. This machine runs
 Python 3.14 with anthropic 0.111.0 installed, which does not satisfy the
-project's own constraint. So the `mypy --strict` result reported above is a
-result for anthropic 0.x, and `pipeline/llm/anthropic_client.py` is the one
-module where the two could legitimately disagree. If the lint job fails again,
-look there first rather than assuming the discovery fix regressed.
+project's own constraint. Local `mypy --strict` results are therefore results
+for anthropic 0.x.
+
+Run 2 settled the part of that which mattered: mypy checked all 49 files
+against anthropic 1.7.0 and reported nothing in
+`pipeline/llm/anthropic_client.py`. The module types clean under both majors.
+What remains unsettled is *runtime* behaviour under 1.x -- no test exercises
+the Anthropic provider against the installed SDK, and the live LLM tests are
+still unrun (§15). The version drift on this machine is real and worth closing
+the next time the environment is touched.

@@ -61,7 +61,10 @@ dev = [
     "mypy>=1.10",
     "pre-commit>=3.7",
     # Stubs mypy --strict needs to type the YAML and jsonschema boundaries.
+    # Both were installed on the development machine and only one was declared,
+    # so the lint job failed on a stub that had been present here all along.
     "types-PyYAML>=6.0",
+    "types-jsonschema>=4.21",
 ]
 
 # Without this, setuptools' flat-layout auto-discovery sees agents/, config/,
