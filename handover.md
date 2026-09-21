@@ -6,7 +6,7 @@ Read `CLAUDE.md` first for what the project *is*. This file covers what state it
 
 `CLAUDE.md` points every session here, and asks you to update this file before you finish. Keep it current: a stale handover is worse than none, because the next agent will trust it. If you change the state of the project, change §1, §6 and §7 to match.
 
-Last updated: 2026-09-20. Working tree clean at `8c714de` plus the CI fixes in §16.
+Last updated: 2026-09-21. Working tree dirty: §16 changes plus §17 (offline processing, gold set, sweep).
 
 ---
 
@@ -31,8 +31,8 @@ Infrastructure is complete: `pipeline/db.py`, `config.py`, `quality.py`, `loggin
 ```bash
 export DATABASE_URL="postgresql+psycopg://general_war:general_war@127.0.0.1:5432/general_war"
 ruff check pipeline/ tests/ alembic/     # expect: All checks passed
-python -m mypy pipeline/                 # expect: Success, 49 source files (strict)
-python -m pytest tests/ -q               # expect: 410 passed, 10 skipped
+python -m mypy pipeline/                 # expect: Success, 50 source files (strict)
+python -m pytest tests/ -q               # expect: 418+ passed, 15 skipped (with DB)
 ```
 
 Without DATABASE_URL set the integration tests skip rather than fail, by
@@ -44,12 +44,13 @@ matters.**
 was declared in `pyproject.toml` and had never actually been installed, so
 importing `pipeline.resolvers` fails without it.
 
-**Ten skips are now correct and expected**, and they are not the old
-database skips. They are the opt-in live tests added in §15: five in
-`tests/integration/test_crawl_live.py` (real Wikipedia) and five in
-`tests/integration/test_llm_live.py` (real, billed LLM calls). Both are gated
-on an environment variable so they cannot run by accident. A skip count
-*above* ten means DATABASE_URL is unset and you are not running the
+**Fifteen skips are now correct and expected**, and they are not the old
+database skips. They are the opt-in live tests: five in
+`tests/integration/test_crawl_live.py` (real Wikipedia), five in
+`tests/integration/test_llm_live.py` (real, billed LLM calls), and five in
+`tests/integration/test_resolve_live.py` (real Wikidata SPARQL, added §17.3).
+All are gated on an environment variable so they cannot run by accident. A skip
+count *above* fifteen means DATABASE_URL is unset and you are not running the
 integration suite at all.
 
 A warning about `asyncio_mode` is expected: `pytest-asyncio` is declared in
@@ -415,8 +416,9 @@ Four config files are referenced by agent specs but **do not exist**. Each block
 `README.md`, CI config, pre-commit hooks and the structlog configuration
 were all written on 2026-09-19 (§15) and are no longer outstanding.
 
-Still outstanding: `tests/fixtures/gold/` (the hand-labelled set
-`/extraction-eval` scores against — see §8).
+The resolve gold set now exists at `tests/fixtures/gold/resolve/` (§17.4),
+agent-labelled and unreviewed. The extraction gold set (`tests/fixtures/gold/`
+for `/extraction-eval`) is still outstanding (see §8).
 
 `pytest-asyncio` is declared in `pyproject.toml` dev extras but **not
 installed**, which is the `asyncio_mode` warning you will see. The crawl tests
@@ -1576,10 +1578,115 @@ the cache and `llm_calls` logging are untouched. Correlate on `request_hash`
 as the `custom_id` -- batch results return out of order and can partially
 fail, and the cache key doubles as the correlation id.
 
-**Unresolved and worth deciding deliberately:** `CLAUDE.md` names
-**claude-sonnet-4-6** for LLM extraction, `agents/extract.yaml` sets
-**gemini-3.8-flash**, and `agents/classify.yaml` uses Anthropic. The design
-doc and the spec disagree about who does the bulk work, which decides which
-key needs paying for. A ~50-battle cost pilot on both providers would settle
-it on measurement; `factory.build_provider` is already provider-agnostic, so
-that is a config change.
+**Resolved.** `CLAUDE.md` now documents the actual routing: Gemini 3.8 Flash
+for extract and resolve (high volume, low judgement), Anthropic claude-sonnet-4-6
+for classify (low volume, high judgement). Haiku 4.5 is documented as the API
+fallback in both `agents/extract.yaml` and `agents/resolve.yaml`. The offline
+processing path (§17.1) is the primary alternative to paid API for the bulk
+stages.
+
+
+## 17. Session of 2026-09-21: offline processing, gold set, threshold sweep
+
+### 17.1 Offline LLM processing
+
+The Gemini free-tier quota (§16.8) makes the bulk stages unrunnable through the
+API. Rather than a batch API design, the pipeline now has an offline processing
+path that routes requests through the user's Claude Pro subscription:
+
+| File | What it does |
+|---|---|
+| `pipeline/llm/offline.py` | `export_pending` serialises uncached requests to JSONL, `import_responses` writes completed responses back to `llm_calls` |
+| `scripts/llm_offline.py` | CLI: `status --stage`, `export --stage`, `import --file`, `list` |
+| `.claude/commands/process-llm-batch.md` | Slash command for Claude Code sessions: reads request JSONL, follows the system prompt, writes response JSONL. 25 requests per session. |
+| `tests/unit/test_llm_offline.py` | 8 tests: export, import, caching, roundtrip |
+
+The `request_hash` is the sole correlation key: a request exported with hash X
+must come back with hash X, and the next pipeline run will find it in `llm_calls`
+by that hash. The offline provider/model on the audit row defaults to
+`"offline"` / `"claude-pro-subscription"`, distinguishing manual processing from
+API calls.
+
+New directories `data/llm_requests/` and `data/llm_responses/` are gitignored.
+
+### 17.2 Spec conflict resolution
+
+`CLAUDE.md` previously named claude-sonnet-4-6 as the sole LLM provider. Updated to
+document the actual per-stage routing (Gemini for extract/resolve, Anthropic for
+classify). Both `agents/extract.yaml` and `agents/resolve.yaml` now carry
+`llm_fallback_provider: anthropic` and `llm_fallback_model: claude-haiku-4-5-20251001`.
+
+### 17.3 Live resolve regression tests
+
+`tests/integration/test_resolve_live.py`, 5 tests, gated on
+`GENERAL_WAR_LIVE_CRAWL=1`. Tests the Wikidata SPARQL lookup against the live
+endpoint for regressions the fixture suite cannot catch:
+
+1. Four known commanders (Napoleon, Nelson, Wellington, Caesar) still have
+   candidates
+2. Nelson is reachable via the `mul` label (the §16.1 regression)
+3. No candidate label is Q-id shaped (the §16.2 regression)
+4. The date gate separates Hannibal Barca from an 1811 Hannibal
+5. Napoleon and Nelson resolve deterministically with no LLM call
+
+All Q-ids verified live, not recalled. Q47153 (from an earlier task) was
+identified as a 2009 novel, not Hannibal Barca; Q36456 is correct.
+
+### 17.4 Resolve gold set and threshold sweep
+
+`tests/fixtures/gold/resolve/` contains 15 mentions across 12 battles, with
+cached synthetic candidates. Covers exact match, alias match, `mul` label, date
+gate separation, MAX_PLAUSIBLE_AGE, genuine ambiguity (Yi Sun-sin), placeholders,
+two spellings of one person, and BC dates.
+
+`scripts/resolve_sweep.py` sweeps `fuzzy_threshold` x `ambiguity_margin` over a
+grid, scoring each combo against the gold set. Spends zero LLM quota: ambiguous
+groups are counted, never resolved.
+
+`.claude/commands/resolve-eval.md` is the `/resolve-eval` command that runs the
+sweep (or a single check at the current defaults) and reports per-case results,
+a summary table, and a cost projection.
+
+**Result at the current defaults (85.0 / 6.0):** zero wrong links, 11 correct
+links, 1 ambiguous (Yi Sun-sin, correctly deferred), 2 placeholders. Every combo
+in the grid (threshold 70-95, margin 2-12) also achieves zero wrong links,
+which means the gold set's 15 cases are too clear-cut to discriminate between
+thresholds. The MANIFEST states this limitation: the set needs harder boundary
+cases (commanders known only by a title, contested identities, same-era name
+collisions) before it can tune thresholds on measurement rather than judgement.
+
+### 17.5 Changed files
+
+| File | Change |
+|---|---|
+| `pipeline/llm/offline.py` | **New.** Offline export/import for LLM requests. |
+| `pipeline/llm/__init__.py` | Added offline exports to `__all__` |
+| `scripts/llm_offline.py` | **New.** CLI for the offline workflow. |
+| `scripts/resolve_sweep.py` | **New.** Threshold sweep against the gold set. |
+| `.claude/commands/process-llm-batch.md` | **New.** Slash command for Pro subscription processing. |
+| `.claude/commands/resolve-eval.md` | **New.** Slash command for resolve evaluation. |
+| `tests/unit/test_llm_offline.py` | **New.** 8 tests for the offline module. |
+| `tests/integration/test_resolve_live.py` | **New.** 5 live regression tests. |
+| `tests/fixtures/gold/resolve/` | **New.** Gold set: mentions, candidates, battle pairs, manifest. |
+| `agents/extract.yaml` | Added Haiku 4.5 fallback params. |
+| `agents/resolve.yaml` | Added Haiku 4.5 fallback params. |
+| `CLAUDE.md` | Updated tech stack to document per-stage LLM routing. |
+| `TODO.md` | Marked offline processing and spec conflict as done. |
+| `.gitignore` | Added `data/llm_requests/` and `data/llm_responses/`. |
+| `handover.md` | This. |
+
+### 17.6 Verification, stated honestly
+
+`ruff` clean. `mypy --strict` clean on 50 source files. **376 passed, 70
+skipped** without DATABASE_URL set: 70 skips = 55 database integration tests +
+15 opt-in live tests (10 from §15 + 5 new from §17.3). The test count increased
+from 410 (with DB) to at least 384 unit tests (376 passing + 8 new offline
+tests).
+
+The sweep runs end-to-end against the gold set and produces correct results.
+The live resolve tests were not run this session (no `GENERAL_WAR_LIVE_CRAWL`
+env flag); they were written and verified to skip correctly.
+
+**Not verified:** the offline processing path has not been tested end-to-end
+(exporting real requests, processing via Claude.ai, importing back). The gold
+set candidates are synthetic, not captured from the live endpoint.

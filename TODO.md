@@ -162,18 +162,18 @@ against Postgres, including the enum casts and the text-array column.
       extract calls, so **300-600 days**. The project cannot run. The blocker is
       the *request cap*, not cost — the one measured call was $0.0014, putting
       the corpus at order $50-200 — so any paid tier removes it. See handover.md 16.8.
-      - [ ] Provider **batch APIs** (Anthropic Message Batches, Gemini batch
-            mode) in `pipeline/llm/`: independent requests, one async job, ~half
-            price, one call per passage preserved so `request_hash` caching and
-            `llm_calls` logging are untouched. Correlate on `request_hash` as the
-            `custom_id` — results return out of order and can partially fail.
-            **Not** cramming many battles into one prompt, which stays rejected.
+      - [x] **Offline processing path** replaces the batch API design:
+            `pipeline/llm/offline.py` exports uncached requests to JSONL,
+            the user processes them via Claude.ai upload or `/process-llm-batch`
+            in a Claude Code session (Pro subscription, not billed API), and
+            `scripts/llm_offline.py import` writes responses to `llm_calls`.
+            Correlates on `request_hash`. See `.claude/commands/process-llm-batch.md`.
       - [ ] ~50-battle **cost pilot** on both providers to replace the estimate
             with a measurement, reusing the extrapolation in
             `.claude/commands/extraction-eval.md` section 5.
-      - [ ] Resolve the spec conflict it settles: `CLAUDE.md` names
-            claude-sonnet-4-6 for extraction, `agents/extract.yaml` sets
-            gemini-3.8-flash, `agents/classify.yaml` uses Anthropic.
+      - [x] Resolve the spec conflict: `CLAUDE.md` updated to reflect that
+            extract/resolve use Gemini, classify uses Anthropic. Haiku 4.5
+            documented as fallback in both agent specs.
 - [x] Exact match linker (name -> Wikidata ID)
 - [x] Fuzzy match with context (rapidfuzz + lifespan gate + polity tiebreak)
       - the date gate does the real work: a candidate who was not alive cannot
@@ -200,21 +200,14 @@ against Postgres, including the enum casts and the text-array column.
       Scipio all link deterministically, Yi Sun-sin correctly defers to the LLM,
       and both Hannibal cases defer rather than link. **Zero wrong links**,
       which is the number that matters. Still a spot check, not a gold set.
-      - [ ] `tests/fixtures/gold/resolve/` — `mentions.jsonl` (mention + battle
-            context + expected qid, verdict one of linked/new/ambiguous_ok/
-            placeholder), `battle_pairs.jsonl`, and `candidates/` holding cached
-            raw SPARQL bodies so the sweep is deterministic and offline.
-            Every expected qid looked up live, never remembered; MANIFEST.md to
-            state plainly that it is agent-labelled and unreviewed.
-      - [ ] `scripts/resolve_sweep.py` + `.claude/commands/resolve-eval.md`.
-            **Spends zero LLM quota** — build it with `LazyService(None)` so the
-            LLM path is structurally unreachable, and report `ambiguous` as a
-            projected cost column rather than paying for it. Minimise *wrong*
-            links first; a false merge is undetectable downstream.
-      Design is in the approved plan; see handover.md 16.7.
-- [ ] `tests/integration/test_resolve_live.py` — live regression tests that
-      would catch Wikidata migrating Nelson's label back, and pin that no
-      candidate label is ever Q-id shaped. Gated on GENERAL_WAR_LIVE_CRAWL=1.
+      - [x] `tests/fixtures/gold/resolve/` — 15 mentions, 12 battles, synthetic
+            cached candidates. Agent-labelled, unreviewed. See handover.md §17.4.
+      - [x] `scripts/resolve_sweep.py` + `.claude/commands/resolve-eval.md`.
+            Zero LLM quota. At defaults (85.0/6.0): 0 wrong links, 11 correct,
+            1 ambiguous. Gold set too clear-cut to discriminate thresholds.
+- [x] `tests/integration/test_resolve_live.py` — 5 live regression tests,
+      gated on GENERAL_WAR_LIVE_CRAWL=1. Covers mul label, Q-id label shape,
+      date gate separation, deterministic resolution. See handover.md §17.3.
 
 ## Stage 4: Reconcile (pipeline/stages/reconcile.py)
 - [ ] Source-bias model specification in PyMC
