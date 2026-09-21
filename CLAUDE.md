@@ -54,7 +54,7 @@ The orchestrator in `pipeline/orchestrator.py` runs stages in sequence, checks q
 - **Language**: Python 3.11+
 - **Database**: PostgreSQL 15+ (schema in `config/schema.sql`)
 - **Web scraping**: httpx + beautifulsoup4 + mwparserfromhell (for MediaWiki templates)
-- **LLM extraction**: Anthropic API (claude-sonnet-4-6) via the `anthropic` SDK
+- **LLM extraction**: Gemini 3.8 Flash (extract, resolve) and Anthropic claude-sonnet-4-6 (classify), routed per stage via `agents/<stage>.yaml`. Fallback: Haiku 4.5 API or offline processing via Claude Pro subscription (`/process-llm-batch`)
 - **Entity resolution**: Wikidata SPARQL via `SPARQLWrapper`
 - **Bayesian modelling**: PyMC 5.x (primary), CmdStanPy as fallback
 - **Data processing**: pandas, polars

@@ -36,6 +36,12 @@ params:
   llm_model: gemini-3.8-flash
   llm_temperature: 0.0         # honoured: Gemini still accepts sampling params
   llm_max_tokens: 4096
+  # Fallback when Gemini free tier is exhausted (20 req/day): use the
+  # offline processing path (scripts/llm_offline.py export, then
+  # /process-llm-batch in a Claude Code session under the Pro subscription,
+  # then import). Haiku 4.5 is the model if API calls are preferred instead.
+  llm_fallback_provider: anthropic
+  llm_fallback_model: claude-haiku-4-5-20251001
   batch_size: 50               # process this many articles per LLM batch
   log_all_llm_calls: true
 

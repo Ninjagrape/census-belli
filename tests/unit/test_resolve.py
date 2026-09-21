@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from structlog.testing import capture_logs
 
 from pipeline.crawlers.fetcher import FetchResult
 from pipeline.llm.base import CallStatus, LLMResponse
@@ -44,12 +45,16 @@ from pipeline.resolvers import (
     person_candidates,
 )
 from pipeline.resolvers.candidates import (
+    _NAME_LANGUAGE_TAGS,
+    _QUERY_ROW_LIMIT,
     CandidateLookupError,
     LocalCandidateSource,
     NullCandidateSource,
     PrefetchedCandidateSource,
+    _escape_sparql,
     _iso_to_literal,
-    _sparql_literal,
+    _sparql_literals,
+    candidate_keys,
     collect_query_names,
     fetch_candidates,
 )
@@ -183,13 +188,14 @@ def _entity(
     *,
     human: bool = True,
     aliases: tuple[str, ...] = (),
+    language: str = "en",
 ) -> dict[str, Any]:
     """Build a Wikidata entity payload as the crawl stage stores it."""
     return {
         "entities": {
             qid: {
                 "id": qid,
-                "labels": {"en": {"value": label}},
+                "labels": {language: {"value": label}},
                 "descriptions": {"en": {"value": "Roman general"}},
                 "aliases": {"en": [{"value": a} for a in aliases]},
                 "claims": {
@@ -347,6 +353,24 @@ def test_the_gate_abstains_when_it_cannot_judge() -> None:
     assert lifespan_verdict(_candidate("Q1", "Somebody", None, None), [1500]) is None
 
 
+def test_a_birth_with_no_recorded_death_does_not_make_a_candidate_immortal() -> None:
+    # Found live, 2026-09-20. Q1576150 is a Carthaginian commander born about
+    # 300 BC whose death claim is an explicit "no value", so death_year is
+    # None. With the upper end left open the gate judged him alive at the
+    # Battle of Lissa in 1811 -- and judged him *positively*, so the
+    # exact-match rule preferred him over dateless namesakes and linked him at
+    # 0.95 confidence. A false merge, the one error nothing downstream detects.
+    ancient = _candidate("Q1576150", "Hannibal", -299, None)
+    assert lifespan_verdict(ancient, [-250]) is True
+    assert lifespan_verdict(ancient, [1811]) is False
+
+
+def test_a_death_with_no_recorded_birth_is_bounded_backwards_too() -> None:
+    late = _candidate("Q1", "Somebody", None, -182)
+    assert lifespan_verdict(late, [-200]) is True
+    assert lifespan_verdict(late, [-700]) is False
+
+
 def test_an_exact_name_match_is_refused_when_the_dates_rule_it_out() -> None:
     # This is the case that name similarity alone gets wrong every time.
     group = _group("Hannibal", year=1811, battle="Battle of Lissa")
@@ -361,9 +385,9 @@ def test_an_exact_name_match_is_refused_when_the_dates_rule_it_out() -> None:
 
 def test_a_single_exact_match_links() -> None:
     group = _group("Marcus Vipsanius Agrippa")
-    decision = match_group(group, [_candidate("Q167846", "Marcus Vipsanius Agrippa", -62, -11)])
+    decision = match_group(group, [_candidate("Q48174", "Marcus Vipsanius Agrippa", -62, -11)])
     assert decision.status == "linked"
-    assert decision.qid == "Q167846"
+    assert decision.qid == "Q48174"
     assert decision.method == "exact_wikidata"
     assert decision.confidence > 0.9
 
@@ -375,6 +399,40 @@ def test_two_exact_matches_go_to_the_llm_rather_than_guessing() -> None:
     )
     assert decision.status == "ambiguous"
     assert decision.candidates_considered == 2
+
+
+def test_a_single_date_confirmed_exact_match_wins_over_dateless_namesakes() -> None:
+    # Handover 13.2: the date gate abstains on a dateless candidate, so every
+    # dateless namesake survives it, and Wikidata has many. Without this rule
+    # Nelson at Trafalgar goes to the model because two undated entities share
+    # his label. Exactly one candidate the dates positively confirm is not an
+    # ambiguity, and resolving it here is what keeps the LLM step for the 5%
+    # the spec budgets for.
+    decision = match_group(
+        _group("Horatio Nelson", year=1805, battle="Battle of Trafalgar"),
+        [
+            _candidate("Q83235", "Horatio Nelson", 1758, 1805),
+            _candidate("Q108178529", "Horatio Nelson", None, None),
+            _candidate("Q76209578", "Horatio Nelson", None, None),
+        ],
+    )
+    assert decision.status == "linked"
+    assert decision.qid == "Q83235"
+    assert decision.method == "exact_wikidata"
+
+
+def test_two_date_confirmed_exact_matches_still_go_to_the_llm() -> None:
+    # The 13.2 rule breaks the tie between evidence and no evidence only. Two
+    # candidates the dates both confirm is a genuine ambiguity and must not be
+    # resolved by picking one.
+    decision = match_group(
+        _group("Yi Sun-sin", year=1597),
+        [
+            _candidate("Q50184", "Yi Sun-sin", 1545, 1598),
+            _candidate("Q12611867", "Yi Sun-sin", 1554, 1611),
+        ],
+    )
+    assert decision.status == "ambiguous"
 
 
 def test_near_ties_go_to_the_llm_rather_than_picking_the_first() -> None:
@@ -512,8 +570,8 @@ def test_the_prompt_offers_the_qids_the_model_must_answer_with() -> None:
 
 
 def test_local_source_indexes_people_and_ignores_battles(tmp_path: Path) -> None:
-    (tmp_path / "Q167846.json").write_text(
-        json.dumps(_entity("Q167846", "Marcus Vipsanius Agrippa", aliases=("Agrippa",))),
+    (tmp_path / "Q48174.json").write_text(
+        json.dumps(_entity("Q48174", "Marcus Vipsanius Agrippa", aliases=("Agrippa",))),
         encoding="utf-8",
     )
     (tmp_path / "Q185729.json").write_text(
@@ -521,12 +579,27 @@ def test_local_source_indexes_people_and_ignores_battles(tmp_path: Path) -> None
     )
 
     source = LocalCandidateSource(tmp_path)
-    assert [c.qid for c in source.search(_group("Agrippa"))] == ["Q167846"]
+    assert [c.qid for c in source.search(_group("Agrippa"))] == ["Q48174"]
     assert source.search(_group("Battle of Actium")) == []
 
 
+def test_the_local_source_indexes_a_person_whose_only_label_is_multilingual(
+    tmp_path: Path,
+) -> None:
+    # person_candidates read labels["en"] and skipped the entity when it was
+    # absent, so a mul-only person was missing from the offline index
+    # altogether rather than merely mislabelled -- leaving the no-network
+    # source blind to the same class the SPARQL path was fixed for.
+    (tmp_path / "Q83235.json").write_text(
+        json.dumps(_entity("Q83235", "Horatio Nelson", language="mul")),
+        encoding="utf-8",
+    )
+    source = LocalCandidateSource(tmp_path)
+    assert [c.qid for c in source.search(_group("Horatio Nelson", year=1805))] == ["Q83235"]
+
+
 def test_person_candidates_reads_the_lifespan_as_an_astronomical_year() -> None:
-    candidates = person_candidates(_entity("Q167846", "Marcus Vipsanius Agrippa"))
+    candidates = person_candidates(_entity("Q48174", "Marcus Vipsanius Agrippa"))
     assert candidates[0].birth_year == -61  # 62 BC
 
 
@@ -534,10 +607,26 @@ def test_null_source_resolves_everything_as_new() -> None:
     assert NullCandidateSource().search(_group("Anybody")) == []
 
 
-def test_sparql_literals_escape_quotes() -> None:
+def test_escaping_a_name_cannot_terminate_the_literal_early() -> None:
     # A name carrying a quote would otherwise end the literal early and
     # change the query that gets sent.
-    assert _sparql_literal('Sun "the Great"') == '"Sun \\"the Great\\""@en'
+    assert _escape_sparql('Sun "the Great"') == 'Sun \\"the Great\\"'
+
+
+def test_a_name_is_asked_for_in_both_english_and_multilingual_form() -> None:
+    # Wikidata began migrating person labels from en to mul in 2024. Nelson
+    # (Q83235) has no en label at all, so an en-only literal cannot reach him
+    # and handover 14.6 mistook that for the name being absent from Wikidata.
+    assert _sparql_literals("Horatio Nelson") == (
+        '"Horatio Nelson"@en',
+        '"Horatio Nelson"@mul',
+    )
+
+
+def test_the_escaping_survives_every_language_tag() -> None:
+    assert _sparql_literals('Sun "the Great"') == tuple(
+        f'"Sun \\"the Great\\""@{tag}' for tag in _NAME_LANGUAGE_TAGS
+    )
 
 
 @pytest.mark.parametrize(
@@ -557,9 +646,9 @@ def test_prefetched_source_serves_by_surface_form() -> None:
     group = _group("Agrippa")
     names = collect_query_names([group])
     source = PrefetchedCandidateSource(
-        {names[0]: [_candidate("Q167846", "Marcus Vipsanius Agrippa", -62, -11)]}
+        {names[0]: [_candidate("Q48174", "Marcus Vipsanius Agrippa", -62, -11)]}
     )
-    assert [c.qid for c in source.search(group)] == ["Q167846"]
+    assert [c.qid for c in source.search(group)] == ["Q48174"]
 
 
 @sync
@@ -607,6 +696,102 @@ async def test_fetch_candidates_folds_rows_into_one_candidate_per_person() -> No
     assert candidate.is_military
     # The other matched name is carried as an alias; the label is not.
     assert candidate.aliases == ("Napoleon Bonaparte",)
+
+
+@sync
+async def test_a_query_is_sent_with_the_literals_the_batch_asked_for() -> None:
+    # Nothing previously pinned that the literals reach the endpoint: the stub
+    # ignores the query text, so a change to the language tags could have been
+    # silently inert.
+    fetcher = _StubFetcher(json.dumps({"results": {"bindings": []}}))
+    await fetch_candidates(fetcher, ["Horatio Nelson"])  # type: ignore[arg-type]
+
+    sent = fetcher.queries[0]
+    assert '"Horatio Nelson"@en' in sent
+    assert '"Horatio Nelson"@mul' in sent
+    # The label service must be asked in the same languages, or an entity found
+    # by its mul label comes back labelled with its Q-id.
+    assert f'wikibase:language "{",".join(_NAME_LANGUAGE_TAGS)}"' in sent
+
+
+@sync
+async def test_an_entity_whose_only_label_is_multilingual_is_still_found() -> None:
+    # Q83235 has no en label at all: en-gb "Horatio Nelson, 1st Viscount
+    # Nelson" and mul "Horatio Nelson". Verified live 2026-09-20, and the
+    # reason handover 14.6's diagnosis was wrong.
+    body = json.dumps(
+        {
+            "results": {
+                "bindings": [
+                    {
+                        "name": {"value": "Horatio Nelson"},
+                        "person": {"value": "http://www.wikidata.org/entity/Q83235"},
+                        "personLabel": {"value": "Horatio Nelson"},
+                        "birth": {"value": "1758-09-29T00:00:00Z"},
+                        "death": {"value": "1805-10-21T00:00:00Z"},
+                    }
+                ]
+            }
+        }
+    )
+    found = await fetch_candidates(
+        _StubFetcher(body),  # type: ignore[arg-type]
+        ["Horatio Nelson"],
+    )
+    assert [c.qid for c in found["Horatio Nelson"]] == ["Q83235"]
+    assert found["Horatio Nelson"][0].birth_year == 1758
+
+
+@sync
+async def test_a_qid_shaped_label_is_not_accepted_as_a_name() -> None:
+    # The label service returns the bare Q-id when it has no label in the
+    # languages asked for. That string would become a fuzzy matching key and,
+    # on a link, the canonical_name written to generals and to the primary
+    # general_aliases row -- a general published as "Q83235".
+    body = json.dumps(
+        {
+            "results": {
+                "bindings": [
+                    {
+                        "name": {"value": "Horatio Nelson"},
+                        "person": {"value": "http://www.wikidata.org/entity/Q83235"},
+                        "personLabel": {"value": "Q83235"},
+                        "birth": {"value": "1758-09-29T00:00:00Z"},
+                    }
+                ]
+            }
+        }
+    )
+    found = await fetch_candidates(
+        _StubFetcher(body),  # type: ignore[arg-type]
+        ["Horatio Nelson"],
+    )
+    candidate = found["Horatio Nelson"][0]
+    assert candidate.label == "Horatio Nelson"
+    assert "q83235" not in candidate_keys(candidate)
+
+
+@sync
+async def test_a_truncated_result_set_is_logged_rather_than_silently_short() -> None:
+    # Truncation would make the candidate set depend on which rows came back,
+    # which is neither stable across re-runs nor visible in the result.
+    rows = [
+        {
+            "name": {"value": "Smith"},
+            "person": {"value": f"http://www.wikidata.org/entity/Q{n}"},
+            "personLabel": {"value": "Smith"},
+        }
+        for n in range(_QUERY_ROW_LIMIT)
+    ]
+    body = json.dumps({"results": {"bindings": rows}})
+
+    with capture_logs() as logs:
+        await fetch_candidates(
+            _StubFetcher(body),  # type: ignore[arg-type]
+            ["Smith"],
+        )
+
+    assert any(entry["event"] == "sparql_candidate_batch_truncated" for entry in logs)
 
 
 @sync
@@ -772,7 +957,7 @@ def test_two_groups_linking_to_one_entity_become_one_general() -> None:
     assert len(groups) == 2, "the two spellings should not group on name alone"
 
     agrippa = _candidate(
-        "Q167846", "Marcus Vipsanius Agrippa", -61, -11, aliases=("M. Agrippa", "Agrippa")
+        "Q48174", "Marcus Vipsanius Agrippa", -61, -11, aliases=("M. Agrippa", "Agrippa")
     )
     decisions = resolve_groups(
         groups,
@@ -786,7 +971,7 @@ def test_two_groups_linking_to_one_entity_become_one_general() -> None:
     identities = _build_identities(groups, decisions)
 
     assert len(identities) == 1
-    assert identities[0].qid == "Q167846"
+    assert identities[0].qid == "Q48174"
     assert len(identities[0].groups) == 2
     assert "M. Agrippa" in identities[0].aliases
     # The canonical name is not repeated as an alias of itself.

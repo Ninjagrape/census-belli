@@ -42,6 +42,7 @@ __all__ = [
     "AMBIGUITY_MARGIN",
     "LIFESPAN_SLACK_YEARS",
     "LLM_FLOOR_BELOW_THRESHOLD",
+    "MAX_PLAUSIBLE_AGE_YEARS",
     "best_score",
     "lifespan_verdict",
     "match_against_identities",
@@ -55,6 +56,13 @@ logger = structlog.get_logger()
 # is the normal case rather than the exception, so the window is opened at
 # both ends by a couple of years before anything is rejected on it.
 LIFESPAN_SLACK_YEARS: Final[int] = 2
+
+# How long after a known birth, or before a known death, a candidate may still
+# have commanded when the other end of their life is unrecorded. Wikidata has a
+# great many half-dated ancients, and treating the missing end as open made
+# them eligible for every later battle in history. Generous on purpose: this
+# bounds a lifespan to a century, it does not judge whether an age is likely.
+MAX_PLAUSIBLE_AGE_YEARS: Final[int] = 100
 
 # How far the best candidate must beat the runner-up to be accepted without
 # asking the LLM. Two entities scoring within this of each other are usually
@@ -121,8 +129,26 @@ def lifespan_verdict(candidate: Candidate, years: Sequence[int]) -> bool | None:
     if candidate.birth_year is None and candidate.death_year is None:
         return None
 
-    low = None if candidate.birth_year is None else candidate.birth_year - LIFESPAN_SLACK_YEARS
-    high = None if candidate.death_year is None else candidate.death_year + LIFESPAN_SLACK_YEARS
+    # A half-known lifespan is bounded at the missing end rather than left
+    # open. Wikidata carries many ancients with a birth and no death -- often
+    # an explicit "no value" snak -- and an unbounded upper end made them
+    # immortal: Q1576150, a Carthaginian commander born about 300 BC with no
+    # recorded death, was judged alive at the Battle of Lissa in 1811, and
+    # judged *positively*, so the exact-match rule below preferred it over
+    # dateless namesakes and linked it at 0.95 confidence. That is a false
+    # merge, which is the one error nothing downstream can detect.
+    #
+    # The cap is deliberately far beyond any real career, like
+    # _CAREER_SPAN_YEARS: this gate separates centuries, it does not police age.
+    low = candidate.birth_year
+    high = candidate.death_year
+    if low is None and high is not None:
+        low = high - MAX_PLAUSIBLE_AGE_YEARS
+    if high is None and low is not None:
+        high = low + MAX_PLAUSIBLE_AGE_YEARS
+
+    low = None if low is None else low - LIFESPAN_SLACK_YEARS
+    high = None if high is None else high + LIFESPAN_SLACK_YEARS
 
     for year in years:
         if low is not None and year < low:

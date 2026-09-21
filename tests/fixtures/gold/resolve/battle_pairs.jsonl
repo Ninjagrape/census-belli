@@ -1,0 +1,4 @@
+{"slug_a": "antietam-1862", "slug_b": "sharpsburg-1862", "name_a": "Battle of Antietam", "name_b": "Battle of Sharpsburg", "year_a": 1862, "year_b": 1862, "expected_duplicate": true}
+{"slug_a": "bull-run-1-1861", "slug_b": "bull-run-2-1862", "name_a": "First Battle of Bull Run", "name_b": "Second Battle of Bull Run", "year_a": 1861, "year_b": 1862, "expected_duplicate": false}
+{"slug_a": "panipat-1-1526", "slug_b": "panipat-3-1761", "name_a": "First Battle of Panipat", "name_b": "Third Battle of Panipat", "year_a": 1526, "year_b": 1761, "expected_duplicate": false}
+{"slug_a": "austerlitz-1805", "slug_b": "austerlitz-1805-alt", "name_a": "Battle of Austerlitz", "name_b": "Battle of the Three Emperors", "year_a": 1805, "year_b": 1805, "expected_duplicate": true}

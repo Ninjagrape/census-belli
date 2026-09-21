@@ -191,22 +191,30 @@ def _qids(entity: dict[str, Any], prop: str) -> list[str]:
     return found
 
 
-def _label(entity: dict[str, Any], language: str = "en") -> str | None:
-    """Read an entity's label in one language.
+def _label(entity: dict[str, Any], languages: tuple[str, ...] = ("en", "mul")) -> str | None:
+    """Read an entity's label, trying each language in preference order.
+
+    ``mul`` is Wikidata's multilingual code, introduced in 2024 for names that
+    are spelled the same in every language. Person labels have been migrating
+    onto it, and reading ``en`` alone silently falls back to the article title
+    for anything that has moved. Battles mostly still carry ``en`` labels, so
+    the practical exposure here is small, but the project should have one rule
+    about this rather than two.
 
     Args:
         entity: A Wikidata entity mapping.
-        language: Language code.
+        languages: Language codes, most preferred first.
 
     Returns:
-        The label, or None when absent.
+        The first label found, or None when the entity has none of them.
     """
     labels = entity.get("labels")
     if not isinstance(labels, dict):
         return None
-    entry = labels.get(language)
-    if isinstance(entry, dict) and entry.get("value"):
-        return str(entry["value"])
+    for language in languages:
+        entry = labels.get(language)
+        if isinstance(entry, dict) and entry.get("value"):
+            return str(entry["value"])
     return None
 
 

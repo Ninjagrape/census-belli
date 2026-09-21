@@ -27,7 +27,12 @@ wikidata_queries:
       ?battle wdt:P31 wd:Q178561 .
       OPTIONAL { ?battle wdt:P585 ?date . }
       OPTIONAL { ?battle wdt:P625 ?coord . }
-      SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
+      # "en,mul": Wikidata has been migrating labels to the multilingual code
+      # since 2024, and the label service returns a bare Q-id when it finds no
+      # label in the languages asked for. Nothing reads these labels yet -- the
+      # discovery path takes the URIs -- but the first thing that does would
+      # otherwise store "Q83235" as a name.
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul" . }
     }
     LIMIT 50000
 
@@ -37,7 +42,12 @@ wikidata_queries:
       ?battle wdt:P31 wd:Q178561 .
       ?battle wdt:P361 ?war .
       ?war wdt:P31 wd:Q198 .
-      SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
+      # "en,mul": Wikidata has been migrating labels to the multilingual code
+      # since 2024, and the label service returns a bare Q-id when it finds no
+      # label in the languages asked for. Nothing reads these labels yet -- the
+      # discovery path takes the URIs -- but the first thing that does would
+      # otherwise store "Q83235" as a name.
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul" . }
     }
     LIMIT 50000
 
@@ -48,7 +58,12 @@ wikidata_queries:
       ?person wdt:P106 wd:Q47064 .
       ?battle wdt:P710 ?person .
       ?battle wdt:P31 wd:Q178561 .
-      SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
+      # "en,mul": Wikidata has been migrating labels to the multilingual code
+      # since 2024, and the label service returns a bare Q-id when it finds no
+      # label in the languages asked for. Nothing reads these labels yet -- the
+      # discovery path takes the URIs -- but the first thing that does would
+      # otherwise store "Q83235" as a name.
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul" . }
     }
     LIMIT 100000
 
