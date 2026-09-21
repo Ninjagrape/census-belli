@@ -37,9 +37,18 @@ from pipeline.llm.base import (
 )
 from pipeline.llm.capabilities import accepts_temperature, estimate_cost, traits_for
 from pipeline.llm.factory import PROVIDER_NAMES, build_provider, llm_params
+from pipeline.llm.offline import (
+    ExportResult,
+    ImportResult,
+    export_pending,
+    import_responses,
+    pending_count,
+)
 from pipeline.llm.service import LLMService, StageUsage
 
 __all__ = [
+    "ExportResult",
+    "ImportResult",
     "PROVIDER_NAMES",
     "CallStatus",
     "LLMConfigError",
@@ -53,7 +62,10 @@ __all__ = [
     "accepts_temperature",
     "build_provider",
     "estimate_cost",
+    "export_pending",
+    "import_responses",
     "llm_params",
+    "pending_count",
     "request_hash",
     "traits_for",
 ]

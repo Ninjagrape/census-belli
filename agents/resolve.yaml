@@ -53,6 +53,10 @@ params:
   llm_provider: gemini
   llm_model: gemini-3.8-flash
   llm_temperature: 0.0
+  # Fallback: offline processing via /process-llm-batch (Pro subscription),
+  # or Haiku 4.5 API calls. See agents/extract.yaml for the full note.
+  llm_fallback_provider: anthropic
+  llm_fallback_model: claude-haiku-4-5-20251001
 
 steps:
   # Step 1: deterministic — exact name match to Wikidata
