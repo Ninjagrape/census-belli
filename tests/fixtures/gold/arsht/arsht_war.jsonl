@@ -1,0 +1,226 @@
+{"general": "Napoleon", "battle": "Siege of Toulon", "year": 1793, "year_missing": false, "outcome": "V", "war": 0.479531, "cumulative": 0.479531}
+{"general": "Napoleon", "battle": "Battle of Montenotte", "year": 1796, "year_missing": false, "outcome": "V", "war": 0.478016, "cumulative": 0.957547}
+{"general": "Napoleon", "battle": "Battle of Castiglione", "year": 1796, "year_missing": false, "outcome": "V", "war": 0.489183, "cumulative": 1.446729}
+{"general": "Napoleon", "battle": "Battle of Lodi", "year": 1796, "year_missing": false, "outcome": "V", "war": 0.473926, "cumulative": 1.920655}
+{"general": "Napoleon", "battle": "Battle of Bassano", "year": 1796, "year_missing": false, "outcome": "V", "war": 0.468786, "cumulative": 2.389441}
+{"general": "Napoleon", "battle": "Battle of the Bridge of Arcole", "year": 1796, "year_missing": false, "outcome": "V", "war": 0.507813, "cumulative": 2.897254}
+{"general": "Napoleon", "battle": "Battle of Rivoli", "year": 1797, "year_missing": false, "outcome": "V", "war": 0.518113, "cumulative": 3.415367}
+{"general": "Napoleon", "battle": "Battle of the Pyramids", "year": 1798, "year_missing": false, "outcome": "V", "war": 0.518009, "cumulative": 3.933376}
+{"general": "Napoleon", "battle": "Siege of El Arish", "year": 1799, "year_missing": false, "outcome": "V", "war": 0.57239, "cumulative": 4.505766}
+{"general": "Napoleon", "battle": "Siege of Acre (1799)", "year": 1799, "year_missing": false, "outcome": "V", "war": 0.578863, "cumulative": 5.084629}
+{"general": "Napoleon", "battle": "Battle of Abukir (1799)", "year": 1799, "year_missing": false, "outcome": "V", "war": 0.539486, "cumulative": 5.624115}
+{"general": "Napoleon", "battle": "Battle of Marengo", "year": 1800, "year_missing": false, "outcome": "V", "war": 0.511538, "cumulative": 6.135653}
+{"general": "Napoleon", "battle": "Battle of Austerlitz", "year": 1805, "year_missing": false, "outcome": "V", "war": 0.506088, "cumulative": 6.641741}
+{"general": "Napoleon", "battle": "Battle of Ulm", "year": 1805, "year_missing": false, "outcome": "V", "war": 0.464398, "cumulative": 7.106139}
+{"general": "Napoleon", "battle": "Battle of Jena–Auerstedt", "year": 1806, "year_missing": false, "outcome": "V", "war": 0.527709, "cumulative": 7.633848}
+{"general": "Napoleon", "battle": "Battle of Eylau", "year": 1807, "year_missing": false, "outcome": "V", "war": 0.499176, "cumulative": 8.133024}
+{"general": "Napoleon", "battle": "Battle of Friedland", "year": 1807, "year_missing": false, "outcome": "V", "war": 0.478626, "cumulative": 8.61165}
+{"general": "Napoleon", "battle": "Battle of Somosierra", "year": 1808, "year_missing": false, "outcome": "V", "war": 0.459173, "cumulative": 9.070824}
+{"general": "Napoleon", "battle": "Battle of Wagram", "year": 1809, "year_missing": false, "outcome": "V", "war": 0.50202, "cumulative": 9.572843}
+{"general": "Napoleon", "battle": "Battle of Ratisbon", "year": 1809, "year_missing": false, "outcome": "V", "war": 0.480614, "cumulative": 10.053457}
+{"general": "Napoleon", "battle": "Battle of Abensberg", "year": 1809, "year_missing": false, "outcome": "V", "war": 0.484768, "cumulative": 10.538225}
+{"general": "Napoleon", "battle": "Battle of Landshut (1809)", "year": 1809, "year_missing": false, "outcome": "V", "war": 0.461392, "cumulative": 10.999617}
+{"general": "Napoleon", "battle": "Battle of Aspern-Essling", "year": 1809, "year_missing": false, "outcome": "D", "war": -0.485299, "cumulative": 10.514318}
+{"general": "Napoleon", "battle": "Battle of Krasnoi", "year": 1812, "year_missing": false, "outcome": "D", "war": -0.475902, "cumulative": 10.038416}
+{"general": "Napoleon", "battle": "Battle of Maloyaroslavets", "year": 1812, "year_missing": false, "outcome": "V", "war": 0.503377, "cumulative": 10.541793}
+{"general": "Napoleon", "battle": "Battle of Berezina", "year": 1812, "year_missing": false, "outcome": "D", "war": -0.487902, "cumulative": 10.053891}
+{"general": "Napoleon", "battle": "Battle of Borodino", "year": 1812, "year_missing": false, "outcome": "V", "war": 0.491666, "cumulative": 10.545557}
+{"general": "Napoleon", "battle": "Battle of Smolensk (1812)", "year": 1812, "year_missing": false, "outcome": "V", "war": 0.498497, "cumulative": 11.044054}
+{"general": "Napoleon", "battle": "Battle of Bautzen", "year": 1813, "year_missing": false, "outcome": "V", "war": 0.474431, "cumulative": 11.518485}
+{"general": "Napoleon", "battle": "Battle of Leipzig", "year": 1813, "year_missing": false, "outcome": "D", "war": -0.469467, "cumulative": 11.049018}
+{"general": "Napoleon", "battle": "Battle of Dresden", "year": 1813, "year_missing": false, "outcome": "V", "war": 0.521681, "cumulative": 11.570699}
+{"general": "Napoleon", "battle": "Battle of Hanau", "year": 1813, "year_missing": false, "outcome": "V", "war": 0.5428, "cumulative": 12.113498}
+{"general": "Napoleon", "battle": "Battle of Reims (1814)", "year": 1814, "year_missing": false, "outcome": "V", "war": 0.472548, "cumulative": 12.586046}
+{"general": "Napoleon", "battle": "Battle of Laon", "year": 1814, "year_missing": false, "outcome": "V", "war": 0.54117, "cumulative": 13.127217}
+{"general": "Napoleon", "battle": "Battle of Montmirail", "year": 1814, "year_missing": false, "outcome": "V", "war": 0.505599, "cumulative": 13.632816}
+{"general": "Napoleon", "battle": "Battle of Brienne", "year": 1814, "year_missing": false, "outcome": "V", "war": 0.489183, "cumulative": 14.121999}
+{"general": "Napoleon", "battle": "Battle of Montereau", "year": 1814, "year_missing": false, "outcome": "V", "war": 0.468786, "cumulative": 14.590785}
+{"general": "Napoleon", "battle": "Battle of Vauchamps", "year": 1814, "year_missing": false, "outcome": "V", "war": 0.535848, "cumulative": 15.126633}
+{"general": "Napoleon", "battle": "Battle of Arcis-sur-Aube", "year": 1814, "year_missing": false, "outcome": "V", "war": 0.543335, "cumulative": 15.669968}
+{"general": "Napoleon", "battle": "Battle of Craonne", "year": 1814, "year_missing": false, "outcome": "V", "war": 0.524098, "cumulative": 16.194066}
+{"general": "Napoleon", "battle": "Battle of Champaubert", "year": 1814, "year_missing": false, "outcome": "V", "war": 0.430006, "cumulative": 16.624072}
+{"general": "Napoleon", "battle": "Battle of Ligny", "year": 1815, "year_missing": false, "outcome": "V", "war": 0.514912, "cumulative": 17.138984}
+{"general": "Napoleon", "battle": "Battle of Waterloo", "year": 1815, "year_missing": false, "outcome": "D", "war": -0.460702, "cumulative": 16.678282}
+{"general": "Julius Caesar", "battle": "Battle of Alesia", "year": null, "year_missing": true, "outcome": "V", "war": 0.524098, "cumulative": 0.524098}
+{"general": "Julius Caesar", "battle": "Battle of Zela", "year": null, "year_missing": true, "outcome": "V", "war": 0.528389, "cumulative": 1.052487}
+{"general": "Julius Caesar", "battle": "Battle of Vosges (58 BC)", "year": null, "year_missing": true, "outcome": "V", "war": 0.539407, "cumulative": 1.591894}
+{"general": "Julius Caesar", "battle": "Battle of the Sabis", "year": null, "year_missing": true, "outcome": "V", "war": 0.527374, "cumulative": 2.119268}
+{"general": "Julius Caesar", "battle": "Battle of the Nile (47 BC)", "year": null, "year_missing": true, "outcome": "V", "war": 0.498497, "cumulative": 2.617765}
+{"general": "Julius Caesar", "battle": "Battle of the Axona", "year": null, "year_missing": true, "outcome": "V", "war": 0.5, "cumulative": 3.117765}
+{"general": "Julius Caesar", "battle": "Battle of the Arar", "year": null, "year_missing": true, "outcome": "V", "war": 0.5, "cumulative": 3.617765}
+{"general": "Julius Caesar", "battle": "Siege of Alexandria (47 BC)", "year": null, "year_missing": true, "outcome": "V", "war": 0.559698, "cumulative": 4.177464}
+{"general": "Julius Caesar", "battle": "Battle of Thapsus", "year": null, "year_missing": true, "outcome": "V", "war": 0.528967, "cumulative": 4.706431}
+{"general": "Julius Caesar", "battle": "Battle of Pharsalus", "year": null, "year_missing": true, "outcome": "V", "war": 0.533813, "cumulative": 5.240244}
+{"general": "Julius Caesar", "battle": "Battle of Munda", "year": null, "year_missing": true, "outcome": "V", "war": 0.53661, "cumulative": 5.776853}
+{"general": "Julius Caesar", "battle": "Battle of Ilerda", "year": null, "year_missing": true, "outcome": "V", "war": 0.513807, "cumulative": 6.29066}
+{"general": "Julius Caesar", "battle": "Battle of Gergovia", "year": null, "year_missing": true, "outcome": "V", "war": 0.507813, "cumulative": 6.798473}
+{"general": "Julius Caesar", "battle": "Battle of Dyrrhachium (48 BC)", "year": null, "year_missing": true, "outcome": "D", "war": -0.481016, "cumulative": 6.317456}
+{"general": "Julius Caesar", "battle": "Battle of Bibracte", "year": null, "year_missing": true, "outcome": "V", "war": 0.527748, "cumulative": 6.845205}
+{"general": "Julius Caesar", "battle": "Battle of Ruspina", "year": null, "year_missing": true, "outcome": "I", "war": 0.040012, "cumulative": 6.885216}
+{"general": "Julius Caesar", "battle": "Siege of Massilia", "year": null, "year_missing": true, "outcome": "V", "war": 0.467355, "cumulative": 7.352571}
+{"general": "Hannibal", "battle": "Siege of Saguntum", "year": -219, "year_missing": false, "outcome": "V", "war": 0.5, "cumulative": 0.5}
+{"general": "Hannibal", "battle": "Battle of the Trebia", "year": -218, "year_missing": false, "outcome": "V", "war": 0.500746, "cumulative": 1.000746}
+{"general": "Hannibal", "battle": "Battle of the Ticinus", "year": -218, "year_missing": false, "outcome": "V", "war": 0.490634, "cumulative": 1.49138}
+{"general": "Hannibal", "battle": "Battle of Rhone Crossing", "year": -218, "year_missing": false, "outcome": "V", "war": 0.5, "cumulative": 1.99138}
+{"general": "Hannibal", "battle": "Battle of Geronium", "year": -217, "year_missing": false, "outcome": "V", "war": 0.464398, "cumulative": 2.455778}
+{"general": "Hannibal", "battle": "Battle of Ager Falernus", "year": -217, "year_missing": false, "outcome": "V", "war": 0.53261, "cumulative": 2.988388}
+{"general": "Hannibal", "battle": "Battle of Lake Trasimene", "year": -217, "year_missing": false, "outcome": "V", "war": 0.468399, "cumulative": 3.456787}
+{"general": "Hannibal", "battle": "Battle of Cannae", "year": -216, "year_missing": false, "outcome": "V", "war": 0.527213, "cumulative": 3.983999}
+{"general": "Hannibal", "battle": "Battle of Herdonia", "year": -212, "year_missing": false, "outcome": "V", "war": 0.481823, "cumulative": 4.465822}
+{"general": "Hannibal", "battle": "Battle of Capua (212 BC)", "year": -212, "year_missing": false, "outcome": "V", "war": 0.528219, "cumulative": 4.994041}
+{"general": "Hannibal", "battle": "Battle of Tarentum (212 BC)", "year": -212, "year_missing": false, "outcome": "V", "war": 0.518984, "cumulative": 5.513025}
+{"general": "Hannibal", "battle": "Battle of the Silarus", "year": -212, "year_missing": false, "outcome": "V", "war": 0.471436, "cumulative": 5.984461}
+{"general": "Hannibal", "battle": "Second Battle of Herdonia", "year": -210, "year_missing": false, "outcome": "V", "war": 0.487114, "cumulative": 6.471574}
+{"general": "Hannibal", "battle": "Battle of Canusium", "year": -209, "year_missing": false, "outcome": "I", "war": 0.009882, "cumulative": 6.481457}
+{"general": "Hannibal", "battle": "Battle of Grumentum", "year": -207, "year_missing": false, "outcome": "D", "war": -0.492187, "cumulative": 5.98927}
+{"general": "Hannibal", "battle": "Battle of Crotona", "year": -204, "year_missing": false, "outcome": "I", "war": 0.0, "cumulative": 5.98927}
+{"general": "Hannibal", "battle": "Battle of Zama", "year": -202, "year_missing": false, "outcome": "D", "war": -0.507407, "cumulative": 5.481862}
+{"general": "Alexander the Great", "battle": "Battle of Chaeronea (338 BC)", "year": null, "year_missing": true, "outcome": "V", "war": 0.50638, "cumulative": 0.50638}
+{"general": "Alexander the Great", "battle": "Battle of Gaugamela", "year": null, "year_missing": true, "outcome": "V", "war": 0.522643, "cumulative": 1.029023}
+{"general": "Alexander the Great", "battle": "Battle of Issus", "year": null, "year_missing": true, "outcome": "V", "war": 0.550953, "cumulative": 1.579976}
+{"general": "Alexander the Great", "battle": "Battle of the Granicus", "year": null, "year_missing": true, "outcome": "V", "war": 0.465799, "cumulative": 2.045775}
+{"general": "Alexander the Great", "battle": "Battle of the Hydaspes", "year": null, "year_missing": true, "outcome": "V", "war": 0.47565, "cumulative": 2.521426}
+{"general": "Alexander the Great", "battle": "Battle of the Persian Gate", "year": null, "year_missing": true, "outcome": "V", "war": 0.405282, "cumulative": 2.926708}
+{"general": "Alexander the Great", "battle": "Battle of Thebes", "year": null, "year_missing": true, "outcome": "V", "war": 0.5, "cumulative": 3.426708}
+{"general": "Alexander the Great", "battle": "Siege of Gaza", "year": null, "year_missing": true, "outcome": "V", "war": 0.447453, "cumulative": 3.874161}
+{"general": "Alexander the Great", "battle": "Siege of the Sogdian Rock", "year": null, "year_missing": true, "outcome": "V", "war": 0.5, "cumulative": 4.374161}
+{"general": "Robert E. Lee", "battle": "Battle of Cheat Mountain", "year": 1861, "year_missing": false, "outcome": "D", "war": -0.527096, "cumulative": -0.527096}
+{"general": "Robert E. Lee", "battle": "Battle of 2nd Bull Run", "year": 1862, "year_missing": false, "outcome": "V", "war": 0.520273, "cumulative": -0.006823}
+{"general": "Robert E. Lee", "battle": "Battle of South Mountain", "year": 1862, "year_missing": false, "outcome": "D", "war": -0.479237, "cumulative": -0.48606}
+{"general": "Robert E. Lee", "battle": "Battle of Oak Grove", "year": 1862, "year_missing": false, "outcome": "D", "war": -0.5, "cumulative": -0.98606}
+{"general": "Robert E. Lee", "battle": "Battle of Glendale", "year": 1862, "year_missing": false, "outcome": "I", "war": -0.00753, "cumulative": -0.99359}
+{"general": "Robert E. Lee", "battle": "Battle of Gaines' Mill", "year": 1862, "year_missing": false, "outcome": "V", "war": 0.472909, "cumulative": -0.520682}
+{"general": "Robert E. Lee", "battle": "Battle of Fredericksburg", "year": 1862, "year_missing": false, "outcome": "V", "war": 0.520714, "cumulative": 3.3e-05}
+{"general": "Robert E. Lee", "battle": "Battle of Malvern Hill", "year": 1862, "year_missing": false, "outcome": "D", "war": -0.502443, "cumulative": -0.50241}
+{"general": "Robert E. Lee", "battle": "Battle of Beaver Dam Creek", "year": 1862, "year_missing": false, "outcome": "D", "war": -0.503825, "cumulative": -1.006236}
+{"general": "Robert E. Lee", "battle": "Battle of Antietam", "year": 1862, "year_missing": false, "outcome": "D", "war": -0.461327, "cumulative": -1.467563}
+{"general": "Robert E. Lee", "battle": "Battle of Chancellorsville", "year": 1863, "year_missing": false, "outcome": "V", "war": 0.537257, "cumulative": -0.930305}
+{"general": "Robert E. Lee", "battle": "Battle of Gettysburg", "year": 1863, "year_missing": false, "outcome": "D", "war": -0.483439, "cumulative": -1.413744}
+{"general": "Robert E. Lee", "battle": "Battle of Williamsport", "year": 1863, "year_missing": false, "outcome": "I", "war": 0.0, "cumulative": -1.413744}
+{"general": "Robert E. Lee", "battle": "Battle of Mine Run", "year": 1863, "year_missing": false, "outcome": "I", "war": 0.024693, "cumulative": -1.389052}
+{"general": "Robert E. Lee", "battle": "Battle of Rappahannock Station II", "year": 1863, "year_missing": false, "outcome": "D", "war": -0.501503, "cumulative": -1.890554}
+{"general": "Robert E. Lee", "battle": "Battle of Salem Church", "year": 1863, "year_missing": false, "outcome": "V", "war": 0.538789, "cumulative": -1.351765}
+{"general": "Robert E. Lee", "battle": "Second Battle of Petersburg", "year": 1864, "year_missing": false, "outcome": "V", "war": 0.523076, "cumulative": -0.828689}
+{"general": "Robert E. Lee", "battle": "Battle of Chaffin's Farm", "year": 1864, "year_missing": false, "outcome": "D", "war": -0.471364, "cumulative": -1.300053}
+{"general": "Robert E. Lee", "battle": "Battle of North Anna", "year": 1864, "year_missing": false, "outcome": "I", "war": 0.02219, "cumulative": -1.277863}
+{"general": "Robert E. Lee", "battle": "Battle of Cold Harbor", "year": 1864, "year_missing": false, "outcome": "D", "war": -0.470734, "cumulative": -1.748597}
+{"general": "Robert E. Lee", "battle": "Battle of Spotsylvania Court House", "year": 1864, "year_missing": false, "outcome": "I", "war": 0.029239, "cumulative": -1.719358}
+{"general": "Robert E. Lee", "battle": "Battle of the Crater", "year": 1864, "year_missing": false, "outcome": "V", "war": 0.515338, "cumulative": -1.204019}
+{"general": "Robert E. Lee", "battle": "Battle of the Wilderness", "year": 1864, "year_missing": false, "outcome": "I", "war": 0.032331, "cumulative": -1.171689}
+{"general": "Robert E. Lee", "battle": "Battle of White Oak Road", "year": 1865, "year_missing": false, "outcome": "D", "war": -0.453812, "cumulative": -1.6255}
+{"general": "Robert E. Lee", "battle": "Battle of Cumberland Church", "year": 1865, "year_missing": false, "outcome": "V", "war": 0.498497, "cumulative": -1.127003}
+{"general": "Robert E. Lee", "battle": "Battle of Appomattox Courthouse", "year": 1865, "year_missing": false, "outcome": "D", "war": -0.431694, "cumulative": -1.558698}
+{"general": "Robert E. Lee", "battle": "Battle of Petersburg III", "year": 1865, "year_missing": false, "outcome": "D", "war": -0.454689, "cumulative": -2.013387}
+{"general": "Erwin Rommel", "battle": "Battle of Arras", "year": 1940, "year_missing": false, "outcome": "V", "war": 0.427225, "cumulative": 0.427225}
+{"general": "Erwin Rommel", "battle": "Siege of Tobruk", "year": 1941, "year_missing": false, "outcome": "D", "war": -0.514722, "cumulative": -0.087497}
+{"general": "Erwin Rommel", "battle": "Battle of Alam Halfa", "year": 1942, "year_missing": false, "outcome": "D", "war": -0.5, "cumulative": -0.587497}
+{"general": "Erwin Rommel", "battle": "Battle of Bir Hakeim", "year": 1942, "year_missing": false, "outcome": "D", "war": -0.584516, "cumulative": -1.172013}
+{"general": "Erwin Rommel", "battle": "Battle of Gazala", "year": 1942, "year_missing": false, "outcome": "V", "war": 0.515337, "cumulative": -0.656676}
+{"general": "Erwin Rommel", "battle": "First Battle of El Alamein", "year": 1942, "year_missing": false, "outcome": "D", "war": -0.453376, "cumulative": -1.110052}
+{"general": "Erwin Rommel", "battle": "Second Battle of El Alamein", "year": 1942, "year_missing": false, "outcome": "D", "war": -0.469386, "cumulative": -1.579438}
+{"general": "Erwin Rommel", "battle": "Battle of the Kasserine Pass", "year": 1943, "year_missing": false, "outcome": "V", "war": 0.514259, "cumulative": -1.065179}
+{"general": "Erwin Rommel", "battle": "Operation Overlord", "year": 1944, "year_missing": false, "outcome": "D", "war": -0.466224, "cumulative": -1.531403}
+{"general": "George S. Patton", "battle": "Operation Torch", "year": 1942, "year_missing": false, "outcome": "V", "war": 0.498497, "cumulative": 0.498497}
+{"general": "George S. Patton", "battle": "Battle of the Bulge", "year": 1944, "year_missing": false, "outcome": "V", "war": 0.5, "cumulative": 0.998497}
+{"general": "Pyrrhus of Epirus", "battle": "Battle of Heraclea", "year": -280, "year_missing": false, "outcome": "V", "war": 0.466241, "cumulative": 0.466241}
+{"general": "Pyrrhus of Epirus", "battle": "Battle of Asculum", "year": -279, "year_missing": false, "outcome": "D", "war": -0.501503, "cumulative": -0.035262}
+{"general": "Pyrrhus of Epirus", "battle": "Battle of Beneventum (275 BC)", "year": -275, "year_missing": false, "outcome": "D", "war": -0.5, "cumulative": -0.535262}
+{"general": "Moshe Dayan", "battle": "1948 Arab–Israeli War", "year": 1948, "year_missing": false, "outcome": "V", "war": 0.464437, "cumulative": 0.464437}
+{"general": "Moshe Dayan", "battle": "Suez Crisis", "year": 1956, "year_missing": false, "outcome": "V", "war": 0.507006, "cumulative": 0.971442}
+{"general": "Moshe Dayan", "battle": "Six Day War", "year": 1967, "year_missing": false, "outcome": "V", "war": 0.562302, "cumulative": 1.533745}
+{"general": "Moshe Dayan", "battle": "Yom Kippur War", "year": 1973, "year_missing": false, "outcome": "V", "war": 0.552481, "cumulative": 2.086226}
+{"general": "Ariel Sharon", "battle": "Suez Crisis", "year": 1956, "year_missing": false, "outcome": "V", "war": 0.507006, "cumulative": 0.507006}
+{"general": "Ariel Sharon", "battle": "Battle of Abu-Ageila (1967)", "year": 1967, "year_missing": false, "outcome": "V", "war": 0.5, "cumulative": 1.007006}
+{"general": "Ariel Sharon", "battle": "Six Day War", "year": 1967, "year_missing": false, "outcome": "V", "war": 0.562302, "cumulative": 1.569308}
+{"general": "Ariel Sharon", "battle": "Battle of The Chinese Farm", "year": 1973, "year_missing": false, "outcome": "V", "war": 0.5, "cumulative": 2.069308}
+{"general": "Ariel Sharon", "battle": "Operation Badr (1973)", "year": 1973, "year_missing": false, "outcome": "D", "war": -0.411517, "cumulative": 1.657791}
+{"general": "Ariel Sharon", "battle": "Yom Kippur War", "year": 1973, "year_missing": false, "outcome": "V", "war": 0.552481, "cumulative": 2.210272}
+{"general": "Ariel Sharon", "battle": "1982 Lebanon War", "year": 1982, "year_missing": false, "outcome": "I", "war": -0.068953, "cumulative": 2.14132}
+{"general": "Yi Sun-sin", "battle": "Battle of Busan (1592)", "year": 1592, "year_missing": false, "outcome": "V", "war": 0.566594, "cumulative": 0.566594}
+{"general": "Yi Sun-sin", "battle": "Battle of Hansan Island", "year": 1592, "year_missing": false, "outcome": "V", "war": 0.517374, "cumulative": 1.083968}
+{"general": "Yi Sun-sin", "battle": "Battle of Okpo", "year": 1592, "year_missing": false, "outcome": "V", "war": 0.480595, "cumulative": 1.564563}
+{"general": "Yi Sun-sin", "battle": "Battle of Myeongnyang", "year": 1597, "year_missing": false, "outcome": "V", "war": 0.613717, "cumulative": 2.178279}
+{"general": "Yi Sun-sin", "battle": "Battle of Noryang Point", "year": 1598, "year_missing": false, "outcome": "V", "war": 0.52474, "cumulative": 2.703019}
+{"general": "Themistocles", "battle": "Battle of Artemisium", "year": null, "year_missing": true, "outcome": "I", "war": 0.08831, "cumulative": 0.08831}
+{"general": "Themistocles", "battle": "Battle of Marathon", "year": null, "year_missing": true, "outcome": "V", "war": 0.542315, "cumulative": 0.630625}
+{"general": "Themistocles", "battle": "Battle of Salamis", "year": null, "year_missing": true, "outcome": "V", "war": 0.511522, "cumulative": 1.142147}
+{"general": "Scipio Africanus", "battle": "Battle of Cartagena (207 BC)", "year": -209, "year_missing": false, "outcome": "V", "war": 0.5, "cumulative": 0.5}
+{"general": "Scipio Africanus", "battle": "Battle of Baecula", "year": -208, "year_missing": false, "outcome": "V", "war": 0.481426, "cumulative": 0.981426}
+{"general": "Scipio Africanus", "battle": "Battle of Ilipa", "year": -206, "year_missing": false, "outcome": "V", "war": 0.508826, "cumulative": 1.490252}
+{"general": "Scipio Africanus", "battle": "Battle of Bagbrades", "year": -203, "year_missing": false, "outcome": "V", "war": 0.5, "cumulative": 1.990252}
+{"general": "Scipio Africanus", "battle": "Battle of Zama", "year": -202, "year_missing": false, "outcome": "V", "war": 0.504402, "cumulative": 2.494654}
+{"general": "Augustus", "battle": "Battle of Actium", "year": null, "year_missing": true, "outcome": "V", "war": 0.516604, "cumulative": 0.516604}
+{"general": "Augustus", "battle": "Battle of Forum Gallorum", "year": null, "year_missing": true, "outcome": "V", "war": 0.437341, "cumulative": 0.953945}
+{"general": "Augustus", "battle": "Battle of Munda", "year": null, "year_missing": true, "outcome": "V", "war": 0.53661, "cumulative": 1.490555}
+{"general": "Augustus", "battle": "Battle of Mutina", "year": null, "year_missing": true, "outcome": "V", "war": 0.459173, "cumulative": 1.949728}
+{"general": "Augustus", "battle": "Battle of Perugia", "year": null, "year_missing": true, "outcome": "V", "war": 0.453024, "cumulative": 2.402753}
+{"general": "Augustus", "battle": "First Battle of Philippi", "year": null, "year_missing": true, "outcome": "V", "war": 0.490601, "cumulative": 2.893354}
+{"general": "Augustus", "battle": "Second Battle of Philippi", "year": null, "year_missing": true, "outcome": "V", "war": 0.484911, "cumulative": 3.378265}
+{"general": "Marcus Vipsanius Agrippa", "battle": "Battle of Actium", "year": null, "year_missing": true, "outcome": "V", "war": 0.516604, "cumulative": 0.516604}
+{"general": "Marcus Vipsanius Agrippa", "battle": "Battle of Alexandria (30 BC)", "year": null, "year_missing": true, "outcome": "V", "war": 0.454702, "cumulative": 0.971306}
+{"general": "Marcus Vipsanius Agrippa", "battle": "Battle of Munda", "year": null, "year_missing": true, "outcome": "V", "war": 0.53661, "cumulative": 1.507916}
+{"general": "Marcus Vipsanius Agrippa", "battle": "Battle of Naulochus", "year": null, "year_missing": true, "outcome": "V", "war": 0.498497, "cumulative": 2.006413}
+{"general": "Trajan", "battle": "Battle of Adamclisi", "year": 101, "year_missing": false, "outcome": "V", "war": 0.5, "cumulative": 0.5}
+{"general": "Trajan", "battle": "Second Battle of Tapae", "year": 101, "year_missing": false, "outcome": "V", "war": 0.447453, "cumulative": 0.947453}
+{"general": "Trajan", "battle": "Battle of Sarmizegetusa", "year": 106, "year_missing": false, "outcome": "V", "war": 0.5, "cumulative": 1.447453}
+{"general": "Ulysses S. Grant", "battle": "Battle of Belmont", "year": 1861, "year_missing": false, "outcome": "V", "war": 0.522302, "cumulative": 0.522302}
+{"general": "Ulysses S. Grant", "battle": "Battle of Fort Donelson", "year": 1862, "year_missing": false, "outcome": "V", "war": 0.477464, "cumulative": 0.999766}
+{"general": "Ulysses S. Grant", "battle": "Battle of Fort Henry", "year": 1862, "year_missing": false, "outcome": "V", "war": 0.43247, "cumulative": 1.432236}
+{"general": "Ulysses S. Grant", "battle": "Battle of Shiloh", "year": 1862, "year_missing": false, "outcome": "V", "war": 0.476038, "cumulative": 1.908275}
+{"general": "Ulysses S. Grant", "battle": "Siege of Corinth", "year": 1862, "year_missing": false, "outcome": "V", "war": 0.468074, "cumulative": 2.376349}
+{"general": "Ulysses S. Grant", "battle": "Battle of Champion's Hill", "year": 1863, "year_missing": false, "outcome": "V", "war": 0.479531, "cumulative": 2.85588}
+{"general": "Ulysses S. Grant", "battle": "Battle of Port Gibson", "year": 1863, "year_missing": false, "outcome": "V", "war": 0.5, "cumulative": 3.35588}
+{"general": "Ulysses S. Grant", "battle": "Battle of Vicksburg", "year": 1863, "year_missing": false, "outcome": "V", "war": 0.457608, "cumulative": 3.813487}
+{"general": "Ulysses S. Grant", "battle": "Third Battle of Chattanooga", "year": 1863, "year_missing": false, "outcome": "V", "war": 0.478614, "cumulative": 4.292102}
+{"general": "Ulysses S. Grant", "battle": "Battle of Cold Harbor", "year": 1864, "year_missing": false, "outcome": "V", "war": 0.467739, "cumulative": 4.759841}
+{"general": "Ulysses S. Grant", "battle": "Battle of North Anna", "year": 1864, "year_missing": false, "outcome": "I", "war": -0.025189, "cumulative": 4.734652}
+{"general": "Ulysses S. Grant", "battle": "Battle of Spotsylvania Court House", "year": 1864, "year_missing": false, "outcome": "I", "war": -0.032233, "cumulative": 4.702418}
+{"general": "Ulysses S. Grant", "battle": "Battle of the Wilderness", "year": 1864, "year_missing": false, "outcome": "I", "war": -0.035322, "cumulative": 4.667096}
+{"general": "Ulysses S. Grant", "battle": "Second Battle of Petersburg", "year": 1864, "year_missing": false, "outcome": "D", "war": -0.526074, "cumulative": 4.141022}
+{"general": "Ulysses S. Grant", "battle": "Battle of Appomattox Courthouse", "year": 1865, "year_missing": false, "outcome": "V", "war": 0.428747, "cumulative": 4.569769}
+{"general": "Ulysses S. Grant", "battle": "Battle of Petersburg III", "year": 1865, "year_missing": false, "outcome": "V", "war": 0.45171, "cumulative": 5.021479}
+{"general": "Georgy Zhukov", "battle": "Battle of Khalkhin Gol", "year": 1939, "year_missing": false, "outcome": "V", "war": 0.4348, "cumulative": 0.4348}
+{"general": "Georgy Zhukov", "battle": "Battle of Moscow", "year": 1941, "year_missing": false, "outcome": "V", "war": 0.492354, "cumulative": 0.927154}
+{"general": "Georgy Zhukov", "battle": "Operation Barbarossa", "year": 1941, "year_missing": false, "outcome": "V", "war": 0.487096, "cumulative": 1.414251}
+{"general": "Georgy Zhukov", "battle": "Siege of Leningrad", "year": 1941, "year_missing": false, "outcome": "V", "war": 0.485807, "cumulative": 1.900058}
+{"general": "Georgy Zhukov", "battle": "Battle of Stalingrad", "year": 1942, "year_missing": false, "outcome": "V", "war": 0.479976, "cumulative": 2.380034}
+{"general": "Georgy Zhukov", "battle": "Battle of Kursk", "year": 1943, "year_missing": false, "outcome": "V", "war": 0.436933, "cumulative": 2.816967}
+{"general": "Georgy Zhukov", "battle": "Kamenets-Podolsky pocket", "year": 1944, "year_missing": false, "outcome": "V", "war": 0.454702, "cumulative": 3.27167}
+{"general": "Georgy Zhukov", "battle": "Korsun Pocket", "year": 1944, "year_missing": false, "outcome": "V", "war": 0.444401, "cumulative": 3.716071}
+{"general": "Georgy Zhukov", "battle": "Operation Bagration", "year": 1944, "year_missing": false, "outcome": "V", "war": 0.433961, "cumulative": 4.150032}
+{"general": "Georgy Zhukov", "battle": "Battle of Berlin", "year": 1945, "year_missing": false, "outcome": "V", "war": 0.444356, "cumulative": 4.594388}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Ajnadayn", "year": null, "year_missing": true, "outcome": "V", "war": 0.498497, "cumulative": 0.498497}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Akraba", "year": null, "year_missing": true, "outcome": "V", "war": 0.55053, "cumulative": 1.049027}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Bosra", "year": null, "year_missing": true, "outcome": "V", "war": 0.549573, "cumulative": 1.5986}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Chains", "year": null, "year_missing": true, "outcome": "V", "war": 0.5, "cumulative": 2.0986}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Fahl", "year": null, "year_missing": true, "outcome": "V", "war": 0.5, "cumulative": 2.5986}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Hazir", "year": null, "year_missing": true, "outcome": "V", "war": 0.5, "cumulative": 3.0986}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Iron bridge", "year": null, "year_missing": true, "outcome": "V", "war": 0.518009, "cumulative": 3.61661}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Marj-ud-Deebaj", "year": null, "year_missing": true, "outcome": "V", "war": 0.5, "cumulative": 4.11661}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Mu'tah", "year": null, "year_missing": true, "outcome": "D", "war": -0.446527, "cumulative": 3.670082}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Uhud", "year": null, "year_missing": true, "outcome": "I", "war": -0.086775, "cumulative": 3.583307}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Ullais", "year": null, "year_missing": true, "outcome": "V", "war": 0.5, "cumulative": 4.083307}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Walaja", "year": null, "year_missing": true, "outcome": "V", "war": 0.544957, "cumulative": 4.628264}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Yarmouk", "year": null, "year_missing": true, "outcome": "V", "war": 0.498497, "cumulative": 5.126761}
+{"general": "Khalid ibn al-Walid", "battle": "Battle of Zumail", "year": null, "year_missing": true, "outcome": "V", "war": 0.5, "cumulative": 5.626761}
+{"general": "Subutai", "battle": "Battle of Kalka River", "year": 1223, "year_missing": false, "outcome": "V", "war": 0.559698, "cumulative": 0.559698}
+{"general": "Subutai", "battle": "Battle of Mohi", "year": 1241, "year_missing": false, "outcome": "V", "war": 0.447453, "cumulative": 1.007151}
+{"general": "Frederick the Great", "battle": "Battle of Mollwitz", "year": 1741, "year_missing": false, "outcome": "V", "war": 0.491935, "cumulative": 0.491935}
+{"general": "Frederick the Great", "battle": "Battle of Chotusitz", "year": 1742, "year_missing": false, "outcome": "V", "war": 0.502031, "cumulative": 0.993966}
+{"general": "Frederick the Great", "battle": "Battle of Hohenfriedberg", "year": 1745, "year_missing": false, "outcome": "V", "war": 0.501885, "cumulative": 1.495851}
+{"general": "Frederick the Great", "battle": "Battle of Soor", "year": 1745, "year_missing": false, "outcome": "V", "war": 0.527399, "cumulative": 2.02325}
+{"general": "Frederick the Great", "battle": "Battle of Lobositz", "year": 1756, "year_missing": false, "outcome": "V", "war": 0.507439, "cumulative": 2.530689}
+{"general": "Frederick the Great", "battle": "Battle of Leuthen", "year": 1757, "year_missing": false, "outcome": "V", "war": 0.53261, "cumulative": 3.0633}
+{"general": "Frederick the Great", "battle": "Battle of Prague (1757)", "year": 1757, "year_missing": false, "outcome": "V", "war": 0.492849, "cumulative": 3.556149}
+{"general": "Frederick the Great", "battle": "Battle of Rossbach", "year": 1757, "year_missing": false, "outcome": "V", "war": 0.530484, "cumulative": 4.086633}
+{"general": "Frederick the Great", "battle": "Battle of Hochkirch", "year": 1758, "year_missing": false, "outcome": "D", "war": -0.458971, "cumulative": 3.627661}
+{"general": "Frederick the Great", "battle": "Battle of Zorndorf", "year": 1758, "year_missing": false, "outcome": "I", "war": 0.008164, "cumulative": 3.635826}
+{"general": "Frederick the Great", "battle": "Battle of Kunersdorf", "year": 1759, "year_missing": false, "outcome": "D", "war": -0.488819, "cumulative": 3.147007}
+{"general": "Frederick the Great", "battle": "Battle of Liegnitz (1760)", "year": 1760, "year_missing": false, "outcome": "V", "war": 0.489183, "cumulative": 3.63619}
+{"general": "Frederick the Great", "battle": "Battle of Torgau", "year": 1760, "year_missing": false, "outcome": "V", "war": 0.501867, "cumulative": 4.138056}
+{"general": "Frederick the Great", "battle": "Battle of Burkersdorf", "year": 1762, "year_missing": false, "outcome": "V", "war": 0.514259, "cumulative": 4.652316}
+{"general": "Belisarius", "battle": "Battle of Ad Decimum", "year": null, "year_missing": true, "outcome": "V", "war": 0.482738, "cumulative": 0.482738}
+{"general": "Belisarius", "battle": "Battle of Callinicum", "year": null, "year_missing": true, "outcome": "D", "war": -0.486699, "cumulative": -0.003961}
+{"general": "Belisarius", "battle": "Battle of Dara", "year": null, "year_missing": true, "outcome": "V", "war": 0.53261, "cumulative": 0.52865}
+{"general": "Belisarius", "battle": "Battle of Tricamarum", "year": null, "year_missing": true, "outcome": "V", "war": 0.529651, "cumulative": 1.058301}
+{"general": "Belisarius", "battle": "Siege of Rome (537-538)", "year": null, "year_missing": true, "outcome": "V", "war": 0.561587, "cumulative": 1.619888}

@@ -1164,3 +1164,89 @@ async def test_robots_refusal_is_recorded_with_no_status(tmp_path: Path) -> None
     assert summary.failures >= 1
     assert sink.entries[0].http_status is None
     assert sink.entries[0].errors == "robots_disallowed"
+
+
+# ─── Named battle articles (curated corpora) ─────────────────────────────────
+
+
+def test_seed_config_accepts_named_battle_articles(tmp_path: Path) -> None:
+    """A curated corpus may name its battles and no list pages at all."""
+    path = tmp_path / "seed.yaml"
+    path.write_text(
+        f"wikipedia_battle_articles:\n  - {ARTICLE_URL}\n  - {ARTICLE_URL}\n",
+        encoding="utf-8",
+    )
+
+    loaded = seeds.load_seeds(path)
+
+    assert loaded.battle_articles == (ARTICLE_URL,)
+    assert loaded.battle_lists == ()
+
+
+def test_named_battle_article_must_be_absolute(tmp_path: Path) -> None:
+    """A relative URL here would fail hours in, so it fails at load."""
+    path = tmp_path / "seed.yaml"
+    path.write_text("wikipedia_battle_articles:\n  - /wiki/Battle_of_Cannae\n", encoding="utf-8")
+
+    with pytest.raises(seeds.SeedConfigError, match="wikipedia_battle_articles"):
+        seeds.load_seeds(path)
+
+
+def test_arsht_pilot_seed_config_loads() -> None:
+    """The curated Arsht corpus is a valid seed file for the crawl stage."""
+    loaded = seeds.load_seeds(Path("config/sources_seed_arsht.yaml"))
+
+    assert len(loaded.battle_articles) >= 200
+    assert loaded.battle_lists == ()
+    assert all(url.startswith("https://en.wikipedia.org/wiki/") for url in loaded.battle_articles)
+    # Membership must not drift with Wikipedia's list pages, which is the
+    # reason this file names articles rather than lists.
+    assert loaded.wikidata_queries == {}
+
+
+@sync
+async def test_named_battle_articles_are_crawled_without_a_list_page(tmp_path: Path) -> None:
+    """Named articles are fetched directly, with no discovery pass."""
+    (tmp_path / "seed.yaml").write_text(
+        f"wikipedia_battle_articles:\n  - {ARTICLE_URL}\n", encoding="utf-8"
+    )
+    params = crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path))
+    params.paths.ensure()
+    loaded = seeds.load_seeds(params.seed_path)
+    sink = InMemoryCrawlLog()
+
+    async with make_client(crawl_handler()) as client:
+        summary = await crawl_stage.crawl(
+            params, loaded, state.CrawlState(), sink, client=client, limit=5
+        )
+
+    assert summary.list_pages == 0
+    assert summary.battles_discovered == 1
+    assert summary.battles_fetched == 1
+    assert [p.name.split("-")[0] for p in params.paths.battles_html.glob("*.html")] == [
+        "Battle_of_Cannae"
+    ]
+
+
+@sync
+async def test_named_articles_are_not_refetched_on_resume(tmp_path: Path) -> None:
+    """Re-running a curated corpus does not re-fetch what is already done."""
+    (tmp_path / "seed.yaml").write_text(
+        f"wikipedia_battle_articles:\n  - {ARTICLE_URL}\n", encoding="utf-8"
+    )
+    params = crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path))
+    params.paths.ensure()
+    loaded = seeds.load_seeds(params.seed_path)
+    resume = state.CrawlState()
+
+    async with make_client(crawl_handler()) as client:
+        first = await crawl_stage.crawl(
+            params, loaded, resume, InMemoryCrawlLog(), client=client, limit=5
+        )
+        second = await crawl_stage.crawl(
+            params, loaded, resume, InMemoryCrawlLog(), client=client, limit=5
+        )
+
+    assert first.battles_fetched == 1
+    assert second.battles_fetched == 0
+    assert second.battles_discovered == 0

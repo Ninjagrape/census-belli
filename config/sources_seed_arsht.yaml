@@ -1,0 +1,227 @@
+# Curated pilot corpus: the battles of the generals named in Ethan Arsht's
+# 2018 analysis, the work this project sets out to improve on, plus the
+# commanders chosen to cover this project's known failure modes -- naval
+# battles (handover §4.2), BC dates (§5.1) and shared command.
+#
+# Every title here was resolved against the live MediaWiki API, so these are
+# canonical article URLs, not the redirects his corpus carried.
+#
+# Battles: 211. Generated 2026-09-23.
+# Regenerate with:
+#   python -m scripts.arsht_reference --verify-titles --write-seed
+#
+# No list pages and no SPARQL queries on purpose: the membership of an
+# evaluation corpus must not change because somebody edited a Wikipedia list.
+
+wikipedia_battle_articles:
+  - https://en.wikipedia.org/wiki/Battle_of_Marathon  # 490 BC; Themistocles
+  - https://en.wikipedia.org/wiki/Battle_of_Artemisium  # 480 BC; Themistocles
+  - https://en.wikipedia.org/wiki/Battle_of_Salamis  # 480 BC; Themistocles
+  - https://en.wikipedia.org/wiki/Battle_of_Chaeronea_%28338_BC%29  # 338 BC; Alexander the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Thebes  # 335 BC; Alexander the Great
+  - https://en.wikipedia.org/wiki/Battle_of_the_Granicus  # 334 BC; Alexander the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Issus  # 333 BC; Alexander the Great
+  - https://en.wikipedia.org/wiki/Siege_of_Gaza_%28332_BC%29  # 332 BC; Alexander the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Gaugamela  # 331 BC; Alexander the Great
+  - https://en.wikipedia.org/wiki/Battle_of_the_Persian_Gate  # 330 BC; Alexander the Great
+  - https://en.wikipedia.org/wiki/Siege_of_the_Sogdian_Rock  # 327 BC; Alexander the Great
+  - https://en.wikipedia.org/wiki/Battle_of_the_Hydaspes  # 326 BC; Alexander the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Heraclea  # 280 BC; Pyrrhus of Epirus
+  - https://en.wikipedia.org/wiki/Battle_of_Asculum  # 279 BC; Pyrrhus of Epirus
+  - https://en.wikipedia.org/wiki/Battle_of_Beneventum_%28275_BC%29  # 275 BC; Pyrrhus of Epirus
+  - https://en.wikipedia.org/wiki/Siege_of_Saguntum  # 219 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_the_Rh%C3%B4ne_Crossing  # 218 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_Ticinus  # 218 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_the_Trebia  # 218 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_Ager_Falernus  # 217 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_Geronium  # 217 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_Lake_Trasimene  # 217 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_Cannae  # 216 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_Capua_%28212_BC%29  # 212 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_Herdonia_%28212_BC%29  # 212 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_Tarentum_%28212_BC%29  # 212 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_the_Silarus  # 212 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_Herdonia_%28210_BC%29  # 210 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_Canusium  # 209 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_New_Carthage  # 209 BC; Scipio Africanus
+  - https://en.wikipedia.org/wiki/Battle_of_Baecula  # 208 BC; Scipio Africanus
+  - https://en.wikipedia.org/wiki/Battle_of_Grumentum  # 207 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_Ilipa  # 206 BC; Scipio Africanus
+  - https://en.wikipedia.org/wiki/Battles_of_Kroton  # 204 BC; Hannibal
+  - https://en.wikipedia.org/wiki/Battle_of_the_Great_Plains  # 203 BC; Scipio Africanus
+  - https://en.wikipedia.org/wiki/Battle_of_Zama  # 202 BC; Hannibal, Scipio Africanus
+  - https://en.wikipedia.org/wiki/Battle_of_Bibracte  # 58 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_Vosges_%2858_BC%29  # 58 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_the_Arar  # 58 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_the_Axona  # 57 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_the_Sabis  # 57 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_Alesia  # 52 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_Gergovia  # 52 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_Ilerda  # 49 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Siege_of_Massilia  # 49 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_Dyrrhachium_%2848_BC%29  # 48 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_Pharsalus  # 48 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_Zela_%2847_BC%29  # 47 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_the_Nile_%2847_BC%29  # 47 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Siege_of_Alexandria_%2847_BC%29  # 47 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_Ruspina  # 46 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_Thapsus  # 46 BC; Julius Caesar
+  - https://en.wikipedia.org/wiki/Battle_of_Munda  # 45 BC; Julius Caesar, Augustus, Marcus Vipsanius Agrippa
+  - https://en.wikipedia.org/wiki/Battle_of_Forum_Gallorum  # 43 BC; Augustus
+  - https://en.wikipedia.org/wiki/Battle_of_Mutina  # 43 BC; Augustus
+  - https://en.wikipedia.org/wiki/Battle_of_Philippi  # 42 BC; Augustus
+  - https://en.wikipedia.org/wiki/Perusine_War  # 41 BC; Augustus
+  - https://en.wikipedia.org/wiki/Battle_of_Naulochus  # 36 BC; Marcus Vipsanius Agrippa
+  - https://en.wikipedia.org/wiki/Battle_of_Actium  # 31 BC; Augustus, Marcus Vipsanius Agrippa
+  - https://en.wikipedia.org/wiki/Battle_of_Alexandria_%2830_BC%29  # 30 BC; Marcus Vipsanius Agrippa
+  - https://en.wikipedia.org/wiki/Battle_of_Adamclisi  # 101; Trajan
+  - https://en.wikipedia.org/wiki/Second_Battle_of_Tapae  # 101; Trajan
+  - https://en.wikipedia.org/wiki/Battle_of_Sarmizegetusa  # 106; Trajan
+  - https://en.wikipedia.org/wiki/Battle_of_Dara  # 530; Belisarius
+  - https://en.wikipedia.org/wiki/Battle_of_Callinicum  # 531; Belisarius
+  - https://en.wikipedia.org/wiki/Battle_of_Ad_Decimum  # 533; Belisarius
+  - https://en.wikipedia.org/wiki/Battle_of_Tricamarum  # 533; Belisarius
+  - https://en.wikipedia.org/wiki/Siege_of_Rome_%28537%E2%80%93538%29  # 537; Belisarius
+  - https://en.wikipedia.org/wiki/Battle_of_Uhud  # 625; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_Mu%27tah  # 629; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_al-Yamama  # 632; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_Chains  # 633; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_Ullais  # 633; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_Walaja  # 633; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_Zumail  # 633; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_Ajnadayn  # 634; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_Bosra  # 634; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_Marj_al-Dibaj  # 634; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_Fahl  # 635; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_the_Yarmuk  # 636; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_Hazir  # 637; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_the_Iron_Bridge  # 637; Khalid ibn al-Walid
+  - https://en.wikipedia.org/wiki/Battle_of_the_Kalka_River  # 1223; Subutai
+  - https://en.wikipedia.org/wiki/Battle_of_Mohi  # 1241; Subutai
+  - https://en.wikipedia.org/wiki/Battle_of_Busan  # 1592; Yi Sun-sin
+  - https://en.wikipedia.org/wiki/Battle_of_Hansan_Island  # 1592; Yi Sun-sin
+  - https://en.wikipedia.org/wiki/Battle_of_Okpo  # 1592; Yi Sun-sin
+  - https://en.wikipedia.org/wiki/Battle_of_Myeongnyang  # 1597; Yi Sun-sin
+  - https://en.wikipedia.org/wiki/Battle_of_Noryang  # 1598; Yi Sun-sin
+  - https://en.wikipedia.org/wiki/Battle_of_Mollwitz  # 1741; Frederick the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Chotusitz  # 1742; Frederick the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Hohenfriedberg  # 1745; Frederick the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Soor  # 1745; Frederick the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Lobositz  # 1756; Frederick the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Leuthen  # 1757; Frederick the Great
+  - https://en.wikipedia.org/wiki/Battle_of_%C5%A0t%C4%9Brboholy  # 1757; Frederick the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Rossbach  # 1757; Frederick the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Hochkirch  # 1758; Frederick the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Zorndorf  # 1758; Frederick the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Kunersdorf  # 1759; Frederick the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Liegnitz_%281760%29  # 1760; Frederick the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Torgau  # 1760; Frederick the Great
+  - https://en.wikipedia.org/wiki/Battle_of_Burkersdorf_%281762%29  # 1762; Frederick the Great
+  - https://en.wikipedia.org/wiki/Siege_of_Toulon_%281793%29  # 1793; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Bassano  # 1796; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Castiglione  # 1796; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Lodi  # 1796; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Montenotte  # 1796; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Arcole  # 1796; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Rivoli  # 1797; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_the_Pyramids  # 1798; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Abukir_%281799%29  # 1799; Napoleon
+  - https://en.wikipedia.org/wiki/Siege_of_Acre_%281799%29  # 1799; Napoleon
+  - https://en.wikipedia.org/wiki/Siege_of_El_Arish  # 1799; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Marengo  # 1800; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Austerlitz  # 1805; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Ulm  # 1805; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Jena%E2%80%93Auerstedt  # 1806; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Eylau  # 1807; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Friedland  # 1807; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Somosierra  # 1808; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Abensberg  # 1809; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Aspern%E2%80%93Essling  # 1809; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Landshut_%281809%29  # 1809; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Ratisbon  # 1809; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Wagram  # 1809; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Berezina  # 1812; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Borodino  # 1812; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Krasnoi  # 1812; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Maloyaroslavets  # 1812; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Smolensk_%281812%29  # 1812; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Bautzen_%281813%29  # 1813; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Dresden  # 1813; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Hanau  # 1813; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Leipzig  # 1813; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Arcis-sur-Aube  # 1814; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Brienne  # 1814; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Champaubert  # 1814; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Craonne  # 1814; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Laon  # 1814; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Montereau  # 1814; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Montmirail  # 1814; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Reims_%281814%29  # 1814; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Vauchamps  # 1814; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Ligny  # 1815; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Waterloo  # 1815; Napoleon
+  - https://en.wikipedia.org/wiki/Battle_of_Belmont  # 1861; Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_Cheat_Mountain  # 1861; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Second_Battle_of_Bull_Run  # 1862; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_Antietam  # 1862; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_Beaver_Dam_Creek  # 1862; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_Fort_Donelson  # 1862; Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_Fort_Henry  # 1862; Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_Fredericksburg  # 1862; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_Gaines%27_Mill  # 1862; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_Glendale  # 1862; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_Malvern_Hill  # 1862; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_Oak_Grove  # 1862; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_Shiloh  # 1862; Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_South_Mountain  # 1862; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Siege_of_Corinth  # 1862; Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_Champion_Hill  # 1863; Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_Chancellorsville  # 1863; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_Gettysburg  # 1863; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_Mine_Run  # 1863; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_Port_Gibson  # 1863; Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Second_Battle_of_Rappahannock_Station  # 1863; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_Salem_Church  # 1863; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Siege_of_Vicksburg  # 1863; Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_Williamsport  # 1863; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Chattanooga_campaign  # 1863; Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_Chaffin%27s_Farm  # 1864; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_Cold_Harbor  # 1864; Robert E. Lee, Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_North_Anna  # 1864; Robert E. Lee, Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_Spotsylvania_Court_House  # 1864; Robert E. Lee, Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_the_Crater  # 1864; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battle_of_the_Wilderness  # 1864; Robert E. Lee, Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Second_Battle_of_Petersburg  # 1864; Robert E. Lee, Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_Appomattox_Court_House  # 1865; Robert E. Lee, Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_Cumberland_Church  # 1865; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Third_Battle_of_Petersburg  # 1865; Robert E. Lee, Ulysses S. Grant
+  - https://en.wikipedia.org/wiki/Battle_of_White_Oak_Road  # 1865; Robert E. Lee
+  - https://en.wikipedia.org/wiki/Battles_of_Khalkhin_Gol  # 1939; Georgy Zhukov
+  - https://en.wikipedia.org/wiki/Battle_of_Arras_%281940%29  # 1940; Erwin Rommel
+  - https://en.wikipedia.org/wiki/Battle_of_Moscow  # 1941; Georgy Zhukov
+  - https://en.wikipedia.org/wiki/Operation_Barbarossa  # 1941; Georgy Zhukov
+  - https://en.wikipedia.org/wiki/Siege_of_Leningrad  # 1941; Georgy Zhukov
+  - https://en.wikipedia.org/wiki/Siege_of_Tobruk  # 1941; Erwin Rommel
+  - https://en.wikipedia.org/wiki/Battle_of_Alam_el_Halfa  # 1942; Erwin Rommel
+  - https://en.wikipedia.org/wiki/Battle_of_Bir_Hakeim  # 1942; Erwin Rommel
+  - https://en.wikipedia.org/wiki/Battle_of_Gazala  # 1942; Erwin Rommel
+  - https://en.wikipedia.org/wiki/Battle_of_Stalingrad  # 1942; Georgy Zhukov
+  - https://en.wikipedia.org/wiki/First_Battle_of_El_Alamein  # 1942; Erwin Rommel
+  - https://en.wikipedia.org/wiki/Operation_Torch  # 1942; George S. Patton
+  - https://en.wikipedia.org/wiki/Second_Battle_of_El_Alamein  # 1942; Erwin Rommel
+  - https://en.wikipedia.org/wiki/Battle_of_Kursk  # 1943; Georgy Zhukov
+  - https://en.wikipedia.org/wiki/Battle_of_Kasserine_Pass  # 1943; Erwin Rommel
+  - https://en.wikipedia.org/wiki/Battle_of_the_Bulge  # 1944; George S. Patton
+  - https://en.wikipedia.org/wiki/Kamenets%E2%80%93Podolsky_pocket  # 1944; Georgy Zhukov
+  - https://en.wikipedia.org/wiki/Battle_of_Korsun%E2%80%93Cherkassy  # 1944; Georgy Zhukov
+  - https://en.wikipedia.org/wiki/Operation_Bagration  # 1944; Georgy Zhukov
+  - https://en.wikipedia.org/wiki/Operation_Overlord  # 1944; Erwin Rommel
+  - https://en.wikipedia.org/wiki/Battle_of_Berlin  # 1945; Georgy Zhukov
+  - https://en.wikipedia.org/wiki/1948_Arab%E2%80%93Israeli_War  # 1948; Moshe Dayan
+  - https://en.wikipedia.org/wiki/Suez_Crisis  # 1957; Moshe Dayan, Ariel Sharon
+  - https://en.wikipedia.org/wiki/Battle_of_Abu-Ageila  # 1967; Ariel Sharon
+  - https://en.wikipedia.org/wiki/Six-Day_War  # 1967; Moshe Dayan, Ariel Sharon
+  - https://en.wikipedia.org/wiki/Battle_of_the_Chinese_Farm  # 1973; Ariel Sharon
+  - https://en.wikipedia.org/wiki/Operation_Badr_%281973%29  # 1973; Ariel Sharon
+  - https://en.wikipedia.org/wiki/Yom_Kippur_War  # 1973; Moshe Dayan, Ariel Sharon
+  - https://en.wikipedia.org/wiki/1982_Lebanon_War  # 1982; Ariel Sharon

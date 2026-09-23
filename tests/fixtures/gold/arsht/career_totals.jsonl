@@ -1,0 +1,22 @@
+{"general": "Napoleon", "battles": 43, "wins": 38, "losses": 5, "arsht_war_total": 16.678282, "arsht_war_per_battle": 0.387867, "first_year": 1793, "last_year": 1815, "battles_missing_year": 0}
+{"general": "Julius Caesar", "battles": 17, "wins": 15, "losses": 2, "arsht_war_total": 7.352571, "arsht_war_per_battle": 0.432504, "first_year": null, "last_year": null, "battles_missing_year": 17}
+{"general": "Khalid ibn al-Walid", "battles": 14, "wins": 12, "losses": 2, "arsht_war_total": 5.626761, "arsht_war_per_battle": 0.401911, "first_year": null, "last_year": null, "battles_missing_year": 14}
+{"general": "Hannibal", "battles": 17, "wins": 13, "losses": 4, "arsht_war_total": 5.481862, "arsht_war_per_battle": 0.322462, "first_year": -219, "last_year": -202, "battles_missing_year": 0}
+{"general": "Ulysses S. Grant", "battles": 16, "wins": 12, "losses": 4, "arsht_war_total": 5.021479, "arsht_war_per_battle": 0.313842, "first_year": 1861, "last_year": 1865, "battles_missing_year": 0}
+{"general": "Frederick the Great", "battles": 14, "wins": 11, "losses": 3, "arsht_war_total": 4.652316, "arsht_war_per_battle": 0.332308, "first_year": 1741, "last_year": 1762, "battles_missing_year": 0}
+{"general": "Georgy Zhukov", "battles": 10, "wins": 10, "losses": 0, "arsht_war_total": 4.594388, "arsht_war_per_battle": 0.459439, "first_year": 1939, "last_year": 1945, "battles_missing_year": 0}
+{"general": "Alexander the Great", "battles": 9, "wins": 9, "losses": 0, "arsht_war_total": 4.374161, "arsht_war_per_battle": 0.486018, "first_year": null, "last_year": null, "battles_missing_year": 9}
+{"general": "Augustus", "battles": 7, "wins": 7, "losses": 0, "arsht_war_total": 3.378265, "arsht_war_per_battle": 0.482609, "first_year": null, "last_year": null, "battles_missing_year": 7}
+{"general": "Yi Sun-sin", "battles": 5, "wins": 5, "losses": 0, "arsht_war_total": 2.703019, "arsht_war_per_battle": 0.540604, "first_year": 1592, "last_year": 1598, "battles_missing_year": 0}
+{"general": "Scipio Africanus", "battles": 5, "wins": 5, "losses": 0, "arsht_war_total": 2.494654, "arsht_war_per_battle": 0.498931, "first_year": -209, "last_year": -202, "battles_missing_year": 0}
+{"general": "Ariel Sharon", "battles": 7, "wins": 5, "losses": 2, "arsht_war_total": 2.14132, "arsht_war_per_battle": 0.305903, "first_year": 1956, "last_year": 1982, "battles_missing_year": 0}
+{"general": "Moshe Dayan", "battles": 4, "wins": 4, "losses": 0, "arsht_war_total": 2.086226, "arsht_war_per_battle": 0.521557, "first_year": 1948, "last_year": 1973, "battles_missing_year": 0}
+{"general": "Marcus Vipsanius Agrippa", "battles": 4, "wins": 4, "losses": 0, "arsht_war_total": 2.006413, "arsht_war_per_battle": 0.501603, "first_year": null, "last_year": null, "battles_missing_year": 4}
+{"general": "Belisarius", "battles": 5, "wins": 4, "losses": 1, "arsht_war_total": 1.619888, "arsht_war_per_battle": 0.323978, "first_year": null, "last_year": null, "battles_missing_year": 5}
+{"general": "Trajan", "battles": 3, "wins": 3, "losses": 0, "arsht_war_total": 1.447453, "arsht_war_per_battle": 0.482484, "first_year": 101, "last_year": 106, "battles_missing_year": 0}
+{"general": "Themistocles", "battles": 3, "wins": 2, "losses": 1, "arsht_war_total": 1.142147, "arsht_war_per_battle": 0.380716, "first_year": null, "last_year": null, "battles_missing_year": 3}
+{"general": "Subutai", "battles": 2, "wins": 2, "losses": 0, "arsht_war_total": 1.007151, "arsht_war_per_battle": 0.503575, "first_year": 1223, "last_year": 1241, "battles_missing_year": 0}
+{"general": "George S. Patton", "battles": 2, "wins": 2, "losses": 0, "arsht_war_total": 0.998497, "arsht_war_per_battle": 0.499249, "first_year": 1942, "last_year": 1944, "battles_missing_year": 0}
+{"general": "Pyrrhus of Epirus", "battles": 3, "wins": 1, "losses": 2, "arsht_war_total": -0.535262, "arsht_war_per_battle": -0.178421, "first_year": -280, "last_year": -275, "battles_missing_year": 0}
+{"general": "Erwin Rommel", "battles": 9, "wins": 3, "losses": 6, "arsht_war_total": -1.531403, "arsht_war_per_battle": -0.170156, "first_year": 1940, "last_year": 1944, "battles_missing_year": 0}
+{"general": "Robert E. Lee", "battles": 27, "wins": 8, "losses": 19, "arsht_war_total": -2.013387, "arsht_war_per_battle": -0.07457, "first_year": 1861, "last_year": 1865, "battles_missing_year": 0}

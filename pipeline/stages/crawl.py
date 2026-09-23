@@ -362,6 +362,20 @@ async def _crawl_list_pages(
         writer: The crawl_log sink.
         summary: Counters for this run.
     """
+    # A curated corpus names its battles outright. They go in before any list
+    # page is parsed, so that a run configured with articles and no lists still
+    # has work to do, and so a limited run spends its budget on the battles it
+    # was asked for rather than on whatever a list page yielded first.
+    if seeds.battle_articles:
+        seeded = state.add_battle_urls(list(seeds.battle_articles))
+        summary.battles_discovered += len(seeded)
+        logger.info(
+            "battle_articles_seeded",
+            named=len(seeds.battle_articles),
+            new=len(seeded),
+            known=len(state.battle_urls),
+        )
+
     for list_url in seeds.battle_lists:
         if list_url in state.list_pages_done:
             logger.debug("list_page_already_done", url=list_url)
@@ -641,6 +655,7 @@ def _describe_plan(params: CrawlParams, seeds: Seeds, state: CrawlState, limit: 
         "crawl_dry_run",
         list_pages=len(seeds.battle_lists),
         list_pages_done=len(state.list_pages_done),
+        named_articles=len(seeds.battle_articles),
         battles_known=len(state.battle_urls),
         battles_pending=len(state.pending_battles(limit)),
         sparql_queries=len(seeds.wikidata_queries),
