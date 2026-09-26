@@ -15,6 +15,8 @@ import pytest
 import yaml
 
 from pipeline.quality import (
+    DEFAULT_MAX_RHAT,
+    DEFAULT_MIN_ESS_BULK,
     QualityRunner,
     Severity,
     StageResult,
@@ -234,10 +236,12 @@ def test_prose_check_without_method_fails_rather_than_passes() -> None:
 # ─── Non-SQL method checks ───────────────────────────────────────────────────
 
 
+# diagnostics_json is deliberately absent: it has a handler in
+# METHOD_HANDLERS now, so it no longer reports "not implemented". The tests
+# for its real behaviour are at the foot of this file.
 @pytest.mark.parametrize(
     "method",
     [
-        "diagnostics_json",
         "posterior_check",
         "per_round_check",
         "range_check",
@@ -398,4 +402,193 @@ def test_every_spec_method_is_registered() -> None:
 
     assert unregistered == {}, (
         f"These specs name check methods the runner does not recognise: {unregistered}"
+    )
+
+
+# ─── diagnostics_json method handler ─────────────────────────────────────────
+
+
+class _DiagnosticsRow:
+    """One model_runs row as the handler's query returns it."""
+
+    def __init__(self, run_id: int, diagnostics: Any) -> None:
+        self.run_id = run_id
+        self.diagnostics = diagnostics
+
+    def __getitem__(self, index: int) -> Any:
+        return (self.run_id, self.diagnostics)[index]
+
+
+class _DiagnosticsResult:
+    def __init__(self, row: _DiagnosticsRow | None) -> None:
+        self._row = row
+
+    def first(self) -> _DiagnosticsRow | None:
+        return self._row
+
+    def fetchone(self) -> _DiagnosticsRow | None:
+        return self._row
+
+    def one_or_none(self) -> _DiagnosticsRow | None:
+        return self._row
+
+    def mappings(self) -> _DiagnosticsResult:
+        return self
+
+    def scalar(self) -> Any:
+        return None if self._row is None else self._row.run_id
+
+
+class DiagnosticsConnection:
+    """Serves scripted model_runs rows, newest first.
+
+    The handler asks for one row with ORDER BY run_id DESC LIMIT 1, so this
+    stub holds the rows in the order the database would return them and hands
+    back the head of the list.
+    """
+
+    def __init__(self, rows: list[_DiagnosticsRow] | None = None) -> None:
+        self.rows = rows or []
+        self.executed: list[Any] = []
+        self.savepoints = 0
+
+    def begin_nested(self) -> AbstractContextManager[None]:
+        self.savepoints += 1
+        return nullcontext()
+
+    def execute(self, statement: Any, parameters: Any = None) -> _DiagnosticsResult:
+        self.executed.append((statement, parameters))
+        return _DiagnosticsResult(self.rows[0] if self.rows else None)
+
+
+def _diagnostics_check(**params: Any) -> dict[str, Any]:
+    """Build a diagnostics_json check with the given params."""
+    base: dict[str, Any] = {"model_type": "source_disagreement"}
+    base.update(params)
+    return {
+        "name": "model_convergence",
+        "check": "all rhat < 1.05 and ess_bulk > 400 for all parameters",
+        "method": "diagnostics_json",
+        "params": base,
+        "severity": "error",
+    }
+
+
+def _worst(max_rhat: float, min_ess_bulk: float, divergences: int) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "worst": {
+            "max_rhat": max_rhat,
+            "min_ess_bulk": min_ess_bulk,
+            "divergences": divergences,
+        },
+    }
+
+
+def test_diagnostics_json_passes_when_the_latest_run_of_that_type_is_converged() -> None:
+    conn = DiagnosticsConnection([_DiagnosticsRow(7, _worst(1.004, 1180.0, 0))])
+    result = QualityRunner(conn).run_one(_diagnostics_check())
+    assert result.passed, result.message
+
+
+def test_diagnostics_json_fails_when_no_completed_run_of_that_model_type_exists() -> None:
+    # An absent run must not read as a clean gate: before the stage has ever
+    # run there is nothing to have converged.
+    result = QualityRunner(DiagnosticsConnection([])).run_one(_diagnostics_check())
+    assert not result.passed
+    assert "source_disagreement" in result.message
+
+
+def test_diagnostics_json_fails_rather_than_passes_when_diagnostics_is_null() -> None:
+    # A run that finished without recording diagnostics is a gap in the audit
+    # trail, not evidence of convergence.
+    conn = DiagnosticsConnection([_DiagnosticsRow(3, None)])
+    assert not QualityRunner(conn).run_one(_diagnostics_check()).passed
+
+
+def test_diagnostics_json_fails_when_the_check_declares_no_model_type() -> None:
+    # Defaulting would read some other stage's run and pass this stage on a
+    # different model's convergence.
+    check = _diagnostics_check()
+    del check["params"]
+    conn = DiagnosticsConnection([_DiagnosticsRow(7, _worst(1.0, 5000.0, 0))])
+    result = QualityRunner(conn).run_one(check)
+    assert not result.passed
+    assert "model_type" in result.message
+
+
+def test_diagnostics_json_reads_its_thresholds_from_the_check_params_when_given() -> None:
+    # rhat 1.03 clears the module default of 1.05 but not a spec that asks for
+    # 1.01, so the spec's number has to be the one that decides.
+    conn = DiagnosticsConnection([_DiagnosticsRow(7, _worst(1.03, 5000.0, 0))])
+    strict = QualityRunner(conn).run_one(_diagnostics_check(max_rhat=1.01))
+    lenient = QualityRunner(conn).run_one(_diagnostics_check(max_rhat=1.10))
+    assert not strict.passed
+    assert lenient.passed
+
+
+def test_diagnostics_json_falls_back_to_the_module_default_thresholds() -> None:
+    conn = DiagnosticsConnection([_DiagnosticsRow(7, _worst(1.04, DEFAULT_MIN_ESS_BULK + 1, 0))])
+    assert QualityRunner(conn).run_one(_diagnostics_check()).passed
+
+    conn = DiagnosticsConnection([_DiagnosticsRow(7, _worst(DEFAULT_MAX_RHAT + 0.01, 5000.0, 0))])
+    assert not QualityRunner(conn).run_one(_diagnostics_check()).passed
+
+
+def test_diagnostics_json_fails_when_divergences_exceed_the_limit() -> None:
+    # Divergent transitions mean the sampler did not explore the posterior, so
+    # a clean rhat alongside them is not reassurance.
+    conn = DiagnosticsConnection([_DiagnosticsRow(7, _worst(1.001, 5000.0, 4))])
+    result = QualityRunner(conn).run_one(_diagnostics_check())
+    assert not result.passed
+    assert "divergence" in result.message.lower()
+
+
+def test_diagnostics_json_rolls_up_when_the_payload_has_no_worst_object() -> None:
+    # An older schema_version wrote per-model objects and no rollup. The gate
+    # must still take the worst across them rather than reporting no metrics.
+    payload = {
+        "schema_version": 1,
+        "troops": {"max_rhat": 1.002, "min_ess_bulk": 800.0, "divergences": 0},
+        "casualties": {"max_rhat": 1.30, "min_ess_bulk": 600.0, "divergences": 0},
+    }
+    conn = DiagnosticsConnection([_DiagnosticsRow(7, payload)])
+    result = QualityRunner(conn).run_one(_diagnostics_check())
+    assert not result.passed, "the worse of the two rhats should decide"
+
+
+def test_diagnostics_json_reports_no_connection_rather_than_passing() -> None:
+    result = QualityRunner(None).run_one(_diagnostics_check())
+    assert not result.passed
+    assert "connection" in result.message.lower()
+
+
+def test_diagnostics_json_takes_a_savepoint_like_every_other_check() -> None:
+    # Postgres aborts the whole transaction on a failed statement, so a check
+    # that does not isolate itself makes every later check report someone
+    # else's error instead of its own verdict.
+    conn = DiagnosticsConnection([_DiagnosticsRow(7, _worst(1.0, 5000.0, 0))])
+    QualityRunner(conn).run_one(_diagnostics_check())
+    assert conn.savepoints == 1
+
+
+def test_every_registered_handler_is_also_a_declared_method() -> None:
+    """METHOD_HANDLERS and UNIMPLEMENTED_METHODS must not drift apart."""
+    from pipeline.quality import METHOD_HANDLERS, UNIMPLEMENTED_METHODS
+
+    assert set(METHOD_HANDLERS) <= set(UNIMPLEMENTED_METHODS)
+
+
+def test_every_diagnostics_json_check_in_every_spec_declares_a_model_type() -> None:
+    """A diagnostics_json gate with no model_type can never pass."""
+    missing = [
+        f"{stage}.{check.get('name')}"
+        for stage, check in _spec_checks()
+        if check.get("method") == "diagnostics_json"
+        and not (check.get("params") or {}).get("model_type")
+    ]
+
+    assert missing == [], (
+        "These diagnostics_json checks name no params.model_type, so the handler "
+        f"cannot tell which model run to read: {missing}"
     )

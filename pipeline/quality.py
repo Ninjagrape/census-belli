@@ -7,9 +7,10 @@ string such as ``">= 3000"``. A minority declare a ``method`` instead, naming a
 non-SQL check (posterior diagnostics, distributional tests) that needs the
 stage's own artefacts rather than the database.
 
-This module executes both kinds. Unimplemented ``method`` checks return a
-*failing* result rather than a passing one, so that a gap in coverage stays
-visible instead of silently green-lighting a stage.
+This module executes both kinds. A ``method`` with a handler registered in
+``METHOD_HANDLERS`` is run by that handler; one without returns a *failing*
+result rather than a passing one, so that a gap in coverage stays visible
+instead of silently green-lighting a stage.
 
 Usage:
     runner = QualityRunner(conn)
@@ -20,12 +21,14 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Final, Protocol, cast
 
 import structlog
+from sqlalchemy import text
 
 logger = structlog.get_logger()
 
@@ -193,6 +196,17 @@ class ScalarResult(Protocol):
     def scalar(self) -> Any: ...
 
 
+class RowResult(Protocol):
+    """Minimal protocol for a result object exposing its first row.
+
+    The SQL check path needs only a scalar, so ``Connection.execute`` is
+    declared as returning one. A handler reading several columns of a row casts
+    to this instead; a SQLAlchemy ``Result`` satisfies both.
+    """
+
+    def first(self) -> Any: ...
+
+
 class Connection(Protocol):
     """Minimal protocol for a database connection.
 
@@ -235,13 +249,309 @@ def _to_statement(sql: str) -> Any:
 
 # ─── Non-SQL check handlers ──────────────────────────────────────────────────
 
-# Several specs declare `method:` instead of SQL. These need artefacts the
-# stage itself produces (ArviZ InferenceData, imputed datasets, held-out
-# predictions) rather than a database query. They are registered here as
-# explicitly unimplemented so that the gap is reported, not silently passed.
+# Fallback sampler thresholds, used when a check declares no `params` of its
+# own. Deliberately looser than any spec's prose: a gate that has not stated
+# its own numbers should catch an unusable fit, not adjudicate a marginal one.
+DEFAULT_MAX_RHAT: Final[float] = 1.05
+DEFAULT_MIN_ESS_BULK: Final[float] = 400.0
+DEFAULT_MAX_DIVERGENCES: Final[int] = 0
+
+# The diagnostics of the newest completed run of one model type. Reading them
+# from model_runs rather than an ArviZ file on disk is what lets this handler
+# work with nothing but the connection the runner already holds.
+_LATEST_DIAGNOSTICS = text(
+    "SELECT run_id, diagnostics FROM model_runs "
+    "WHERE model_type = :model_type AND completed_at IS NOT NULL "
+    "ORDER BY run_id DESC LIMIT 1"
+)
+
+# The keys a diagnostics payload carries, in the rolled-up `worst` object the
+# sampling stages write and in whatever per-parameter objects preceded it.
+_RHAT_KEY: Final[str] = "max_rhat"
+_ESS_KEY: Final[str] = "min_ess_bulk"
+_DIVERGENCES_KEY: Final[str] = "divergences"
+
+
+@dataclass(frozen=True)
+class _DiagnosticsMetrics:
+    """The three sampler metrics a convergence gate compares against."""
+
+    max_rhat: float | None = None
+    min_ess_bulk: float | None = None
+    divergences: int | None = None
+
+    @property
+    def is_empty(self) -> bool:
+        """Whether the payload yielded no recognisable metric at all."""
+        return self.max_rhat is None and self.min_ess_bulk is None and self.divergences is None
+
+    def summarise(self) -> str:
+        """Render the metrics as a short one-line summary.
+
+        Returns:
+            Text of the form ``max_rhat=1.01, min_ess_bulk=1200, divergences=0``,
+            with ``n/a`` for any metric the payload did not carry.
+        """
+        parts = [
+            f"{_RHAT_KEY}={'n/a' if self.max_rhat is None else self.max_rhat}",
+            f"{_ESS_KEY}={'n/a' if self.min_ess_bulk is None else self.min_ess_bulk}",
+            f"{_DIVERGENCES_KEY}={'n/a' if self.divergences is None else self.divergences}",
+        ]
+        return ", ".join(parts)
+
+
+def _as_float(value: Any) -> float | None:
+    """Coerce a diagnostics value to a float, or None if it is not numeric.
+
+    Args:
+        value: A value read from the diagnostics JSON.
+
+    Returns:
+        The float, or None for anything non-numeric (including booleans, which
+        are numeric in Python but never a sampler metric).
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _extract_metrics(payload: dict[str, Any]) -> _DiagnosticsMetrics:
+    """Read the sampler metrics out of one diagnostics object.
+
+    Args:
+        payload: A diagnostics object, either the rolled-up ``worst`` or the
+            whole JSON payload for an older schema.
+
+    Returns:
+        The metrics it carries; any key it lacks stays None.
+    """
+    divergences = _as_float(payload.get(_DIVERGENCES_KEY))
+    return _DiagnosticsMetrics(
+        max_rhat=_as_float(payload.get(_RHAT_KEY)),
+        min_ess_bulk=_as_float(payload.get(_ESS_KEY)),
+        divergences=None if divergences is None else int(divergences),
+    )
+
+
+def _roll_up_metrics(diagnostics: dict[str, Any]) -> _DiagnosticsMetrics:
+    """Reduce a whole diagnostics payload to its worst case.
+
+    Prefers the ``worst`` object the sampling stages write. Falling back to a
+    roll-up across the payload's own keys and its nested objects keeps a run
+    written under an older ``schema_version`` gateable rather than unreadable,
+    which would otherwise read as a passing gate's silence.
+
+    Args:
+        diagnostics: The parsed ``model_runs.diagnostics`` JSON.
+
+    Returns:
+        The worst rhat, worst ESS and total divergences found.
+    """
+    worst = diagnostics.get("worst")
+    if isinstance(worst, dict):
+        return _extract_metrics(worst)
+
+    candidates = [diagnostics]
+    candidates.extend(value for value in diagnostics.values() if isinstance(value, dict))
+
+    max_rhat: float | None = None
+    min_ess_bulk: float | None = None
+    divergences: int | None = None
+
+    for candidate in candidates:
+        found = _extract_metrics(candidate)
+        if found.max_rhat is not None:
+            max_rhat = found.max_rhat if max_rhat is None else max(max_rhat, found.max_rhat)
+        if found.min_ess_bulk is not None:
+            min_ess_bulk = (
+                found.min_ess_bulk
+                if min_ess_bulk is None
+                else min(min_ess_bulk, found.min_ess_bulk)
+            )
+        if found.divergences is not None:
+            divergences = (
+                found.divergences if divergences is None else divergences + found.divergences
+            )
+    return _DiagnosticsMetrics(
+        max_rhat=max_rhat, min_ess_bulk=min_ess_bulk, divergences=divergences
+    )
+
+
+def _threshold_float(params: dict[str, Any], key: str, default: float) -> float:
+    """Read a numeric threshold from a check's params, falling back to a default.
+
+    Args:
+        params: The check's ``params`` mapping.
+        key: The param name.
+        default: The module default to use when the param is absent or unusable.
+
+    Returns:
+        The threshold to compare against.
+    """
+    value = _as_float(params.get(key))
+    return default if value is None else value
+
+
+def _check_diagnostics_json(
+    name: str,
+    check: dict[str, Any],
+    severity: Severity,
+    conn: Connection | None,
+) -> QualityCheckResult:
+    """Gate a stage on the sampler diagnostics of its newest completed run.
+
+    Reads ``model_runs.diagnostics`` for the newest completed run of the
+    ``model_type`` the check names, and compares its worst rhat, worst bulk ESS
+    and divergence count against the check's thresholds.
+
+    Args:
+        name: The check's name, as declared in the agent spec.
+        check: The raw check dict; ``params.model_type`` is required, and
+            ``params.max_rhat`` / ``min_ess_bulk`` / ``max_divergences`` override
+            the module defaults.
+        severity: The severity to report the result at.
+        conn: An open database connection, or None.
+
+    Returns:
+        The check's result. Never raises: every failure path, including a
+        database error, is reported as a failing result.
+    """
+    threshold_raw = str(check.get("threshold", ""))
+    raw_params = check.get("params")
+    params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
+
+    def failure(
+        message: str,
+        actual: Any = None,
+        threshold: str = threshold_raw,
+    ) -> QualityCheckResult:
+        """Build a failing result for this check."""
+        return QualityCheckResult(
+            name=name,
+            passed=False,
+            severity=severity,
+            actual_value=actual,
+            threshold=threshold,
+            message=message,
+        )
+
+    model_type = params.get("model_type")
+    if not isinstance(model_type, str) or not model_type.strip():
+        # Defaulting would read some other stage's run and pass this stage on
+        # another model's convergence.
+        return failure(
+            "Check declares no `params.model_type`, so there is no way to tell "
+            "which model run's diagnostics it should read."
+        )
+    model_type = model_type.strip()
+
+    max_rhat_limit = _threshold_float(params, "max_rhat", DEFAULT_MAX_RHAT)
+    min_ess_limit = _threshold_float(params, "min_ess_bulk", DEFAULT_MIN_ESS_BULK)
+    max_divergences_limit = int(
+        _threshold_float(params, "max_divergences", float(DEFAULT_MAX_DIVERGENCES))
+    )
+    effective = (
+        f"{_RHAT_KEY} <= {max_rhat_limit}, "
+        f"{_ESS_KEY} >= {min_ess_limit}, "
+        f"{_DIVERGENCES_KEY} <= {max_divergences_limit}"
+    )
+    threshold_text = threshold_raw or effective
+
+    if conn is None:
+        return failure(
+            "No database connection available to run this check",
+            threshold=threshold_text,
+        )
+
+    try:
+        # Same savepoint isolation as the SQL path: a statement that fails
+        # against Postgres aborts the surrounding transaction, and every later
+        # check would then report that abort instead of its own verdict.
+        statement = _LATEST_DIAGNOSTICS.bindparams(model_type=model_type)
+        with conn.begin_nested():
+            row = cast(RowResult, conn.execute(statement)).first()
+    except Exception as exc:
+        logger.error("diagnostics_check_query_failed", name=name, error=str(exc))
+        return failure(
+            f"Reading model_runs.diagnostics failed: {type(exc).__name__}: {exc}",
+            threshold=threshold_text,
+        )
+
+    if row is None:
+        return failure(
+            f"No completed run of model_type {model_type!r} exists, so there are "
+            "no diagnostics to check. Run the stage that fits it first.",
+            threshold=threshold_text,
+        )
+
+    run_id, diagnostics = row[0], row[1]
+
+    if not isinstance(diagnostics, dict) or not diagnostics:
+        # A run that recorded no diagnostics is unverified, not converged.
+        return failure(
+            f"Run {run_id} of model_type {model_type!r} recorded no diagnostics, "
+            "so its convergence is unknown.",
+            threshold=threshold_text,
+        )
+
+    metrics = _roll_up_metrics(diagnostics)
+    if metrics.is_empty:
+        return failure(
+            f"Run {run_id} of model_type {model_type!r} has a diagnostics payload "
+            f"with no recognisable metrics: expected a `worst` object carrying "
+            f"{_RHAT_KEY}, {_ESS_KEY} and {_DIVERGENCES_KEY}.",
+            threshold=threshold_text,
+        )
+
+    actual = f"run {run_id}: {metrics.summarise()}"
+    breaches: list[str] = []
+    if metrics.max_rhat is not None and metrics.max_rhat > max_rhat_limit:
+        breaches.append(f"{_RHAT_KEY} {metrics.max_rhat} > {max_rhat_limit}")
+    if metrics.min_ess_bulk is not None and metrics.min_ess_bulk < min_ess_limit:
+        breaches.append(f"{_ESS_KEY} {metrics.min_ess_bulk} < {min_ess_limit}")
+    if metrics.divergences is not None and metrics.divergences > max_divergences_limit:
+        breaches.append(f"{_DIVERGENCES_KEY} {metrics.divergences} > {max_divergences_limit}")
+
+    if breaches:
+        return failure(
+            f"Run {run_id} did not converge: {'; '.join(breaches)}",
+            actual=actual,
+            threshold=threshold_text,
+        )
+
+    return QualityCheckResult(
+        name=name,
+        passed=True,
+        severity=severity,
+        actual_value=actual,
+        threshold=threshold_text,
+    )
+
+
+MethodHandler = Callable[[str, dict[str, Any], Severity, "Connection | None"], QualityCheckResult]
+
+# A `method:` listed here is executed by its handler. Anything else falls
+# through to UNIMPLEMENTED_METHODS for its reason.
+METHOD_HANDLERS: dict[str, MethodHandler] = {
+    "diagnostics_json": _check_diagnostics_json,
+}
+
+# Why each `method:` without a handler cannot run yet. Every method named in
+# any agents/*.yaml must appear here (tests/unit/test_quality.py asserts it),
+# including the ones METHOD_HANDLERS implements: this is the reason table the
+# runner falls back to, not a list of what is missing. A method with neither a
+# handler nor an entry reports "Unknown check method", which is a spec typo
+# rather than a gap in coverage.
 #
-# To implement one, replace the entry with a callable taking (check, context)
-# and returning a QualityCheckResult.
+# To implement one, add a handler to METHOD_HANDLERS; the entry here then
+# becomes its fallback reason and is never used.
 UNIMPLEMENTED_METHODS: dict[str, str] = {
     "diagnostics_json": (
         "Requires model_runs.diagnostics from the reconcile/model stage "
@@ -327,18 +637,40 @@ class QualityRunner:
 
         method = check.get("method")
         if method is not None:
-            return self._run_method_check(name, str(method), severity, threshold_raw)
+            return self._run_method_check(name, check, severity, threshold_raw)
 
         return self._run_sql_check(name, check, severity, threshold_raw)
 
     def _run_method_check(
         self,
         name: str,
-        method: str,
+        check: dict[str, Any],
         severity: Severity,
         threshold_raw: str,
     ) -> QualityCheckResult:
-        """Handle a check declaring a non-SQL ``method``."""
+        """Handle a check declaring a non-SQL ``method``.
+
+        A method with an entry in :data:`METHOD_HANDLERS` is executed by that
+        handler. Anything else reports as explicitly unimplemented, so a gap in
+        coverage stays visible instead of silently green-lighting a stage.
+
+        Args:
+            name: The check's name, as declared in the agent spec.
+            check: The raw check dict. The whole dict is passed, not just the
+                method name, because a handler reads its thresholds from
+                ``check["params"]``.
+            severity: The severity to report the result at.
+            threshold_raw: The spec's raw threshold string, for the result.
+
+        Returns:
+            The check's result.
+        """
+        method = str(check.get("method", ""))
+
+        handler = METHOD_HANDLERS.get(method)
+        if handler is not None:
+            return handler(name, check, severity, self._conn)
+
         reason = UNIMPLEMENTED_METHODS.get(method)
         detail = reason or f"Unknown check method: {method!r}"
         return QualityCheckResult(

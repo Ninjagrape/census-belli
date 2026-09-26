@@ -69,11 +69,27 @@ quality_checks:
   - name: convergence
     check: "all rhat < 1.02 and ess_bulk > 800 for skill parameters"
     method: diagnostics_json
+    # The numbers live here, not in the prose above: parsing the description
+    # would make the gate depend on English word order. model_type is required
+    # and has no default, because defaulting would read another stage's run and
+    # pass this stage on somebody else's convergence.
+    params:
+      model_type: bradley_terry_hierarchical
+      max_rhat: 1.02
+      min_ess_bulk: 800
+      max_divergences: 0
     severity: error
 
   - name: no_divergences
     check: "divergences < 10 across all chains"
     method: diagnostics_json
+    # Divergences only. rhat and ess are the convergence gate's business, so
+    # they are relaxed here rather than double-reported as two failures.
+    params:
+      model_type: bradley_terry_hierarchical
+      max_rhat: 1000.0
+      min_ess_bulk: 0
+      max_divergences: 9
     severity: warning
 
   - name: skill_distribution_sensible
