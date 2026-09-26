@@ -7,11 +7,18 @@ description: >
   battles with fewer sources.
 
 inputs:
-  - db: troop_reports, casualty_reports, sources
+  - db: troop_reports, casualty_reports, sources, battle_sides, battles
 
 outputs:
-  - db: battle_sides (est_troops_total, est_troops_total_lo/hi, est_casualties, est_casualties_lo/hi updated)
-  - db: sources (troop_bias_mu, troop_bias_sd updated)
+  - db: battle_sides (est_troops_total, est_troops_total_lo/hi, est_casualties,
+        est_casualties_lo/hi, plus the est_*_run_id / _n_reports / _n_sources /
+        _method / _updated_at provenance columns)
+  - db: sources (troop_bias_mu/sd, troop_sigma_mu/sd, casualty_bias_mu/sd,
+        casualty_sigma_mu/sd, bias_run_id, bias_n_*_reports, bias_updated_at)
+  - db: model_runs (one row per run, model_type='source_disagreement',
+        carrying the sampler diagnostics the model_convergence gate reads)
+  - db: missing_data_log (field_name='troop_total' / 'casualties' for sides
+        that have reports but none the model can use)
   - data/processed/reconciliation_report.json
 
 tools:
@@ -19,49 +26,216 @@ tools:
   - db_update
 
 params:
-  # source-bias model priors
+  # ── source-bias model priors ──────────────────────────────────────────────
   bias_prior_mu: 0.0                  # log-scale; 0 = no bias
   bias_prior_sd: 1.0                  # weakly informative
-  ancient_source_bias_prior_mu: 0.3   # slight positive bias (inflation)
-  ancient_source_bias_prior_sd: 0.5
   precision_prior_alpha: 2.0          # inverse-gamma shape
   precision_prior_beta: 1.0
 
-  # what counts as "ancient" for the inflated prior
+  # The ancient-inflation prior is no longer a single mu/sd pair. A normal
+  # centred on 0.3 means 1.35x inflation and cannot reach 6x even at three
+  # sigma, while the documented cases run 4x-20x (Gaugamela, Nicaea, the
+  # Helvetii, Xerxes) -- and Cannae's Polybian figures are accepted at face
+  # value, so the distribution is a mixture, not a shifted Gaussian. The
+  # hyperparameters are fitted to tests/fixtures/gold/reconcile/ by
+  # scripts/fit_inflation_prior.py and read from this file.
+  inflation_priors: config/inflation_priors.yaml
+
+  # What counts as "ancient" for the era fallback. Only reports whose claim
+  # regime could not be read from their extracted_context use it. Measured on
+  # 2,086 real infobox strength strings, that is about 95% of them, so this
+  # fallback is load-bearing rather than incidental.
   ancient_cutoff_year: 500
 
+  # ── sampling ──────────────────────────────────────────────────────────────
   mcmc_samples: 2000
   mcmc_chains: 4
   mcmc_tune: 1000
+  mcmc_target_accept: 0.9
+  mcmc_cores: 1                       # >1 respawns the interpreter under pytest on Windows
+  random_seed: 20260923               # a re-run must reproduce, not merely converge
+  # PyTensor needs g++ to compile its C backend and falls back to Python
+  # without one, which puts this model out of reach on a machine with no
+  # toolchain. nutpie compiles the logp through numba instead.
+  nuts_sampler: nutpie
+  likelihood_family: student_t        # 'normal' for the ablation in the recovery test
+  ci_mass: 0.95
+
+  # ── hierarchical scales ───────────────────────────────────────────────────
+  source_deviation_prior_sd: 0.5      # tau_u, per-source deviation from its type
+  regime_deviation_prior_sd: 0.3      # tau_a, source_type x claim-regime interaction
+  sigma_deviation_prior_sd: 0.3       # tau_sigma
+  lineage_prior_sd: 0.3               # tau_l, shared effect per repeated claim
+  scope_offset_prior_sd: 0.4
+  scope_unknown_dispersion_sd: 0.4
+  estimate_dispersion_sd: 0.3
+  roundness_dispersion_sd: 0.3        # conventional figures are coarsened, not noisy
+  casualty_type_offset_prior_sd: 0.7
+
+  # ── latent side-strength prior ────────────────────────────────────────────
+  # Deliberately not era-structured: era and polity priors belong to the
+  # impute stage, and duplicating them here would double-count the same
+  # information in two places in the pipeline.
+  side_prior_mu: 9.2                  # log troops; e^9.2 ~ 10,000
+  side_prior_mu_sd: 1.0
+  side_prior_sd_scale: 1.5
+  casualty_side_prior_mu: 7.0
+  casualty_side_prior_mu_sd: 1.0
+  casualty_side_prior_sd_scale: 1.5
+
+  model_type: source_disagreement
+  processed_root: data/processed
 
 prompt: null   # this stage is a statistical model, no LLM needed
 
 quality_checks:
   - name: model_convergence
-    check: "all rhat < 1.05 and ess_bulk > 400 for all parameters"
+    check: "all rhat < 1.05 and ess_bulk > 400 for all parameters, no divergences"
     method: diagnostics_json
+    # The numbers live here, not in the prose above. Parsing the description
+    # would make the gate's behaviour depend on English word order.
+    params:
+      model_type: source_disagreement
+      max_rhat: 1.05
+      min_ess_bulk: 400
+      max_divergences: 0
     severity: error
+    description: >
+      The sampler converged. Says nothing about whether the data support the
+      model -- see calibration_set_is_not_empty for that.
 
   - name: estimates_populated
     check: >
-      SELECT COUNT(*) FILTER (WHERE est_troops_total IS NOT NULL)::float
+      SELECT COUNT(*) FILTER (WHERE bs.est_troops_total IS NOT NULL)::float
            / NULLIF(COUNT(*), 0)
       FROM battle_sides bs
-      WHERE EXISTS (SELECT 1 FROM troop_reports tr WHERE tr.side_id = bs.side_id)
+      WHERE EXISTS (
+        SELECT 1 FROM troop_reports tr
+        WHERE tr.side_id = bs.side_id
+          AND tr.branch = 'total'
+          AND tr.reported_value > 0
+      )
     threshold: ">= 0.99"
     severity: error
-    description: "Every side with at least one troop report should have a reconciled estimate"
+    description: >
+      Every side with at least one modellable troop report has an estimate.
+      The denominator is narrowed to branch='total' and a positive value
+      because a side whose only report is a cavalry count or a non-positive
+      number is structurally un-fillable -- est_troops_total is personnel-only
+      and has no per-branch column, so counting those sides made the gate
+      permanently red for a reason that was not a defect. The narrowing cannot
+      hide a loss: unfillable_sides_are_logged counts exactly what it excludes.
+
+  - name: unfillable_sides_are_logged
+    check: >
+      SELECT COUNT(*)
+      FROM battle_sides bs
+      WHERE bs.est_troops_total IS NULL
+        AND EXISTS (SELECT 1 FROM troop_reports tr WHERE tr.side_id = bs.side_id)
+        AND NOT EXISTS (
+          SELECT 1 FROM missing_data_log mdl
+          WHERE mdl.side_id = bs.side_id AND mdl.field_name = 'troop_total'
+        )
+    threshold: "= 0"
+    severity: error
+    description: >
+      A side that has reports but no estimate must say why in missing_data_log.
+      The extract stage only logs troop_total when a side has no reports at
+      all, so without this reconcile would leave a gap that classify's
+      missing_data_all_logged gate then fails on, one stage downstream of the
+      cause.
 
   - name: ci_width_reasonable
     check: >
       SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (
-        ORDER BY (est_troops_total_hi - est_troops_total_lo) / NULLIF(est_troops_total, 0)
-      )
-      FROM battle_sides
-      WHERE est_troops_total > 0
-    threshold: "< 2.0"
+               ORDER BY LN(bs.est_troops_total_hi / bs.est_troops_total_lo)
+             )
+      FROM battle_sides bs
+      JOIN (
+        SELECT side_id, COUNT(DISTINCT source_id) AS n_sources
+        FROM troop_reports
+        WHERE branch = 'total' AND reported_value > 0
+        GROUP BY side_id
+      ) c ON c.side_id = bs.side_id
+      WHERE c.n_sources >= 2
+        AND bs.est_troops_run_id IS NOT NULL
+        AND bs.est_troops_total_lo > 0
+        AND bs.est_troops_total_hi > 0
+    threshold: "< 2.2"
     severity: warning
-    description: "Median relative CI width should be less than 200% of the estimate"
+    description: >
+      Median log-scale interval width on multi-source sides. LN(hi/lo) < 2.2
+      means the 95% interval spans under a factor of 9. Measured on the log
+      scale because the estimate is a lognormal median and (hi-lo)/est is a
+      tail statistic; restricted to multi-source sides because a singleton's
+      interval is legitimately far wider, and filtered on est_troops_run_id so
+      an earlier fit's estimates cannot pollute the number.
+
+  - name: singleton_estimates_are_honestly_uncertain
+    check: >
+      SELECT COUNT(*)
+      FROM battle_sides bs
+      JOIN (
+        SELECT side_id, COUNT(DISTINCT source_id) AS n_sources
+        FROM troop_reports
+        WHERE branch = 'total' AND reported_value > 0
+        GROUP BY side_id
+      ) c ON c.side_id = bs.side_id
+      WHERE c.n_sources = 1
+        AND bs.est_troops_run_id IS NOT NULL
+        AND bs.est_troops_total_lo > 0
+        AND LN(bs.est_troops_total_hi / bs.est_troops_total_lo) < 0.8
+    threshold: "= 0"
+    severity: error
+    description: >
+      The inverse of ci_width_reasonable, and the more important of the two.
+      A side whose only evidence is one report cannot be known to within a
+      factor of 2.2 (LN 0.8): the source's own observation sd alone is around
+      0.85. A narrow interval here means the fit dropped either the source
+      bias uncertainty or the observation noise, which is the failure that
+      makes a wrong ranking look precise.
+
+  - name: calibration_set_is_not_empty
+    check: >
+      SELECT COUNT(*) FROM (
+        SELECT side_id FROM troop_reports
+        WHERE branch = 'total' AND reported_value > 0
+        GROUP BY side_id
+        HAVING COUNT(DISTINCT source_id) >= 2
+      ) t
+    threshold: ">= 20"
+    severity: warning
+    description: >
+      Bias parameters are identified only by sides that two or more sources
+      both report. Below this the biases are the prior with extra steps, and
+      model_convergence will still pass, because rhat measures the sampler and
+      not the evidence.
+
+  - name: model_run_recorded
+    check: >
+      SELECT COUNT(*) FROM model_runs
+      WHERE model_type = 'source_disagreement'
+        AND completed_at IS NOT NULL
+        AND diagnostics IS NOT NULL
+    threshold: ">= 1"
+    severity: error
+    description: "The run recorded its diagnostics, which model_convergence reads."
+
+  - name: estimates_are_not_stale
+    check: >
+      SELECT COUNT(*)
+      FROM battle_sides bs
+      WHERE bs.est_troops_total IS NOT NULL
+        AND EXISTS (SELECT 1 FROM troop_reports tr WHERE tr.side_id = bs.side_id)
+        AND bs.est_troops_run_id IS DISTINCT FROM (
+          SELECT MAX(run_id) FROM model_runs WHERE model_type = 'source_disagreement'
+        )
+    threshold: "= 0"
+    severity: warning
+    description: >
+      Warning rather than error: a manually entered estimate legitimately has
+      no run_id. An unexpected non-zero means a partial write left some sides
+      on an older fit, which max_stage_retries makes possible.
 
 retry_policy:
   max_stage_retries: 1

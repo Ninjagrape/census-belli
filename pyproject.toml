@@ -24,8 +24,20 @@ dependencies = [
     "alembic>=1.13",
 
     # bayesian modelling
-    "pymc>=5.10",
-    "arviz>=0.18",
+    # Upper-bounded on purpose. pymc 5.28.5 resolves pytensor 2.38.2, which
+    # publishes cp314 wheels and declares requires-python >=3.11,<3.15 -- so one
+    # pin installs on the 3.14 development machine and on CI's 3.11. pymc 6.x
+    # requires >=3.12 and would break the CI job outright; it also moves to
+    # arviz 1.x, a rewritten API.
+    "pymc>=5.28,<6",
+    "arviz>=0.18,<1",
+    # Measured, not assumed. PyTensor needs g++ to compile its C backend and
+    # falls back to Python without one -- 42s to sample a two-parameter toy on
+    # the development machine, which puts the reconcile model out of reach.
+    # nutpie compiles the logp through numba instead, needs no toolchain, and
+    # fits a 300-side hierarchical model in 19s. It is the default sampler for
+    # the reconcile stage; see agents/reconcile.yaml params.nuts_sampler.
+    "nutpie>=0.13",
     "cmdstanpy>=1.2",
 
     # LLM extraction
@@ -91,10 +103,26 @@ strict = true
 module = ["google.*"]
 ignore_missing_imports = true
 
+# The PyMC stack is untyped at the boundary: pymc and arviz ship no py.typed,
+# and pytensor's symbolic tensors have no static type mypy can follow. Scoped
+# to these packages so the rest of pipeline/ stays strict.
+#
+# follow_imports = "skip" as well as ignore_missing_imports, because arviz
+# pulls in zarr, which uses PEP 695 type-parameter syntax. mypy runs here with
+# python_version = "3.11" to match CI, so following that source is a hard
+# syntax error in a third-party package we do not control.
+[[tool.mypy.overrides]]
+module = ["pymc.*", "pytensor.*", "arviz.*", "xarray.*", "zarr.*", "nutpie.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: needs a live PostgreSQL instance (make db-up); skipped otherwise",
     "live: makes real requests to a third party; opt in with GENERAL_WAR_LIVE_CRAWL=1",
+    # Deselected rather than skipped in CI: the test job fails the build on any
+    # skip, because a green run full of skips is what hid two schema bugs.
+    "model: fits a real MCMC model; minutes, not seconds, and needs pymc",
 ]

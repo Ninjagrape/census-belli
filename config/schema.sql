@@ -100,6 +100,27 @@ CREATE TABLE sources (
     troop_bias_sd   DOUBLE PRECISION DEFAULT 1.0,   -- uncertainty on that bias
     credibility     DOUBLE PRECISION DEFAULT 0.5     -- 0..1, prior on source quality
         CHECK (credibility BETWEEN 0.0 AND 1.0),
+
+    -- Fitted by the reconcile stage. troop_bias_mu above is the posterior
+    -- summary of this source's *realised* log-scale bias over the battles it
+    -- actually reports on -- not a single model coefficient. The bias
+    -- decomposes into a source_type mean, a per-source deviation and a
+    -- claim-regime term, and for a source appearing in only one regime those
+    -- components are confounded while their sum is not. The sum is what is
+    -- stored, because the sum is what is applied.
+    troop_sigma_mu          DOUBLE PRECISION,  -- posterior mean log-scale observation SD
+    troop_sigma_sd          DOUBLE PRECISION,
+    casualty_bias_mu        DOUBLE PRECISION DEFAULT 0.0,
+    casualty_bias_sd        DOUBLE PRECISION DEFAULT 1.0,
+    casualty_sigma_mu       DOUBLE PRECISION,
+    casualty_sigma_sd       DOUBLE PRECISION,
+    -- Provenance. bias_n_troop_reports = 0 means the values above are the
+    -- prior, untouched, which must stay distinguishable from a fitted 0.0.
+    bias_run_id             INT,               -- FK added after model_runs exists
+    bias_n_troop_reports    INT DEFAULT 0,
+    bias_n_casualty_reports INT DEFAULT 0,
+    bias_updated_at         TIMESTAMPTZ,
+
     raw_text_cache  TEXT,                            -- cached extraction from crawl
     fetched_at      TIMESTAMPTZ,
     created_at      TIMESTAMPTZ DEFAULT now()
@@ -248,6 +269,24 @@ CREATE TABLE battle_sides (
     est_casualties_lo    DOUBLE PRECISION,
     est_casualties_hi    DOUBLE PRECISION,
 
+    -- Provenance for the estimates above, written by the reconcile stage.
+    -- This table carries only created_at, so without these an estimate from an
+    -- earlier fit is indistinguishable from a fresh one -- and re-running
+    -- extract rewrites the troop_reports underneath without invalidating
+    -- anything here. est_*_method records which regime produced the row:
+    -- 'source_disagreement' (two or more independent claim lineages) or
+    -- 'single_report_debiased' (one, so the interval is necessarily wide).
+    est_troops_run_id         INT,             -- FK added after model_runs exists
+    est_troops_n_reports      INT,
+    est_troops_n_sources      INT,             -- distinct source *keys*, not source_ids
+    est_troops_method         TEXT,
+    est_troops_updated_at     TIMESTAMPTZ,
+    est_casualties_run_id     INT,
+    est_casualties_n_reports  INT,
+    est_casualties_n_sources  INT,
+    est_casualties_method     TEXT,
+    est_casualties_updated_at TIMESTAMPTZ,
+
     created_at      TIMESTAMPTZ DEFAULT now()
 );
 
@@ -308,7 +347,11 @@ CREATE TABLE troop_reports (
     reported_value  DOUBLE PRECISION NOT NULL,
 
     -- what does this number actually represent
-    scope           TEXT DEFAULT 'engaged',  -- 'engaged', 'available', 'theatre_strength', 'on_paper', 'unknown'
+    -- Defaults to 'unknown', matching coerce_scope in extractors/records.py.
+    -- It defaulted to 'engaged' until 2026-09-23, so any INSERT omitting the
+    -- column silently asserted troops-on-the-field, which is the one thing an
+    -- unreadable scope is not evidence of.
+    scope           TEXT DEFAULT 'unknown',  -- 'engaged', 'available', 'theatre_strength', 'on_paper', 'unknown'
     is_estimate     BOOLEAN DEFAULT FALSE,   -- source itself says "approximately"
     is_upper_bound  BOOLEAN DEFAULT FALSE,   -- source says "up to X"
     is_lower_bound  BOOLEAN DEFAULT FALSE,   -- source says "at least X"
@@ -455,6 +498,26 @@ CREATE TABLE model_runs (
     diagnostics     JSONB,                 -- rhat, ess, divergences, etc.
     notes           TEXT
 );
+
+-- Deferred foreign keys. sources and battle_sides are created far above
+-- model_runs, so their reconcile-provenance columns declare plain INTs there
+-- and acquire their references here rather than forward-referencing a table
+-- that does not exist yet.
+ALTER TABLE sources
+    ADD CONSTRAINT sources_bias_run_fk
+        FOREIGN KEY (bias_run_id) REFERENCES model_runs(run_id);
+
+ALTER TABLE battle_sides
+    ADD CONSTRAINT battle_sides_est_troops_run_fk
+        FOREIGN KEY (est_troops_run_id) REFERENCES model_runs(run_id),
+    ADD CONSTRAINT battle_sides_est_casualties_run_fk
+        FOREIGN KEY (est_casualties_run_id) REFERENCES model_runs(run_id);
+
+CREATE INDEX idx_sides_est_troops_run ON battle_sides (est_troops_run_id);
+CREATE INDEX idx_sources_bias_run     ON sources (bias_run_id);
+-- The diagnostics_json quality handler and three reconcile gates all do
+-- ORDER BY run_id DESC LIMIT 1 filtered on model_type.
+CREATE INDEX idx_model_runs_type      ON model_runs (model_type, run_id DESC);
 
 CREATE TABLE general_skill_estimates (
     estimate_id     SERIAL PRIMARY KEY,

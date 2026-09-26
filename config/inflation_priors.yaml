@@ -1,0 +1,57 @@
+# Fitted by scripts/fit_inflation_prior.py -- do not hand-edit.
+#
+# The distribution of log(source figure / modern scholarly estimate)
+# over tests/fixtures/gold/reconcile/. Two components, because Cannae
+# (accepted at face value) and Nicaea (10-20x) are different
+# generative stories rather than two tails of one.
+#
+# Fitted 2026-09-24 from 45 cases.
+# Gold-set digest: 81ee074a0c4d59f2
+
+provenance:
+  fitted_on: 2026-09-24
+  gold_set_digest: 81ee074a0c4d59f2
+  n_cases: 45
+  script: scripts/fit_inflation_prior.py
+
+# The anchor regime is pinned to exactly zero and is never fitted.
+anchor_regime: modern_scholarly
+
+mixture:
+  faithful_mu: 0.1282
+  faithful_sd: 0.2223
+  rhetorical_mu: 1.7095
+  rhetorical_sd: 0.6887
+  weight_rhetorical: 0.6412
+  n: 45
+  log_likelihood: -52.7715
+
+# Prior on the era fallback: how much more an ancient battle's figures
+# inflate than a later one's. Measured, because the mixture-component
+# gap that was used before is a different quantity and has the
+# opposite sign. Widened; see fit_era_effect.
+era:
+  mu: -0.4455
+  sd: 0.5872
+
+regimes:
+  administrative_partisan:
+    weight_rhetorical: 0.4014
+    n: 8
+    median_log_ratio: 0.366
+    median_factor: 1.442
+  ancient_claim:
+    weight_rhetorical: 0.8571
+    n: 5
+    median_log_ratio: 1.843
+    median_factor: 6.315
+  chronicle:
+    weight_rhetorical: 0.7236
+    n: 28
+    median_log_ratio: 1.386
+    median_factor: 3.999
+  staff_return:
+    weight_rhetorical: 0.1889
+    n: 4
+    median_log_ratio: 0.0675
+    median_factor: 1.07
