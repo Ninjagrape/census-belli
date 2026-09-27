@@ -1059,15 +1059,21 @@ async def test_crawl_writes_articles_citations_and_log(tmp_path: Path) -> None:
     assert len(articles) == 2
     assert articles[0].startswith("Battle_of_Cannae-")
 
-    citation_files = list(params.paths.citations.glob("*.jsonl"))
+    # glob() order is the filesystem's: alphabetical on NTFS, arbitrary on ext4.
+    # Only the first article crawled carries the fetched records, since the
+    # second finds its allowed URLs already done, so no single file can be
+    # assumed to hold them.
+    citation_files = sorted(params.paths.citations.glob("*.jsonl"))
     assert len(citation_files) == 2
-    records = [
-        json.loads(line)
-        for line in citation_files[0].read_text(encoding="utf-8").splitlines()
-        if line
+    per_file = [
+        [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+        for path in citation_files
     ]
-    assert any(record.get("skipped") == "domain_not_allowed" for record in records)
-    assert any(record.get("http_status") == 200 for record in records)
+    assert all(
+        any(record.get("skipped") == "domain_not_allowed" for record in records)
+        for records in per_file
+    )
+    assert any(record.get("http_status") == 200 for records in per_file for record in records)
 
     assert (params.paths.wikidata / "query-all_battles.json").exists()
     assert (params.paths.wikidata / "Q184408.json").exists()
