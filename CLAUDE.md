@@ -16,6 +16,34 @@ Two rules that override the momentum to just keep building:
 
 Before you finish a session, update `handover.md` so the next one starts where you stopped.
 
+## How to work: Opus leads, subagents build
+
+Every session works in an agentic coding style. This is a standing instruction to use subagents, so do not wait to be asked.
+
+**Opus is the manager and technical lead.** It owns:
+- Reading `handover.md`, deciding what to do next, and breaking it into tasks small enough for one agent with a clear finish line.
+- Design and statistical decisions: schema changes, model structure, priors, attribution logic, anything that changes what the ranking means.
+- Writing each agent's brief, reviewing what comes back, and integrating it.
+- Verification against a live database (the rules above still apply, and an agent's "tests pass" is a claim to check, not a result).
+- Updating `handover.md` at the end of the session.
+
+**Lighter models do the scoped work.** Pick the cheapest model that can do the task well:
+
+| Model | Use for |
+|-------|---------|
+| Haiku | Codebase searches, reading and summarising files or logs, mechanical edits across many files, fixture generation, running commands and reporting output |
+| Sonnet | Implementing a function or module against a clear spec, writing tests, fixing a failing test, code review, first-pass data audits |
+| Opus (subagent) | Only when a task needs deep reasoning Opus cannot keep in its own context, e.g. an independent second opinion on a model design |
+
+**Briefing an agent.** Each brief states the goal, the exact files it may touch, the acceptance criteria (which tests or checks must pass), and what to return. Agents start cold, so include the context they need from `handover.md` rather than assuming they have read it.
+
+**Running agents.**
+- Launch independent tasks in parallel. Give agents that write code in parallel `isolation: "worktree"` so they cannot clobber each other.
+- Run the project reviewers as gates: `bayesian-model-reviewer` after any change to reconcile, impute, model, or WAR pooling code; `historiography-reviewer` after running extract, resolve, reconcile, or classify on real data.
+- Agents never commit or push (see Git below).
+
+**Do it inline instead** when delegating costs more than it saves: answering a question, a one-file edit, or a change Opus needs to see line by line to judge.
+
 ## Project Overview
 
 A data pipeline and Bayesian modelling system that ranks military commanders throughout history using a Wins Above Replacement (WAR) framework. Improves on Ethan Arsht's original methodology (https://towardsdatascience.com/napoleon-was-the-best-general-ever-and-the-math-proves-it-86efed303eeb/) by adding multi-source data validation, proper missing-data handling, command hierarchy attribution, and uncertainty quantification.
