@@ -538,3 +538,33 @@ def test_the_diagnostics_payload_round_trips_through_json_and_the_quality_rollup
     assert metrics.max_rhat is not None
     assert metrics.min_ess_bulk is not None
     assert metrics.divergences == 0
+
+
+def test_a_side_with_only_upper_bound_reports_is_labelled_bound_only() -> None:
+    from dataclasses import replace
+
+    reports = [
+        replace(_report(1, side_id=1), is_upper_bound=True),
+        replace(_report(2, side_id=1, url="https://example/b"), is_upper_bound=True),
+        # A range from one source bounds from both sides: interval evidence.
+        replace(_report(3, side_id=2, url="https://example/c"), is_upper_bound=True),
+        replace(_report(4, side_id=2, url="https://example/d"), is_lower_bound=True),
+    ]
+    design = _design(reports)
+    inflation = InflationPrior()
+    idata = _build_idata(design, inflation, seed=21)
+
+    result = summarise_fit(
+        idata,
+        design,
+        reports,
+        run_id=1,
+        ci_mass=0.95,
+        inflation=inflation,
+        priors=ModelPriors(),
+        computed_at=_COMPUTED_AT,
+    )
+
+    by_side = {e.side_id: e for e in result.side_estimates}
+    assert by_side[1].method == "bound_only"
+    assert by_side[2].method == "source_disagreement"

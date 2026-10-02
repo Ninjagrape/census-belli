@@ -2612,3 +2612,38 @@ Main fit max rhat 1.007, ess 466, 0 divergences. Full suite 648 passed,
   (corr -0.948 to -0.007); `model_convergence` should use `max_rhat: 1.01`;
   centre `data_era` within the unlabelled rows; write estimates only after the
   convergence gate passes, so an unconverged run cannot overwrite good ones.
+
+### 20.11 Wrap-up decisions, 2026-10-02
+
+Taken by the user at the end of the session:
+
+- **HIGH 2 (asymmetric labelling): force ratios move to a regime-neutral
+  scale.** Not built; it needs schema work, so it is the first task next
+  session. Spec: reconcile writes, beside each published `est_troops_total`,
+  a second per-side estimate that carries no claim-regime adjustment, so the
+  two sides of a battle are on a common footing whatever their labels. New
+  `battle_sides` columns in **both** `config/schema.sql` and an Alembic
+  migration (§5.1). The model stage builds `log(force_ratio)` from those
+  columns; published troop counts stay adjusted. Before building, decide
+  exactly what "no claim-regime adjustment" means for a side whose reports
+  are themselves ancient claims (Persian 1,000,000): the neutral scale must
+  not reintroduce the inflation the regime term exists to remove. Run the
+  `bayesian-model-reviewer` on that definition before coding it.
+- **Done: `bound_only` method label.** A side whose every report bounds it
+  from one direction gets `est_*_method = 'bound_only'`; a range (an upper
+  and a lower bound) does not. Pinned in `tests/unit/test_reconcile_summarise.py`.
+- **Done: write only after convergence.** `_fit_quantity` writes estimates and
+  biases only when the fit's worst diagnostics meet `write_max_rhat` (1.05),
+  `write_min_ess_bulk` (400) and `write_max_divergences` (0), matching the
+  `model_convergence` gate. An unconverged run is still recorded with its
+  diagnostics, so the gate fails, but the previous estimates stand. Pinned by
+  `test_an_unconverged_fit_writes_no_estimates`. The integration tests relax
+  the thresholds in `_load_spec` because they sample 200 draws on purpose.
+- **Deferred to next session:** the `historiography-reviewer` pass on
+  classify, and the remaining §20.10 items (identified-scale width gates,
+  `n_identifying_sides`, the `z_side` ridge, `max_rhat: 1.01`, era centring
+  within unlabelled rows, the `b_type` reference-type documentation).
+
+Final state: ruff clean, `mypy --strict` clean on 69 files, **650 passed,
+0 skipped** against live Postgres; recovery suite 13 passed, 1 xfail.
+Nothing committed.

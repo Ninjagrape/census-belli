@@ -225,6 +225,26 @@ def _fit_quantity(
         computed_at=computed_at,
     )
 
+    # Write only a converged fit. The model_convergence gate runs after the
+    # stage, so writing first let an unconverged run overwrite the last good
+    # estimates before anything could object. The run row and its diagnostics
+    # are still recorded, so the gate fails loudly; the old estimates stand.
+    worst = summary.diagnostics.get("worst", {})
+    converged = (
+        (worst.get("max_rhat") or 0.0) <= float(params.get("write_max_rhat", 1.05))
+        and (worst.get("min_ess_bulk") or 0.0) >= float(params.get("write_min_ess_bulk", 400))
+        and (worst.get("divergences") or 0) <= int(params.get("write_max_divergences", 0))
+    )
+    if not converged:
+        logger.error(
+            "reconcile_fit_not_written",
+            quantity=quantity,
+            run_id=run_id,
+            worst=worst,
+            hint="estimates left at their previous values; see model_convergence",
+        )
+        return summary.diagnostics
+
     counts.sides_estimated += store.write_side_estimates(conn, summary.side_estimates)
     counts.sources_updated += store.write_source_biases(conn, summary.source_biases)
 

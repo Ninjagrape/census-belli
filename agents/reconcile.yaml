@@ -166,8 +166,8 @@ quality_checks:
     # report is `unlabelled` (handover.md 19.2, 19.9) the unlabelled offset is
     # prior-driven and shared by every side, and its prior sd of ~0.94 alone
     # puts a floor of ~3.7 under LN(hi/lo) (3.3-3.7 across regimes, computed
-    # from config/inflation_priors.yaml). Measured 4.13 on the first real
-    # write, 2026-09-29. 4.5 leaves room above that floor to catch a
+    # from config/inflation_priors.yaml). Measured 4.13 on the 5-battle seeded
+    # test fixture, 2026-09-29, not real data. 4.5 leaves room above that floor to catch a
     # multi-source side whose sources genuinely disagree. Never narrow the
     # intervals to meet this; raise it with a reason instead.
     threshold: "< 4.5"

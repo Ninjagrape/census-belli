@@ -219,9 +219,10 @@ Built and writing estimates against live Postgres; see handover.md §19-§20.
 - [x] Convergence diagnostics + the diagnostics_json gate
 - [x] Parameter-recovery suite (tests/model, `-m model`): 13 pass, 1 xfail (censoring)
 - [x] bayesian-model-reviewer pass (handover §20.10)
-- [ ] **HIGH: asymmetric claim labelling biases force ratios; settle before the model stage** (§20.10)
-- [ ] Width gates on the identified scale; n_identifying_sides; bound_only labels (§20.10)
-- [ ] Censoring: bound_only guard now, ExGaussian later (§20.10)
+- [ ] **HIGH: regime-neutral force-ratio scale (decided, not built; handover §20.11)**
+- [ ] Width gates on the identified scale; n_identifying_sides (§20.10)
+- [x] bound_only label; [ ] ExGaussian bound likelihood later (§20.10)
+- [x] Write estimates only after convergence (§20.11)
 - [ ] Prior predictive check; per-side casualty ratio; InverseGamma(2,1) on variance
 - [ ] Run on a real corpus (needs crawl/extract/resolve on config/sources_seed_arsht.yaml first)
 

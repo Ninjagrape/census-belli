@@ -149,6 +149,12 @@ def _load_spec(processed_root: Path, **param_overrides: Any) -> dict[str, Any]:
             "mcmc_tune": 200,
             "mcmc_chains": 2,
             "mcmc_cores": 1,
+            # These tests check plumbing at 200 draws, far below what the
+            # write gate demands; test_an_unconverged_fit_writes_no_estimates
+            # restores a strict gate to check the gate itself.
+            "write_max_rhat": 10.0,
+            "write_min_ess_bulk": 0,
+            "write_max_divergences": 1_000_000,
         }
     )
     params.update(param_overrides)
@@ -686,3 +692,44 @@ def test_reconcile_opens_its_own_connection_when_the_context_carries_none(
         # the deleted battle/side/source from it any more.
         cleanup.commit()
         cleanup.close()
+
+
+def test_an_unconverged_fit_writes_no_estimates(engine: Engine, tmp_path: Path) -> None:
+    # An ess floor no fit can reach stands in for a fit that did not converge.
+    # The run must still be recorded with its diagnostics, so model_convergence
+    # fails loudly, but the side keeps whatever estimate it had before.
+    setup = engine.connect()
+    source = _source(setup, "unconverged-doc")
+    battle = _battle(setup, "Battle India Unconverged", "1915-01-01")
+    side = _side(setup, battle, "Unconverged Side")
+    _troop(setup, side, source, 12_000.0)
+    setup.commit()
+    setup.close()
+
+    conn = engine.connect()
+    try:
+        spec = _load_spec(tmp_path, write_min_ess_bulk=1e12)
+        reconcile_stage.run(spec, context=StageContext(db_conn=conn))
+        estimate = conn.execute(
+            text("SELECT est_troops_total FROM battle_sides WHERE side_id = :s"), {"s": side}
+        ).scalar_one()
+        completed = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM model_runs WHERE completed_at IS NOT NULL "
+                "AND diagnostics IS NOT NULL AND run_id = (SELECT MAX(run_id) FROM model_runs)"
+            )
+        ).scalar_one()
+    finally:
+        conn.rollback()
+        conn.close()
+        cleanup = engine.connect()
+        cleanup.execute(text("DELETE FROM missing_data_log WHERE battle_id = :b"), {"b": battle})
+        cleanup.execute(text("DELETE FROM troop_reports WHERE side_id = :s"), {"s": side})
+        cleanup.execute(text("DELETE FROM battle_sides WHERE battle_id = :b"), {"b": battle})
+        cleanup.execute(text("DELETE FROM battles WHERE battle_id = :b"), {"b": battle})
+        cleanup.execute(text("DELETE FROM sources WHERE source_id = :s"), {"s": source})
+        cleanup.commit()
+        cleanup.close()
+
+    assert estimate is None
+    assert completed == 1

@@ -292,6 +292,15 @@ def _side_estimates(
         side_reports = reports_by_side.get(side_id, [])
         n_lineages = len({r.lineage_id for r in side_reports})
         method = "source_disagreement" if n_lineages >= 2 else "single_report_debiased"
+        # Every report bounds the side from the same direction ("up to X" and
+        # nothing else): the estimate is the hierarchical prior truncated at X,
+        # not evidence of where below X the truth lies. Flagged so downstream
+        # stages can down-weight it (handover.md 20.10, MEDIUM 4).
+        if side_reports and (
+            all(r.is_upper_bound and not r.is_lower_bound for r in side_reports)
+            or all(r.is_lower_bound and not r.is_upper_bound for r in side_reports)
+        ):
+            method = "bound_only"
 
         estimates.append(
             SideEstimate(
