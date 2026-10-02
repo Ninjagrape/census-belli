@@ -42,7 +42,7 @@ import numpy as np
 import structlog
 
 from pipeline.extractors.records import CASUALTY_TYPES, SCOPES
-from pipeline.reconcilers.claims import era_flag
+from pipeline.reconcilers.claims import collapse_lineages, era_flag
 from pipeline.reconcilers.records import CLAIM_REGIMES, ReconcileCounts, Report, SourceKey
 
 __all__ = [
@@ -227,7 +227,9 @@ def build_design(
             otherwise produce a model with no observations, which samples its
             priors and reports clean convergence on no evidence.
     """
-    rows = [r for r in reports if r.quantity == quantity]
+    # Copies of one claim enter once; see collapse_lineages for why the
+    # model no longer carries a lineage effect instead.
+    rows = collapse_lineages([r for r in reports if r.quantity == quantity])
     if not rows:
         raise ValueError(
             f"No usable {quantity} reports. Fitting would sample the priors and "

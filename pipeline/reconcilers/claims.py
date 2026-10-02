@@ -24,7 +24,7 @@ from typing import Final
 
 from pipeline.reconcilers.records import Report
 
-__all__ = ["assign_lineages", "classify_regime", "era_flag", "roundness"]
+__all__ = ["assign_lineages", "classify_regime", "collapse_lineages", "era_flag", "roundness"]
 
 # Citation refs -- [12], [a], [nb 1], [citation needed], [better source
 # needed] -- appear in 52.7% of real Wikipedia infobox strength strings.
@@ -309,6 +309,41 @@ def _report_subgroup_key(report: Report) -> tuple[int, str, str]:
     """The (side, quantity, branch-or-casualty-type) group a report belongs to."""
     sub = report.branch if report.quantity == "troops" else report.casualty_type
     return (report.side_id, report.quantity, sub)
+
+
+def collapse_lineages(reports: Sequence[Report]) -> list[Report]:
+    """Keep one report per claim lineage, preferring the originating row.
+
+    A lineage groups Wikidata and DBpedia rows that repeat a Wikipedia figure
+    to within 1% (:func:`assign_lineages`). Such a copy adds no information,
+    so it enters the model once. Modelling the copies instead, with a shared
+    lineage effect, failed twice: with singleton lineages the effect's scale
+    was unidentified and stalled the sampler, and with only shared lineages
+    modelled, their near-zero scatter dragged the source noise scale down and
+    made every non-copied report overconfident (handover.md 20.10). The
+    copies stay in the stage's report counts; they are dropped only here.
+
+    Args:
+        reports: One quantity's reports, lineage-assigned.
+
+    Returns:
+        One report per lineage, in order of first appearance. The kept row is
+        a non-derived (Wikipedia or other primary) report where the lineage
+        has one, else the lowest ``report_id``. A report with no lineage id is
+        kept as its own.
+    """
+    kept: dict[object, Report] = {}
+    for report in reports:
+        key: object = ("solo", report.report_id) if report.lineage_id is None else report.lineage_id
+        current = kept.get(key)
+        if current is None or _origin_rank(report) < _origin_rank(current):
+            kept[key] = report
+    return list(kept.values())
+
+
+def _origin_rank(report: Report) -> tuple[bool, int]:
+    """Sort key putting a lineage's originating report first."""
+    return (report.source_type in _DERIVED_SOURCE_TYPES, report.report_id)
 
 
 def assign_lineages(

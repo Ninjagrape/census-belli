@@ -40,7 +40,7 @@ def _report(
     url: str = "https://example/a",
     year: int | None = -330,
     regime: str = "unlabelled",
-    lineage_id: int = 0,
+    lineage_id: int | None = None,
     is_upper_bound: bool = False,
     is_lower_bound: bool = False,
     is_estimate: bool = False,
@@ -65,7 +65,8 @@ def _report(
         extracted_context="",
         year_astronomical=year,
         claim_regime=regime,
-        lineage_id=lineage_id,
+        # Production gives every report its own lineage unless it copies another.
+        lineage_id=report_id if lineage_id is None else lineage_id,
         roundness=roundness,
     )
 
@@ -236,16 +237,19 @@ def test_two_source_rows_sharing_a_type_and_url_collapse_to_one_bias_key() -> No
     assert design.source_index.tolist() == [0, 0]
 
 
-def test_reports_repeating_one_claim_share_a_lineage_index() -> None:
+def test_reports_repeating_one_claim_enter_the_design_once_as_the_originating_row() -> None:
+    # The Wikidata copy is listed first, so keeping the first row would keep
+    # the copy; the originating Wikipedia row must win regardless of order.
     design = _design(
         [
-            _report(1, url="https://example/x", lineage_id=7),
             _report(2, url="https://example/y", source_type="wikidata", lineage_id=7),
+            _report(1, url="https://example/x", lineage_id=7),
             _report(3, url="https://example/z", source_type="peer_reviewed", lineage_id=9),
         ]
     )
 
-    assert design.lineage_index.tolist() == [0, 0, 1]
+    assert design.n_obs == 2
+    assert {key.url for key in design.source_keys} == {"https://example/x", "https://example/z"}
 
 
 # ─── Zero casualties ─────────────────────────────────────────────────────────

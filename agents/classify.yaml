@@ -37,6 +37,20 @@ params:
   llm_model: claude-sonnet-4-6
   llm_temperature: 0.0
 
+  # Stage wiring (added when the stage runner was built; the prompts and
+  # gates above are unchanged).
+  #
+  # 'offline' looks up each pending side's command-role request in llm_calls
+  # by its exact hash and applies a cached answer; nothing left uncached is
+  # guessed at, and no API client is built. 'api' sends the request live,
+  # using the provider/model/temperature above. See pipeline/stages/classify.py.
+  llm_mode: offline
+  processed_root: data/processed
+  raw_root: data/raw
+  # Character budget for the article excerpt sent with a command-role
+  # request; see pipeline.classifiers.requests.select_excerpt.
+  excerpt_max_chars: 6000
+
 # ──── TASK A: COMMAND ROLE CLASSIFICATION ────────────────────────────────────
 
 command_role_prompt:

@@ -211,12 +211,47 @@ def _classify_requests(
     spec: dict[str, Any],
     processed_root: Path,
 ) -> list[LLMRequest]:
-    """Build classify-stage requests from resolved commanders."""
-    logger.info(
-        "classify_stage_not_yet_implemented",
-        reason="classify is not yet built; export will work once it is",
-    )
-    return []
+    """Build classify-stage command-role requests for every pending side.
+
+    Delegates to ``pipeline.stages.classify.build_pending_role_requests``,
+    the same function the live stage's offline and api LLM steps call, so a
+    request built here and one built by a live run are always identical and
+    hash the same way. Without that shared path this exporter could drift
+    from the stage silently, and every response processed against the drift
+    would come back a cache miss.
+
+    Args:
+        spec: The loaded ``agents/classify.yaml``.
+        processed_root: Unused here -- classify reads from the database, not
+            from ``data/processed``; kept for a uniform dispatch signature
+            with ``_extract_requests``/``_resolve_requests``.
+
+    Returns:
+        One request per side still needing an LLM answer. An empty list,
+        with a warning logged, when no database is reachable: unlike
+        extract or resolve, classify has nothing to build a request from
+        without one.
+    """
+    del processed_root  # classify's inputs are all in the database
+
+    from pipeline.db import get_connection
+    from pipeline.stages.classify import build_pending_role_requests
+
+    params = spec.get("params", {}) or {}
+    raw_root = Path(str(params.get("raw_root", "data/raw")))
+    excerpt_max_chars = int(params.get("excerpt_max_chars", 6000))
+
+    try:
+        with get_connection() as conn:
+            return [
+                request
+                for _side, request in build_pending_role_requests(
+                    conn, raw_root, spec, excerpt_max_chars=excerpt_max_chars
+                )
+            ]
+    except Exception as e:
+        logger.warning("classify_requests_needs_database", error=str(e))
+        return []
 
 
 def cmd_status(args: argparse.Namespace) -> None:

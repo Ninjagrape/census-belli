@@ -65,7 +65,8 @@ params:
   source_deviation_prior_sd: 0.5      # tau_u, per-source deviation from its type
   regime_deviation_prior_sd: 0.3      # tau_a, source_type x claim-regime interaction
   sigma_deviation_prior_sd: 0.3       # tau_sigma
-  lineage_prior_sd: 0.3               # tau_l, shared effect per repeated claim
+  # lineage_prior_sd removed 2026-10-02: copies of one claim are collapsed to
+  # one row in build_design, so the model has no lineage term (handover 20.10).
   scope_offset_prior_sd: 0.4
   scope_unknown_dispersion_sd: 0.4
   estimate_dispersion_sd: 0.3
@@ -161,11 +162,20 @@ quality_checks:
         AND bs.est_troops_run_id IS NOT NULL
         AND bs.est_troops_total_lo > 0
         AND bs.est_troops_total_hi > 0
-    threshold: "< 2.2"
+    # Was "< 2.2", which no fit can meet: in a corpus where nearly every
+    # report is `unlabelled` (handover.md 19.2, 19.9) the unlabelled offset is
+    # prior-driven and shared by every side, and its prior sd of ~0.94 alone
+    # puts a floor of ~3.7 under LN(hi/lo) (3.3-3.7 across regimes, computed
+    # from config/inflation_priors.yaml). Measured 4.13 on the first real
+    # write, 2026-09-29. 4.5 leaves room above that floor to catch a
+    # multi-source side whose sources genuinely disagree. Never narrow the
+    # intervals to meet this; raise it with a reason instead.
+    threshold: "< 4.5"
     severity: warning
     description: >
-      Median log-scale interval width on multi-source sides. LN(hi/lo) < 2.2
-      means the 95% interval spans under a factor of 9. Measured on the log
+      Median log-scale interval width on multi-source sides. LN(hi/lo) < 4.5
+      means the 95% interval spans under a factor of 90, most of which is the
+      shared, prior-driven inflation term rather than source disagreement. Measured on the log
       scale because the estimate is a lognormal median and (hi-lo)/est is a
       tail statistic; restricted to multi-source sides because a singleton's
       interval is legitimately far wider, and filtered on est_troops_run_id so

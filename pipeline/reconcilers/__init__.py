@@ -41,20 +41,34 @@ from pipeline.reconcilers.records import (
     SourceBias,
     SourceKey,
 )
+from pipeline.reconcilers.report import ReconcileReport, build_report, write_report
+from pipeline.reconcilers.store import (
+    complete_model_run,
+    start_model_run,
+    write_side_estimates,
+    write_source_biases,
+)
 
 __all__ = [
     "CLAIM_REGIMES",
     "ReconcileCounts",
+    "ReconcileReport",
     "Report",
     "SideEstimate",
     "SourceBias",
     "SourceKey",
     "UnfillableSide",
     "assign_lineages",
+    "build_report",
     "classify_regime",
     "classify_sides",
+    "complete_model_run",
     "era_flag",
     "load_reports",
     "roundness",
+    "start_model_run",
+    "write_report",
+    "write_side_estimates",
+    "write_source_biases",
     "write_unfillable",
 ]

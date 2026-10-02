@@ -14,7 +14,7 @@ statistical stack.
 For observation ``i`` on the log scale::
 
     eta_i  = mu_side[s_i] + beta_source[j_i] + g_regime[r_i]
-             + delta_level[k_i] + l_lineage[c_i] + a_era * era_i * unlabelled_i
+             + delta_level[k_i] + a_era * era_i * unlabelled_i
     beta_j = b_type[t_j] + u_j
 
 ``mu_side`` is the quantity published. Everything else exists to explain why a
@@ -46,7 +46,7 @@ Four devices, each doing a different job:
    two are exactly confounded. A type holding a single key therefore gets no
    free deviation at all, which is the correct answer and says so.
 3. **The rotation.** The observation-weighted mean of the reference-coded
-   blocks is what the data identify, so it is what gets sampled: ``level``
+   blocks is what the data identify, so it is what gets sampled: ``corpus_level``
    rather than ``m0``, with ``m0`` derived. The ridge then lies along a
    coordinate axis where a diagonal mass matrix can scale it. This is a change
    of coordinates, not of model: posterior means are unchanged and ESS rises
@@ -205,7 +205,6 @@ class ModelPriors:
     bias_prior_sd: float = 1.0
     source_deviation_prior_sd: float = 0.5
     sigma_deviation_prior_sd: float = 0.3
-    lineage_prior_sd: float = 0.3
     scope_offset_prior_sd: float = 0.4
     casualty_type_offset_prior_sd: float = 0.7
     scope_unknown_dispersion_sd: float = 0.4
@@ -237,7 +236,6 @@ class ModelPriors:
             bias_prior_sd=float(params.get("bias_prior_sd", 1.0)),
             source_deviation_prior_sd=float(params.get("source_deviation_prior_sd", 0.5)),
             sigma_deviation_prior_sd=float(params.get("sigma_deviation_prior_sd", 0.3)),
-            lineage_prior_sd=float(params.get("lineage_prior_sd", 0.3)),
             scope_offset_prior_sd=float(params.get("scope_offset_prior_sd", 0.4)),
             casualty_type_offset_prior_sd=float(
                 params.get("casualty_type_offset_prior_sd", 0.7)
@@ -400,7 +398,7 @@ def build_model(
         offset_bar = pm.Deterministic(
             "offset_bar", pt.dot(w_regime, g_regime) + pt.dot(w_level, delta_level)
         )
-        level = pm.Normal("level", mu=priors.side_prior_mu, sigma=_LEVEL_PRIOR_SD)
+        level = pm.Normal("corpus_level", mu=priors.side_prior_mu, sigma=_LEVEL_PRIOR_SD)
         m0 = pm.Deterministic("m0", level - offset_bar)
 
         s0 = pm.HalfNormal("s0", sigma=priors.side_prior_sd_scale)
@@ -416,10 +414,8 @@ def build_model(
             "beta_source", b_type[source_type_of_key] + u_source, dims="source_key"
         )
 
-        # ── claim lineage: a repeated claim counts once ──────────────────────
-        tau_lineage = pm.HalfNormal("tau_lineage", sigma=priors.lineage_prior_sd)
-        z_lineage = pm.Normal("z_lineage", 0.0, 1.0, dims="lineage")
-        l_lineage = pm.Deterministic("l_lineage", tau_lineage * z_lineage, dims="lineage")
+        # A repeated claim counts once because build_design collapses each
+        # lineage to one row; there is no lineage term. See collapse_lineages.
 
         # ── era fallback, on unlabelled rows only ────────────────────────────
         # Gated, because an ancient chronicle row already carries g_chronicle,
@@ -428,7 +424,7 @@ def build_model(
         # The prior is measured from the gold set's own years. The mixture-gap
         # value used before was a different quantity with the opposite sign.
         a_era = pm.Normal("a_era", mu=inflation.era_mu, sigma=inflation.era_sd)
-        era_column = design.era * _unlabelled_mask(design)
+        era_column = _data(pm, "data_era", design.era * _unlabelled_mask(design))
 
         # ── observation scale ────────────────────────────────────────────────
         sigma_sq_type = pm.InverseGamma(
@@ -438,7 +434,15 @@ def build_model(
             dims="source_type",
         )
         tau_sigma = pm.HalfNormal("tau_sigma", sigma=priors.sigma_deviation_prior_sd)
-        z_sigma = pm.Normal("z_sigma", 0.0, 1.0, dims="source_key")
+        # Zero-sum within type, for the same reason as u_source: a free mean
+        # of z_sigma within a type is the same parameter as that type's
+        # sigma_sq_type. Measured on the recovery corpus as tau_sigma at
+        # ess 201 and rhat 1.02, the last thing failing the convergence gate.
+        z_sigma = pm.Deterministic(
+            "z_sigma",
+            _within_type_deviations(pm, pt, design, source_type_of_key, prefix="z_sigma"),
+            dims="source_key",
+        )
         sigma_source = pm.Deterministic(
             "sigma_source",
             pm.math.sqrt(sigma_sq_type[source_type_of_key]) * pm.math.exp(tau_sigma * z_sigma),
@@ -448,12 +452,18 @@ def build_model(
         sigma_estimate = pm.HalfNormal("sigma_estimate", sigma=priors.estimate_dispersion_sd)
         sigma_round = pm.HalfNormal("sigma_round", sigma=priors.roundness_dispersion_sd)
 
+        # Every per-observation array enters as pm.Data, never as a numpy
+        # constant. PyTensor's numba backend compiles constants into the
+        # generated code as literals, and nutpie's compile then grows faster
+        # than linearly in the corpus: 43s at 160 observations, 334s at 320,
+        # and 11 GB without finishing at 670. As inputs, the compiled function
+        # is the same size whatever the corpus. The model is unchanged.
+        source_ix = _data(pm, "data_source_index", design.source_index)
         eta = (
-            mu_side[design.side_index]
-            + beta_source[design.source_index]
-            + g_regime[design.regime_index]
-            + delta_level[design.level_index]
-            + l_lineage[design.lineage_index]
+            mu_side[_data(pm, "data_side_index", design.side_index)]
+            + beta_source[source_ix]
+            + g_regime[_data(pm, "data_regime_index", design.regime_index)]
+            + delta_level[_data(pm, "data_level_index", design.level_index)]
             + a_era * era_column
         )
 
@@ -463,19 +473,20 @@ def build_model(
         # variance rather than in scale because that is the algebra for
         # independent error components.
         var = (
-            sigma_source[design.source_index] ** 2
-            + sigma_estimate**2 * design.is_estimate.astype(float)
-            + sigma_round**2 * design.roundness
+            sigma_source[source_ix] ** 2
+            + sigma_estimate**2 * _data(pm, "data_is_estimate", design.is_estimate.astype(float))
+            + sigma_round**2 * _data(pm, "data_roundness", design.roundness)
         )
         unknown_mask = _unknown_level_mask(design)
         if unknown_mask.any():
             sigma_unknown = pm.HalfNormal(
                 "sigma_unknown", sigma=priors.scope_unknown_dispersion_sd
             )
-            var = var + sigma_unknown**2 * unknown_mask
+            var = var + sigma_unknown**2 * _data(pm, "data_unknown_mask", unknown_mask)
         sd = pm.math.sqrt(var)
 
-        _attach_likelihood(pm, design, eta, sd, priors.likelihood_family)
+        log_y = _data(pm, "data_log_y", design.log_y)
+        _attach_likelihood(pm, design, eta, sd, log_y, priors.likelihood_family)
 
     logger.info(
         "reconcile_model_built",
@@ -489,6 +500,21 @@ def build_model(
         era_mu=inflation.era_mu,
     )
     return model
+
+
+def _data(pm_module: Any, name: str, values: np.ndarray) -> Any:
+    """Register a per-observation array as model data rather than a constant.
+
+    Args:
+        pm_module: The imported pymc module.
+        name: The data container's name; prefixed ``data_`` so it can never
+            collide with a dimension or a likelihood term.
+        values: The array.
+
+    Returns:
+        The ``pm.Data`` container, usable wherever the array was.
+    """
+    return pm_module.Data(name, values)
 
 
 def _source_type_of_key(design: Design) -> np.ndarray:
@@ -505,7 +531,12 @@ def _source_type_of_key(design: Design) -> np.ndarray:
 
 
 def _within_type_deviations(
-    pm_module: Any, pt_module: Any, design: Design, source_type_of_key: np.ndarray
+    pm_module: Any,
+    pt_module: Any,
+    design: Design,
+    source_type_of_key: np.ndarray,
+    *,
+    prefix: str = "z_source",
 ) -> Any:
     """Per-source deviations, constrained to sum to zero within each type.
 
@@ -521,6 +552,8 @@ def _within_type_deviations(
         pt_module: The imported pytensor.tensor module.
         design: The design.
         source_type_of_key: Each key's source-type index.
+        prefix: Name stem for the per-type ZeroSumNormal variables, so the
+            bias deviations and the noise-scale deviations stay distinct.
 
     Returns:
         A pytensor vector over the ``source_key`` dimension.
@@ -532,7 +565,7 @@ def _within_type_deviations(
             continue
         z = pt_module.set_subtensor(
             z[keys],
-            pm_module.ZeroSumNormal(f"z_source_{type_name}", sigma=1.0, shape=keys.size),
+            pm_module.ZeroSumNormal(f"{prefix}_{type_name}", sigma=1.0, shape=keys.size),
         )
     return z
 
@@ -647,7 +680,9 @@ def _unlabelled_mask(design: Design) -> np.ndarray:
     return mask
 
 
-def _attach_likelihood(pm_module: Any, design: Design, eta: Any, sd: Any, family: str) -> None:
+def _attach_likelihood(
+    pm_module: Any, design: Design, eta: Any, sd: Any, log_y: Any, family: str
+) -> None:
     """Attach the point and censored likelihood terms.
 
     The censoring direction is inverted relative to the flag names, and that
@@ -661,6 +696,7 @@ def _attach_likelihood(pm_module: Any, design: Design, eta: Any, sd: Any, family
         design: The design.
         eta: The linear predictor.
         sd: The per-observation scale.
+        log_y: The observed log values, as model data.
         family: ``"student_t"`` or ``"normal"``.
 
     Raises:
@@ -681,53 +717,55 @@ def _attach_likelihood(pm_module: Any, design: Design, eta: Any, sd: Any, family
             "nu", pm_module.Gamma("nu_raw", alpha=2.0, beta=0.5) + 2.0
         )
 
-    def dist(rows: np.ndarray) -> Any:
+    def dist(rows: Any) -> Any:
         if family == "normal":
             return pm_module.Normal.dist(mu=eta[rows], sigma=sd[rows])
         return pm_module.StudentT.dist(nu=nu, mu=eta[rows], sigma=sd[rows])
 
+    def rows_data(name: str, rows: np.ndarray) -> Any:
+        # The row partitions are per-observation arrays too; see build_model.
+        return pm_module.Data(f"data_rows_{name}", rows)
+
     if design.point_rows.size:
-        rows = design.point_rows
+        rows = rows_data("point", design.point_rows)
         if family == "normal":
-            pm_module.Normal(
-                "obs_point", mu=eta[rows], sigma=sd[rows], observed=design.log_y[rows]
-            )
+            pm_module.Normal("obs_point", mu=eta[rows], sigma=sd[rows], observed=log_y[rows])
         else:
             pm_module.StudentT(
-                "obs_point", nu=nu, mu=eta[rows], sigma=sd[rows], observed=design.log_y[rows]
+                "obs_point", nu=nu, mu=eta[rows], sigma=sd[rows], observed=log_y[rows]
             )
 
     if design.censor_lower_at.size:
-        rows = design.censor_lower_at
+        rows = rows_data("censor_lower", design.censor_lower_at)
         pm_module.Censored(
             "obs_censor_lower",
             dist(rows),
-            lower=design.log_y[rows],
+            lower=log_y[rows],
             upper=np.inf,
-            observed=design.log_y[rows],
+            observed=log_y[rows],
         )
 
     if design.censor_upper_at.size:
-        rows = design.censor_upper_at
+        rows = rows_data("censor_upper", design.censor_upper_at)
         pm_module.Censored(
             "obs_censor_upper",
             dist(rows),
             lower=-np.inf,
-            upper=design.log_y[rows],
-            observed=design.log_y[rows],
+            upper=log_y[rows],
+            observed=log_y[rows],
         )
 
     if design.zero_rows.size:
         # "One casualty or fewer". Kept rather than dropped, because zero
         # casualties is a fact, and censored rather than log1p-shifted, because
         # log1p would move the scale of every other observation.
-        rows = design.zero_rows
+        rows = rows_data("zero", design.zero_rows)
         pm_module.Censored(
             "obs_zero",
             dist(rows),
-            lower=design.log_y[rows],
+            lower=log_y[rows],
             upper=np.inf,
-            observed=design.log_y[rows],
+            observed=log_y[rows],
         )
 
 

@@ -210,39 +210,36 @@ against Postgres, including the enum casts and the text-array column.
       date gate separation, deterministic resolution. See handover.md §17.3.
 
 ## Stage 4: Reconcile (pipeline/stages/reconcile.py)
-- [ ] Source-bias model specification in PyMC
-  - [ ] Hierarchical model: per-source bias and precision
-  - [ ] Ancient source prior (positive bias for inflation)
-  - [ ] Likelihood: observed reports ~ Normal(true_value * source_bias, source_precision)
-- [ ] Fit the model on battles with 3+ source reports (calibration set)
-- [ ] Apply calibrated source parameters to all battles
-- [ ] Compute best estimates + 95% CI for each side's troop totals and casualties
-- [ ] Write estimates to battle_sides, updated biases to sources
-- [ ] Convergence diagnostics check
-- [ ] Unit test with synthetic source disagreement data
+Built and writing estimates against live Postgres; see handover.md §19-§20.
+- [x] Source-bias model specification in PyMC (claim regime, source type + key, lineage, scope, era)
+- [x] Ancient/claim-regime inflation prior, fitted to a 45-case gold set
+- [x] Likelihood with censored bounds and StudentT noise
+- [x] Compute best estimates + 95% CI per side (exp of posterior median)
+- [x] Write estimates to battle_sides, biases to sources, one model_runs row per run
+- [x] Convergence diagnostics + the diagnostics_json gate
+- [x] Parameter-recovery suite (tests/model, `-m model`): 13 pass, 1 xfail (censoring)
+- [x] bayesian-model-reviewer pass (handover §20.10)
+- [ ] **HIGH: asymmetric claim labelling biases force ratios; settle before the model stage** (§20.10)
+- [ ] Width gates on the identified scale; n_identifying_sides; bound_only labels (§20.10)
+- [ ] Censoring: bound_only guard now, ExGaussian later (§20.10)
+- [ ] Prior predictive check; per-side casualty ratio; InverseGamma(2,1) on variance
+- [ ] Run on a real corpus (needs crawl/extract/resolve on config/sources_seed_arsht.yaml first)
 
 ## Stage 5: Classify (pipeline/stages/classify.py)
-- [ ] Command role classifier
-  - [ ] Deterministic rules for obvious cases (single commander = field_commander)
-  - [ ] LLM classification for multi-commander sides (prompt from agents/classify.yaml)
-  - [ ] Hierarchy builder (set reports_to_bc_id, hierarchy_rank)
-  - [ ] Attribution weight assigner (role-based heuristic, then model-refinable)
-  - [ ] Validation: weights per side sum to ~1.0
-- [ ] `battle_type` inference — extract no longer sets it (see Stage 2), so the
-      covariate is NULL on essentially every battle. Infer from ship/fleet
-      vocabulary, terrain and categories. extract already logs it as missing,
-      so `missing_data_log` tells you which battles need it.
-- [ ] Missingness classifier
-  - [ ] Heuristic rules by era and data pattern
-  - [ ] LLM classification for ambiguous cases
-  - [ ] Write to missing_data_log
-        - extract writes rows for the required fields, the per-side fields and
-          the three battle-level model covariates. The rule is: log the absence
-          of a field some stage consumes, not every field that happens to be
-          NULL. classify assigns the missingness class to those rows.
-- [ ] Its `missing_data_all_logged` gate is ERROR severity, so it halts the
-      pipeline if it does not genuinely write those rows
-- [ ] Integration test: classify Actium (Agrippa = field_commander, Octavian = sovereign)
+First slice built; see handover.md §20.3.
+- [x] Command role classifier
+  - [x] Deterministic rules (single commander = field_commander; consistent roles kept)
+  - [x] LLM classification for multi-commander sides, offline cache path (no billed call yet)
+  - [x] Hierarchy builder (reports_to_bc_id, hierarchy_rank)
+  - [x] Attribution weights, normalised to sum to 1 per side
+  - [x] A re-run never overwrites an LLM-classified side
+- [x] `battle_type` inference (naval / siege / aerial / field only with an article read)
+- [x] Missingness classifier, heuristics only
+  - [ ] LLM classification for the rows the heuristics leave unclassified
+- [x] Integration test: Actium with a cached answer (Agrippa field_commander, Octavian sovereign)
+- [ ] Run the pending multi-commander sides through /process-llm-batch
+- [ ] Per-side defender flag (agents/model.yaml needs it; nothing records it) -- §20.5
+- [ ] historiography-reviewer pass on the classify rules (cut off by a usage limit)
 
 ## Stage 6: Impute (pipeline/stages/impute.py)
 - [ ] Era/polity prior loader from config/imputation_priors.yaml
