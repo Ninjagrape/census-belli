@@ -41,6 +41,14 @@ For a stage invocation with at least one usable report of either quantity:
    :class:`~pipeline.reconcilers.records.SourceBias` records, and UPDATE
    every estimated side and every fitted source -- all under the one run id
    from step 1.
+   Troops is fitted twice: the published fit, then a regime-neutral fit on
+   the same design (``build_model(neutral=True)``) whose estimates serve force
+   ratios. Both belong to the one run id, and the neutral diagnostics sit in
+   their own ``troops_neutral`` block, outside the rolled-up ``"worst"``, so
+   ``model_convergence`` keeps meaning the published fits and the separate
+   ``neutral_fit_converged`` gate speaks for the neutral one. Neutral
+   estimates and ``neutral_draws_run{run_id}.npz`` are written only when it
+   passes the same write thresholds; there is no fallback to published ones.
 3. Stamp the ``model_runs`` row complete, with a diagnostics payload holding
    each fitted quantity's own diagnostics plus a rolled-up ``"worst"``
    object (the max rhat, min ESS and summed divergences across whichever
@@ -88,7 +96,7 @@ import structlog
 
 from pipeline.db import get_connection
 from pipeline.reconcilers import store
-from pipeline.reconcilers.design import build_design
+from pipeline.reconcilers.design import Design, build_design
 from pipeline.reconcilers.load import classify_sides, load_reports, write_unfillable
 from pipeline.reconcilers.model import (
     _UNLABELLED_WEIGHT,
@@ -100,6 +108,7 @@ from pipeline.reconcilers.model import (
     load_inflation_prior,
     sample,
 )
+from pipeline.reconcilers.neutral import summarise_neutral, write_neutral_draws
 from pipeline.reconcilers.records import ReconcileCounts, Report
 from pipeline.reconcilers.report import build_report, write_report
 from pipeline.reconcilers.summarise import summarise_fit
@@ -154,6 +163,81 @@ def _combined_worst(per_quantity: dict[str, dict[str, Any]]) -> dict[str, float 
     }
 
 
+def _passes_write_thresholds(worst: dict[str, Any], params: dict[str, Any]) -> bool:
+    """Whether a fit's worst diagnostics clear the thresholds for writing.
+
+    Args:
+        worst: A diagnostics payload's ``"worst"`` object.
+        params: The spec's ``params`` mapping, for the ``write_*`` thresholds.
+
+    Returns:
+        True when rhat, bulk ESS and divergences are all acceptable.
+    """
+    return bool(
+        (worst.get("max_rhat") or 0.0) <= float(params.get("write_max_rhat", 1.05))
+        and (worst.get("min_ess_bulk") or 0.0) >= float(params.get("write_min_ess_bulk", 400))
+        and (worst.get("divergences") or 0) <= int(params.get("write_max_divergences", 0))
+    )
+
+
+def _fit_neutral_troops(
+    conn: Any,
+    *,
+    design: Design,
+    priors: ModelPriors,
+    reports: list[Report],
+    params: dict[str, Any],
+    ci_mass: float,
+    inflation: InflationPrior,
+    run_id: int,
+    processed_root: Path,
+) -> dict[str, Any]:
+    """Fit the regime-neutral troops model and write it if it converged.
+
+    Args:
+        conn: An open database connection.
+        design: The design the published troops fit used.
+        priors: The troops hierarchy scales.
+        reports: Every loaded report, for the side-to-battle mapping.
+        params: The spec's ``params`` mapping.
+        ci_mass: The credible interval's total mass.
+        inflation: The fitted claim-regime inflation prior.
+        run_id: The shared ``model_runs`` id.
+        processed_root: Where the draws file goes.
+
+    Returns:
+        The ``troops_neutral`` diagnostics block, including whether the fit was
+        written.
+
+    Raises:
+        Exception: Whatever sampling raises, re-raised after logging.
+    """
+    model = build_model(design, priors=priors, inflation=inflation, neutral=True)
+    try:
+        idata = sample(model, SamplerSettings.from_params(params))
+    except Exception:
+        logger.error("reconcile_neutral_sampling_failed", run_id=run_id)
+        raise
+
+    battle_of_side = {r.side_id: r.battle_id for r in reports if r.quantity == "troops"}
+    summary = summarise_neutral(idata, design, battle_of_side, run_id=run_id, ci_mass=ci_mass)
+    worst = summary.diagnostics["worst"]
+    written = _passes_write_thresholds(worst, params)
+    summary.diagnostics["written"] = written
+    if not written:
+        logger.error(
+            "reconcile_neutral_fit_not_written",
+            run_id=run_id,
+            worst=worst,
+            hint="no neutral estimates or draws file; see neutral_fit_converged",
+        )
+        return summary.diagnostics
+
+    store.write_neutral_estimates(conn, summary.estimates)
+    write_neutral_draws(summary, processed_root=processed_root, run_id=run_id)
+    return summary.diagnostics
+
+
 def _fit_quantity(
     conn: Any,
     *,
@@ -166,8 +250,11 @@ def _fit_quantity(
     run_id: int,
     computed_at: datetime,
     counts: ReconcileCounts,
-) -> dict[str, Any]:
+    processed_root: Path,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Fit one quantity's model and write its estimates, under a shared run id.
+
+    Troops also gets the regime-neutral second fit, on the same design.
 
     Args:
         conn: An open database connection.
@@ -186,10 +273,12 @@ def _fit_quantity(
         computed_at: The timestamp to stamp every record with.
         counts: Counters to accumulate ``sides_estimated`` and
             ``sources_updated`` into.
+        processed_root: Where the neutral draws file is written.
 
     Returns:
         This quantity's diagnostics payload from
-        :func:`~pipeline.reconcilers.summarise.summarise_fit`.
+        :func:`~pipeline.reconcilers.summarise.summarise_fit`, and the neutral
+        fit's diagnostics block (None for casualties).
 
     Raises:
         Exception: Whatever :func:`~pipeline.reconcilers.model.sample` raises.
@@ -230,12 +319,10 @@ def _fit_quantity(
     # estimates before anything could object. The run row and its diagnostics
     # are still recorded, so the gate fails loudly; the old estimates stand.
     worst = summary.diagnostics.get("worst", {})
-    converged = (
-        (worst.get("max_rhat") or 0.0) <= float(params.get("write_max_rhat", 1.05))
-        and (worst.get("min_ess_bulk") or 0.0) >= float(params.get("write_min_ess_bulk", 400))
-        and (worst.get("divergences") or 0) <= int(params.get("write_max_divergences", 0))
-    )
-    if not converged:
+    if _passes_write_thresholds(worst, params):
+        counts.sides_estimated += store.write_side_estimates(conn, summary.side_estimates)
+        counts.sources_updated += store.write_source_biases(conn, summary.source_biases)
+    else:
         logger.error(
             "reconcile_fit_not_written",
             quantity=quantity,
@@ -243,12 +330,23 @@ def _fit_quantity(
             worst=worst,
             hint="estimates left at their previous values; see model_convergence",
         )
-        return summary.diagnostics
 
-    counts.sides_estimated += store.write_side_estimates(conn, summary.side_estimates)
-    counts.sources_updated += store.write_source_biases(conn, summary.source_biases)
-
-    return summary.diagnostics
+    # Judged and written on its own diagnostics, whatever happened to the
+    # published fit above.
+    neutral_diagnostics = None
+    if quantity == "troops":
+        neutral_diagnostics = _fit_neutral_troops(
+            conn,
+            design=design,
+            priors=priors,
+            reports=reports,
+            params=params,
+            ci_mass=ci_mass,
+            inflation=inflation,
+            run_id=run_id,
+            processed_root=processed_root,
+        )
+    return summary.diagnostics, neutral_diagnostics
 
 
 def _run_body(
@@ -333,8 +431,9 @@ def _run_body(
             conn.commit()
 
         per_quantity_diagnostics: dict[str, dict[str, Any]] = {}
+        neutral_blocks: dict[str, dict[str, Any]] = {}
         for quantity in quantities_with_reports:
-            per_quantity_diagnostics[quantity] = _fit_quantity(
+            per_quantity_diagnostics[quantity], neutral_block = _fit_quantity(
                 conn,
                 quantity=quantity,
                 reports=reports,
@@ -345,7 +444,10 @@ def _run_body(
                 run_id=run_id,
                 computed_at=computed_at,
                 counts=counts,
+                processed_root=processed_root,
             )
+            if neutral_block is not None:
+                neutral_blocks["troops_neutral"] = neutral_block
             # Both quantities point at the one shared run id: see the module
             # docstring for why splitting this across two model_runs rows
             # would leave model_convergence and estimates_are_not_stale
@@ -356,6 +458,7 @@ def _run_body(
         diagnostics = {
             "worst": _combined_worst(per_quantity_diagnostics),
             **per_quantity_diagnostics,
+            **neutral_blocks,
         }
         store.complete_model_run(conn, run_id, diagnostics)
         if owns_connection:

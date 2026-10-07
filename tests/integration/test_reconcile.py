@@ -477,7 +477,7 @@ def test_every_quality_check_in_the_reconcile_spec_executes(
     del reconciled
     raw = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))
     checks = raw["quality_checks"]
-    assert len(checks) == 8
+    assert len(checks) == 10
 
     runner = QualityRunner(conn)
     results = runner.run_all(checks)
@@ -549,6 +549,67 @@ def test_one_run_covers_both_quantities_and_the_estimates_are_not_stale_gate_rea
     # for a reason that has nothing to do with reconcile's own idempotency.
     stale = conn.execute(_ESTIMATES_ARE_NOT_STALE).scalar_one()
     assert stale == 0
+
+
+def _quality_check(name: str) -> dict[str, Any]:
+    raw = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))
+    return next(check for check in raw["quality_checks"] if check["name"] == name)
+
+
+def test_the_neutral_fit_writes_estimates_diagnostics_and_a_draws_file(
+    conn: Connection, reconciled: Path, seed_ids: dict[str, int]
+) -> None:
+    import numpy as np
+
+    side = seed_ids["side_multi"]
+    row = conn.execute(
+        text(
+            "SELECT est_troops_neutral, est_troops_neutral_lo, est_troops_neutral_hi, "
+            "est_troops_neutral_log_mean, est_troops_neutral_log_sd, "
+            "est_troops_neutral_run_id, "
+            "is_defender FROM battle_sides WHERE side_id = :s"
+        ),
+        {"s": side},
+    ).one()
+    value, lo, hi, log_mean, log_sd, run_id, is_defender = row
+    assert run_id is not None
+    assert value is not None and lo < value < hi
+    assert math.isclose(math.log(value), log_mean, abs_tol=0.5)
+    assert log_sd > 0
+    assert is_defender is None  # classify fills it later
+
+    diagnostics = conn.execute(
+        text("SELECT diagnostics FROM model_runs WHERE run_id = :r"), {"r": run_id}
+    ).scalar_one()
+    block = diagnostics["troops_neutral"]
+    assert block["written"] is True
+    assert set(block["worst"]) == {"max_rhat", "min_ess_bulk", "divergences"}
+    assert block["m0"]["mean"] is not None and block["s0"]["mean"] is not None
+    # Neutral diagnostics stay out of the rollup model_convergence reads.
+    assert "troops_neutral" not in diagnostics["worst"]
+
+    path = reconciled / "reconcile" / f"neutral_draws_run{run_id}.npz"
+    assert path.exists()
+    with np.load(path) as data:
+        assert int(data["run_id"]) == run_id
+        assert data["draws"].shape[1] == len(data["side_id"]) == len(data["battle_id"])
+        assert data["draws"].shape[0] <= 1000
+        assert data["draws"].dtype == np.float64
+        assert side in set(data["side_id"].tolist())
+
+
+def test_the_neutral_gates_execute_and_the_estimates_are_not_stale(
+    conn: Connection, reconciled: Path
+) -> None:
+    del reconciled
+    # The gate's SQL hard-codes ess >= 400; this file samples 200 draws on
+    # purpose, so only execution is asserted for the convergence gate. Its
+    # failing branch is pinned by test_an_unconverged_fit_writes_no_estimates.
+    converged = QualityRunner(conn).run_one(_quality_check("neutral_fit_converged"))
+    assert "SQL execution failed" not in converged.message, converged
+    stale = QualityRunner(conn).run_one(_quality_check("neutral_estimates_are_not_stale"))
+    assert "SQL execution failed" not in stale.message, stale
+    assert stale.passed, stale
 
 
 # ─── Standalone tests ────────────────────────────────────────────────────────
@@ -719,6 +780,11 @@ def test_an_unconverged_fit_writes_no_estimates(engine: Engine, tmp_path: Path) 
                 "AND diagnostics IS NOT NULL AND run_id = (SELECT MAX(run_id) FROM model_runs)"
             )
         ).scalar_one()
+        neutral_estimate = conn.execute(
+            text("SELECT est_troops_neutral FROM battle_sides WHERE side_id = :s"), {"s": side}
+        ).scalar_one()
+        neutral_gate = QualityRunner(conn).run_one(_quality_check("neutral_fit_converged"))
+        draws_files = list((tmp_path / "reconcile").glob("neutral_draws_run*.npz"))
     finally:
         conn.rollback()
         conn.close()
@@ -733,3 +799,8 @@ def test_an_unconverged_fit_writes_no_estimates(engine: Engine, tmp_path: Path) 
 
     assert estimate is None
     assert completed == 1
+    # The neutral fit is judged by the same thresholds: nothing written, the
+    # gate fails, and there is no fallback to the published estimates.
+    assert neutral_estimate is None
+    assert draws_files == []
+    assert not neutral_gate.passed

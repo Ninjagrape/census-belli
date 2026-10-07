@@ -15,8 +15,14 @@ outputs:
         _method / _updated_at provenance columns)
   - db: sources (troop_bias_mu/sd, troop_sigma_mu/sd, casualty_bias_mu/sd,
         casualty_sigma_mu/sd, bias_run_id, bias_n_*_reports, bias_updated_at)
+  - db: battle_sides (est_troops_neutral, _lo, _hi, _log_mean, _log_sd, the
+        regime-neutral troop total from a second fit, for force ratios only;
+        is_defender is added but not populated here)
   - db: model_runs (one row per run, model_type='source_disagreement',
-        carrying the sampler diagnostics the model_convergence gate reads)
+        carrying the sampler diagnostics the model_convergence gate reads, and
+        a troops_neutral block the neutral_fit_converged gate reads)
+  - data/processed/reconcile/neutral_draws_run{run_id}.npz (joint log-scale
+        draws of the neutral fit, read by the impute stage)
   - db: missing_data_log (field_name='troop_total' / 'casualties' for sides
         that have reports but none the model can use)
   - data/processed/reconciliation_report.json
@@ -104,6 +110,41 @@ quality_checks:
     description: >
       The sampler converged. Says nothing about whether the data support the
       model -- see calibration_set_is_not_empty for that.
+
+  - name: neutral_fit_converged
+    check: >
+      SELECT COUNT(*)
+      FROM (
+        SELECT diagnostics
+        FROM model_runs
+        WHERE model_type = 'source_disagreement'
+          AND completed_at IS NOT NULL
+        ORDER BY run_id DESC
+        LIMIT 1
+      ) latest
+      WHERE latest.diagnostics -> 'troops' IS NOT NULL
+        AND (
+          latest.diagnostics -> 'troops_neutral' IS NULL
+          OR COALESCE(
+               (latest.diagnostics -> 'troops_neutral' -> 'worst' ->> 'max_rhat')::float,
+               'Infinity'::float) > 1.05
+          OR COALESCE(
+               (latest.diagnostics -> 'troops_neutral' -> 'worst' ->> 'min_ess_bulk')::float,
+               0::float) < 400
+          OR COALESCE(
+               (latest.diagnostics -> 'troops_neutral' -> 'worst' ->> 'divergences')::float,
+               1::float) > 0
+        )
+    threshold: "= 0"
+    severity: error
+    description: >
+      The regime-neutral troops fit converged, on the same limits as
+      model_convergence. When it fails no est_troops_neutral values and no
+      neutral_draws_run file are written for that run, and there is no
+      fallback to the published estimates, because the published figures carry
+      the unlabelled-regime prior that the neutral fit exists to remove from
+      force ratios. Kept apart from model_convergence, which reads the
+      published fits only.
 
   - name: estimates_populated
     check: >
@@ -220,6 +261,21 @@ quality_checks:
       both report. Below this the biases are the prior with extra steps, and
       model_convergence will still pass, because rhat measures the sampler and
       not the evidence.
+
+  - name: neutral_estimates_are_not_stale
+    check: >
+      SELECT COUNT(*)
+      FROM battle_sides bs
+      WHERE bs.est_troops_neutral IS NOT NULL
+        AND bs.est_troops_neutral_run_id IS DISTINCT FROM (
+          SELECT MAX(run_id) FROM model_runs WHERE model_type = 'source_disagreement'
+        )
+    threshold: "= 0"
+    severity: warning
+    description: >
+      Every neutral estimate comes from the newest source_disagreement run.
+      Reads est_troops_neutral_run_id, not est_troops_run_id, because the
+      neutral fit is written independently of the published one.
 
   - name: model_run_recorded
     check: >

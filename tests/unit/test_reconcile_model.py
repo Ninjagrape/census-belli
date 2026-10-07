@@ -77,3 +77,38 @@ def test_no_model_variable_shares_a_name_with_a_dimension(quantity: str) -> None
     collisions = set(model.named_vars) & set(model.coords)
 
     assert not collisions, f"variables named like dimensions: {sorted(collisions)}"
+
+
+def test_the_neutral_option_changes_only_the_unlabelled_and_era_priors() -> None:
+    import numpy as np
+
+    design = build_design(_reports("troops"), quantity="troops", ancient_cutoff_year=500)
+    inflation = InflationPrior(faithful_mu=0.0, faithful_sd=0.2, rhetorical_mu=1.5)
+
+    published = build_model(design, priors=ModelPriors(), inflation=inflation)
+    neutral = build_model(design, priors=ModelPriors(), inflation=inflation, neutral=True)
+
+    # Same variables either way: the option is a prior change, not a new model.
+    assert set(published.named_vars) == set(neutral.named_vars)
+
+    def prior_params(model: object, name: str) -> tuple[float, float]:
+        rv = model.named_vars[name]  # type: ignore[attr-defined]
+        mu, sigma = rv.owner.inputs[-2:]
+        return float(np.mean(mu.eval())), float(np.mean(sigma.eval()))
+
+    assert prior_params(neutral, "a_era") == (0.0, 0.25)
+    free = list(neutral.coords["regime_free"])
+    g_mu, g_sd = neutral.named_vars["g_free"].owner.inputs[-2:]
+    position = free.index("unlabelled")
+    assert g_mu.eval()[position] == 0.0
+    assert g_sd.eval()[position] == 0.2
+    published_mu = published.named_vars["g_free"].owner.inputs[-2].eval()
+    assert published_mu[position] > 0.0
+
+
+def test_the_neutral_option_is_refused_for_casualties() -> None:
+    import pytest
+
+    design = build_design(_reports("casualties"), quantity="casualties", ancient_cutoff_year=500)
+    with pytest.raises(ValueError, match="troops only"):
+        build_model(design, priors=ModelPriors(), inflation=InflationPrior(), neutral=True)

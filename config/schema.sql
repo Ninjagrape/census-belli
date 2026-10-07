@@ -287,6 +287,21 @@ CREATE TABLE battle_sides (
     est_casualties_method     TEXT,
     est_casualties_updated_at TIMESTAMPTZ,
 
+    -- Regime-neutral troop total from a second reconcile fit, in which an
+    -- unlabelled figure is read as an ordinary modern count. For force ratios
+    -- only, never displayed as a troop count. Log columns are the posterior
+    -- mean and sd of the side's log strength. The neutral estimates carry
+    -- their own run id, est_troops_neutral_run_id, independent of
+    -- est_troops_run_id.
+    est_troops_neutral          DOUBLE PRECISION,
+    est_troops_neutral_lo       DOUBLE PRECISION,
+    est_troops_neutral_hi       DOUBLE PRECISION,
+    est_troops_neutral_log_mean DOUBLE PRECISION,
+    est_troops_neutral_log_sd   DOUBLE PRECISION,
+    est_troops_neutral_run_id   INT,             -- FK added after model_runs exists
+    -- NULL means unknown. Unpopulated until classify fills it.
+    is_defender                 BOOLEAN,
+
     created_at      TIMESTAMPTZ DEFAULT now()
 );
 
@@ -511,7 +526,9 @@ ALTER TABLE battle_sides
     ADD CONSTRAINT battle_sides_est_troops_run_fk
         FOREIGN KEY (est_troops_run_id) REFERENCES model_runs(run_id),
     ADD CONSTRAINT battle_sides_est_casualties_run_fk
-        FOREIGN KEY (est_casualties_run_id) REFERENCES model_runs(run_id);
+        FOREIGN KEY (est_casualties_run_id) REFERENCES model_runs(run_id),
+    ADD CONSTRAINT battle_sides_est_troops_neutral_run_fk
+        FOREIGN KEY (est_troops_neutral_run_id) REFERENCES model_runs(run_id);
 
 CREATE INDEX idx_sides_est_troops_run ON battle_sides (est_troops_run_id);
 CREATE INDEX idx_sources_bias_run     ON sources (bias_run_id);

@@ -78,6 +78,20 @@ invites label switching and multimodal geometry for no gain: where the data
 exist they dominate it, and where they do not the first two moments are the
 whole of what the prior contributes.
 
+## The neutral fit
+
+``build_model(..., neutral=True)`` is the same model with two priors changed,
+and is fit for troops only. The unlabelled offset is almost all prior, so in a
+force ratio it cancels only when both sides share a regime mix; Gaugamela, with
+a labelled Persian claim against an unlabelled Macedonian figure, is tilted by
+the whole of ``_UNLABELLED_WEIGHT``. In the neutral fit the unlabelled regime
+takes the faithful-component prior (an unmarked figure is read as an ordinary
+modern count) and ``a_era`` takes ``N(0, _NEUTRAL_ERA_SD)``. It is a prior
+rather than a pin at zero, so data that do identify an unlabelled-versus-anchor
+gap can still move it. Labelled regimes keep their fitted priors, and every
+identifiability device above is untouched. Neutral estimates are for ratios
+only, never for display as troop counts.
+
 ## Non-centred throughout
 
 Most group-level offsets in this corpus are weakly identified: a source seen
@@ -139,7 +153,13 @@ _UNLABELLED_WEIGHT: Final[float] = 0.5
 # quantity. It should not be quietly doing half the debiasing of the corpus.
 _LEVEL_PRIOR_SD: Final[float] = 2.0
 
+# a_era's prior in the neutral fit. Tight on purpose: the era term is the
+# other route by which an unmarked ancient figure gets deflated, and the
+# neutral fit exists to switch that route off for ratios.
+_NEUTRAL_ERA_SD: Final[float] = 0.25
+
 _TROOPS: Final[str] = "troops"
+_UNLABELLED: Final[str] = "unlabelled"
 
 
 @dataclass(frozen=True)
@@ -237,9 +257,7 @@ class ModelPriors:
             source_deviation_prior_sd=float(params.get("source_deviation_prior_sd", 0.5)),
             sigma_deviation_prior_sd=float(params.get("sigma_deviation_prior_sd", 0.3)),
             scope_offset_prior_sd=float(params.get("scope_offset_prior_sd", 0.4)),
-            casualty_type_offset_prior_sd=float(
-                params.get("casualty_type_offset_prior_sd", 0.7)
-            ),
+            casualty_type_offset_prior_sd=float(params.get("casualty_type_offset_prior_sd", 0.7)),
             scope_unknown_dispersion_sd=float(params.get("scope_unknown_dispersion_sd", 0.4)),
             estimate_dispersion_sd=float(params.get("estimate_dispersion_sd", 0.3)),
             roundness_dispersion_sd=float(params.get("roundness_dispersion_sd", 0.3)),
@@ -339,6 +357,7 @@ def build_model(
     *,
     priors: ModelPriors,
     inflation: InflationPrior,
+    neutral: bool = False,
 ) -> pm.Model:
     """Build the hierarchical source-disagreement model for one quantity.
 
@@ -347,6 +366,8 @@ def build_model(
             :func:`pipeline.reconcilers.design.build_design`.
         priors: Hierarchy scales from the agent spec.
         inflation: The fitted claim-regime inflation prior.
+        neutral: Build the regime-neutral variant used for force ratios; see
+            "The neutral fit" in the module docstring. Troops only.
 
     Returns:
         An unsampled :class:`pymc.Model`.
@@ -354,8 +375,9 @@ def build_model(
     Raises:
         ImportError: If pymc is not installed. Raised here rather than at
             import time, so the rest of the package stays usable without it.
-        ValueError: If the likelihood family is not recognised, or the anchor
-            regime is not one the design knows about.
+        ValueError: If the likelihood family is not recognised, the anchor
+            regime is not one the design knows about, or ``neutral`` is
+            requested for a quantity other than troops.
     """
     import pymc as pm  # noqa: PLC0415 - deliberately deferred; see module docstring
     import pytensor.tensor as pt  # noqa: PLC0415
@@ -371,6 +393,9 @@ def build_model(
             "pipeline.reconcilers.records.CLAIM_REGIMES have diverged."
         )
 
+    if neutral and design.quantity != _TROOPS:
+        raise ValueError("The neutral fit exists for troops only; casualties get none.")
+
     coords = design.coords()
     free_regimes = [r for r in design.regimes if r != inflation.anchor_regime]
     coords["regime_free"] = free_regimes
@@ -383,7 +408,7 @@ def build_model(
 
     with pm.Model(coords=coords) as model:
         # ── claim regime: the inflation term, anchor pinned to zero ──────────
-        g_regime = _regime_bias(pm, pt, design, inflation, free_regimes)
+        g_regime = _regime_bias(pm, pt, design, inflation, free_regimes, neutral=neutral)
         g_regime = pm.Deterministic("g_regime", g_regime, dims="regime")
 
         # ── scope or casualty-type offsets ───────────────────────────────────
@@ -423,7 +448,11 @@ def build_model(
         # applying the era term to it as well deflates the same rows twice.
         # The prior is measured from the gold set's own years. The mixture-gap
         # value used before was a different quantity with the opposite sign.
-        a_era = pm.Normal("a_era", mu=inflation.era_mu, sigma=inflation.era_sd)
+        a_era = pm.Normal(
+            "a_era",
+            mu=0.0 if neutral else inflation.era_mu,
+            sigma=_NEUTRAL_ERA_SD if neutral else inflation.era_sd,
+        )
         era_column = _data(pm, "data_era", design.era * _unlabelled_mask(design))
 
         # ── observation scale ────────────────────────────────────────────────
@@ -479,9 +508,7 @@ def build_model(
         )
         unknown_mask = _unknown_level_mask(design)
         if unknown_mask.any():
-            sigma_unknown = pm.HalfNormal(
-                "sigma_unknown", sigma=priors.scope_unknown_dispersion_sd
-            )
+            sigma_unknown = pm.HalfNormal("sigma_unknown", sigma=priors.scope_unknown_dispersion_sd)
             var = var + sigma_unknown**2 * _data(pm, "data_unknown_mask", unknown_mask)
         sd = pm.math.sqrt(var)
 
@@ -498,6 +525,7 @@ def build_model(
         anchor_regime=inflation.anchor_regime,
         free_regimes=free_regimes,
         era_mu=inflation.era_mu,
+        neutral=neutral,
     )
     return model
 
@@ -576,6 +604,8 @@ def _regime_bias(
     design: Design,
     inflation: InflationPrior,
     free_regimes: list[str],
+    *,
+    neutral: bool = False,
 ) -> Any:
     """Build the claim-regime bias vector, with the anchor pinned to zero.
 
@@ -585,6 +615,8 @@ def _regime_bias(
         design: The design, for the regime labels.
         inflation: The fitted prior.
         free_regimes: The regimes that are not the anchor.
+        neutral: Give the unlabelled regime the faithful-component prior
+            instead of its mixture-weighted one.
 
     Returns:
         A pytensor vector over the ``regime`` dimension.
@@ -593,8 +625,13 @@ def _regime_bias(
     if not free_regimes:
         return full
 
-    mus = np.array([inflation.moments_for(r)[0] for r in free_regimes])
-    sds = np.array([inflation.moments_for(r)[1] for r in free_regimes])
+    def moments(regime: str) -> tuple[float, float]:
+        if neutral and regime == _UNLABELLED:
+            return inflation.faithful_mu, inflation.faithful_sd
+        return inflation.moments_for(regime)
+
+    mus = np.array([moments(r)[0] for r in free_regimes])
+    sds = np.array([moments(r)[1] for r in free_regimes])
     free = pm_module.Normal("g_free", mu=mus, sigma=sds, dims="regime_free")
 
     positions = np.array([design.regimes.index(r) for r in free_regimes], dtype=int)
@@ -640,9 +677,7 @@ def _level_offsets(pm_module: Any, pt_module: Any, design: Design, priors: Model
             parts.append(running)
         else:
             parts.append(
-                -pm_module.HalfNormal(
-                    f"d_{level}", sigma=priors.casualty_type_offset_prior_sd
-                )
+                -pm_module.HalfNormal(f"d_{level}", sigma=priors.casualty_type_offset_prior_sd)
             )
 
     return pt_module.stack(parts)
@@ -713,9 +748,7 @@ def _attach_likelihood(
         # not delivered. Gamma(2, 0.5) has mean 4, so nu sits near 6 and the
         # tails stay genuinely heavy. Registered as a Deterministic so it
         # reaches the trace and the convergence diagnostics.
-        nu = pm_module.Deterministic(
-            "nu", pm_module.Gamma("nu_raw", alpha=2.0, beta=0.5) + 2.0
-        )
+        nu = pm_module.Deterministic("nu", pm_module.Gamma("nu_raw", alpha=2.0, beta=0.5) + 2.0)
 
     def dist(rows: Any) -> Any:
         if family == "normal":

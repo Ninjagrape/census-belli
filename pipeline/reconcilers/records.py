@@ -25,6 +25,7 @@ from pipeline.extractors.records import BRANCHES, CASUALTY_TYPES, SCOPES
 
 __all__ = [
     "CLAIM_REGIMES",
+    "NeutralSideEstimate",
     "ReconcileCounts",
     "Report",
     "SideEstimate",
@@ -289,6 +290,34 @@ class SideEstimate:
     n_sources: int
     method: str
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class NeutralSideEstimate:
+    """One side's regime-neutral troop total, for force ratios only.
+
+    Mirrors ``est_troops_neutral*`` on ``battle_sides``. The value is what the
+    second, regime-neutral fit says, with every unmarked figure read as an
+    ordinary modern count. It exists so a ratio between two sides is not tilted
+    by the unlabelled-regime prior, and must never be shown as a troop count.
+
+    Attributes:
+        side_id: The ``battle_sides.side_id``.
+        value: ``exp`` of the posterior median of ``mu_side``.
+        lo: Lower end of the credible interval, exp scale.
+        hi: Upper end of the credible interval, exp scale.
+        log_mean: Posterior mean of ``mu_side`` on the log scale.
+        log_sd: Posterior sd of ``mu_side`` on the log scale.
+        run_id: The ``model_runs.run_id`` the fit belongs to.
+    """
+
+    side_id: int
+    value: float
+    lo: float
+    hi: float
+    log_mean: float
+    log_sd: float
+    run_id: int
 
 
 @dataclass(frozen=True)

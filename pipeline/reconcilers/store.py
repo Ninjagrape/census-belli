@@ -35,11 +35,17 @@ from typing import Any, Final
 import structlog
 from sqlalchemy import text
 
-from pipeline.reconcilers.records import Quantity, SideEstimate, SourceBias
+from pipeline.reconcilers.records import (
+    NeutralSideEstimate,
+    Quantity,
+    SideEstimate,
+    SourceBias,
+)
 
 __all__ = [
     "complete_model_run",
     "start_model_run",
+    "write_neutral_estimates",
     "write_side_estimates",
     "write_source_biases",
 ]
@@ -73,6 +79,21 @@ _UPDATE_SIDE_TROOPS = text(
         est_troops_n_sources  = :n_sources,
         est_troops_method     = :method,
         est_troops_updated_at = :updated_at
+    WHERE side_id = :side_id
+    """
+)
+
+# The neutral family has its own run id: it is written independently of the
+# published fit, so the two can come from different runs.
+_UPDATE_SIDE_NEUTRAL = text(
+    """
+    UPDATE battle_sides SET
+        est_troops_neutral          = :value,
+        est_troops_neutral_lo       = :lo,
+        est_troops_neutral_hi       = :hi,
+        est_troops_neutral_log_mean = :log_mean,
+        est_troops_neutral_log_sd   = :log_sd,
+        est_troops_neutral_run_id   = :run_id
     WHERE side_id = :side_id
     """
 )
@@ -233,6 +254,32 @@ def write_side_estimates(conn: Any, estimates: list[SideEstimate]) -> int:
         )
         written += 1
     return written
+
+
+def write_neutral_estimates(conn: Any, estimates: list[NeutralSideEstimate]) -> int:
+    """Write the regime-neutral troop estimates onto ``battle_sides``.
+
+    Args:
+        conn: An open database connection.
+        estimates: The neutral fit's per-side estimates.
+
+    Returns:
+        How many rows were written.
+    """
+    for estimate in estimates:
+        conn.execute(
+            _UPDATE_SIDE_NEUTRAL,
+            {
+                "side_id": estimate.side_id,
+                "value": estimate.value,
+                "lo": estimate.lo,
+                "hi": estimate.hi,
+                "log_mean": estimate.log_mean,
+                "log_sd": estimate.log_sd,
+                "run_id": estimate.run_id,
+            },
+        )
+    return len(estimates)
 
 
 def write_source_biases(conn: Any, biases: list[SourceBias]) -> int:

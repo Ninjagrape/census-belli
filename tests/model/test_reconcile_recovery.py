@@ -244,6 +244,47 @@ def test_convergence_is_clean(main_fit: Fit) -> None:
     assert worst["divergences"] == 0, worst
 
 
+@pytest.fixture(scope="module")
+def main_neutral_fit(
+    main_truth: object, inflation_prior: object, troop_priors: ModelPriors
+) -> tuple[object, float]:
+    """The regime-neutral fit on the main corpus, and how long it took."""
+    import time
+
+    from pipeline.reconcilers.design import build_design
+    from pipeline.reconcilers.model import build_model, sample
+
+    design = build_design(
+        main_truth.reports,  # type: ignore[attr-defined]
+        quantity="troops",
+        ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
+    )
+    started = time.perf_counter()
+    model = build_model(
+        design,
+        priors=troop_priors,
+        inflation=inflation_prior,  # type: ignore[arg-type]
+        neutral=True,
+    )
+    idata = sample(model, MAIN_SAMPLER)
+    return idata, time.perf_counter() - started
+
+
+def test_the_neutral_fit_clears_the_write_thresholds_on_the_main_corpus(
+    main_neutral_fit: tuple[object, float], record_property: pytest.RecordProperty
+) -> None:
+    from pipeline.reconcilers.summarise import _convergence
+
+    idata, seconds = main_neutral_fit
+    worst, worst_variable, _ = _convergence(idata)  # type: ignore[arg-type]
+    record_property("neutral_fit_seconds", round(seconds, 1))
+    print(f"neutral fit: {seconds:.1f}s worst={worst} at {worst_variable}")
+
+    assert worst["max_rhat"] is not None and worst["max_rhat"] <= 1.05, worst
+    assert worst["min_ess_bulk"] is not None and worst["min_ess_bulk"] >= 400, worst
+    assert worst["divergences"] == 0, worst
+
+
 def test_the_corpus_level_is_identified_when_the_anchor_regime_is_present(main_fit: Fit) -> None:
     import arviz as az
 
