@@ -147,6 +147,17 @@ adding fixtures — including one that had silently disabled an entire data
 source across two stages, and one that labelled every naval battle a land
 engagement while 73 unit tests passed.
 
+## Inspecting pipeline data
+
+A read-only Streamlit dashboard shows the data at each stage: table sizes, crawl and extract completeness, resolve outcomes, reconcile reports against estimates, classify attribution, imputation rounds, quality gates and a per-battle drill-down.
+
+```bash
+pip install -e ".[inspect]"
+streamlit run scripts/inspector_app.py
+```
+
+The database URL defaults to `INSPECT_DATABASE_URL`, else `DATABASE_URL`, and can be changed in the sidebar. Every connection is opened with `default_transaction_read_only=on`, so the dashboard cannot write.
+
 ## Project status
 
 Verified against a live PostgreSQL 15: the database layer, the schema and its

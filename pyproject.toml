@@ -31,6 +31,8 @@ dependencies = [
     # arviz 1.x, a rewritten API.
     "pymc>=5.28,<6",
     "arviz>=0.18,<1",
+    # KS test in the impute stage's distributional gate; already pulled in by pymc.
+    "scipy>=1.11",
     # Measured, not assumed. PyTensor needs g++ to compile its C backend and
     # falls back to Python without one -- 42s to sample a two-parameter toy on
     # the development machine, which puts the reconcile model out of reach.
@@ -77,7 +79,11 @@ dev = [
     # so the lint job failed on a stub that had been present here all along.
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.21",
+    "general-war[inspect]",
 ]
+
+# Read-only Streamlit dashboard: streamlit run scripts/inspector_app.py
+inspect = ["streamlit>=1.50"]
 
 # Without this, setuptools' flat-layout auto-discovery sees agents/, config/,
 # data/, models/ and alembic/ alongside pipeline/, refuses to guess, and the
@@ -112,7 +118,7 @@ ignore_missing_imports = true
 # python_version = "3.11" to match CI, so following that source is a hard
 # syntax error in a third-party package we do not control.
 [[tool.mypy.overrides]]
-module = ["pymc.*", "pytensor.*", "arviz.*", "xarray.*", "zarr.*", "nutpie.*"]
+module = ["pymc.*", "pytensor.*", "arviz.*", "xarray.*", "zarr.*", "nutpie.*", "scipy.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
 
