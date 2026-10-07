@@ -1,0 +1,56 @@
+# Priors for the impute stage's joint model (pipeline/imputers/).
+#
+# Everything is on the log-troops scale. Hyperparameter scales are judgement
+# calls, not measurements: the corpus is too sparse to fit them, so each one
+# says why it has the width it has.
+
+# Era bins on battles.year_astronomical (handover.md 5.1: never date_start).
+# `before` is an exclusive upper bound, so 499 is ancient and 500 is medieval.
+# BC years are negative in astronomical numbering and fall into 'ancient'.
+# 'undated' is a bin of its own, not a fallback to the nearest era: a battle
+# with no date says nothing about its era, so it takes a pooled, wide prior.
+eras:
+  - {name: ancient,      before: 500}
+  - {name: medieval,     before: 1500}
+  - {name: early_modern, before: 1792}
+  - {name: napoleonic,   before: 1816}
+  - {name: industrial,   before: 1914}
+  - {name: modern,       before: null}
+
+# log_mu / log_sd carried over from the earlier agents/impute.yaml era_priors,
+# with sd widened by 0.5: those numbers were a literature sketch, and a prior
+# that is wrong and tight would pull every sparse era toward the sketch.
+# The neutral scale is a ratio scale (reconcile's regime-neutral fit), so the
+# level is only loosely anchored by these; they matter most for eras with
+# few observed sides.
+era_priors:
+  ancient:      {log_mu: 9.2,  log_sd: 2.0}   # ~10,000
+  medieval:     {log_mu: 8.5,  log_sd: 2.3}   # ~5,000
+  early_modern: {log_mu: 9.9,  log_sd: 1.7}   # ~20,000
+  napoleonic:   {log_mu: 10.5, log_sd: 1.5}   # ~35,000
+  industrial:   {log_mu: 11.0, log_sd: 2.0}   # ~60,000
+  modern:       {log_mu: 11.5, log_sd: 2.5}   # ~100,000
+  # Pooled over the dated eras, widest sd of all: undated battles come from
+  # anywhere in the corpus, so the prior must not favour one era.
+  undated:      {log_mu: 10.0, log_sd: 2.5}
+
+# Scale of the HalfNormal prior on each hyperparameter.
+hyperpriors:
+  # Between-battle sd of the shared battle effect u_b. Armies in one battle
+  # are of comparable scale (same logistics, same era); 1.0 allows a factor
+  # of e between battles without forcing it.
+  tau_b: 1.0
+  # Within-battle residual sd. Wider than tau_b because the two sides of a
+  # battle can differ by an order of magnitude (Gaugamela, Thermopylae).
+  sigma: 1.0
+  # Polity and commander random effects. Smaller: after era, outcome and
+  # type, what is left for a polity or a general to explain is modest, and a
+  # wide prior would let a commander with one battle soak up its noise.
+  tau_p: 0.5
+  tau_c: 0.5
+  # ZeroSumNormal sds. Outcome carries the most signal (winners tend to be
+  # larger); battle type is intermediate; defender is nearly all 'unknown'
+  # until classify fills it, so its prior is tight.
+  zsn_outcome: 0.5
+  zsn_type: 0.5
+  zsn_defender: 0.3

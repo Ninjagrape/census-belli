@@ -19,12 +19,14 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Final, Protocol, cast
 
 import structlog
@@ -535,12 +537,75 @@ def _check_diagnostics_json(
     )
 
 
+def _check_imputation_gate(
+    name: str,
+    check: dict[str, Any],
+    severity: Severity,
+    conn: Connection | None,
+) -> QualityCheckResult:
+    """Report one dataset-level gate recorded by the impute stage.
+
+    The impute stage computes its gates from the imputed rounds before writing
+    and records them in ``{root}/{scale}/gate_report.json``. This handler reads that file rather
+    than recomputing, so the verdict is about exactly the rounds on disk.
+
+    Args:
+        name: The check's name, as declared in the agent spec.
+        check: The raw check dict; ``params.gate`` names the gate (default: the
+            check's own name) and ``params.root`` the imputed-data root, ``params.scale`` the scale
+            whose report to read (default ``neutral``, the primary).
+        severity: The severity to report the result at.
+        conn: Unused; the gate reads a file, not the database.
+
+    Returns:
+        The check's result. Never raises.
+    """
+    del conn
+    raw_params = check.get("params")
+    params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
+    gate_name = str(params.get("gate", name))
+    root = Path(str(params.get("root", "data/imputed")))
+    threshold_raw = str(check.get("threshold", ""))
+
+    def failure(message: str) -> QualityCheckResult:
+        return QualityCheckResult(
+            name=name, passed=False, severity=severity, threshold=threshold_raw, message=message
+        )
+
+    path = root / str(params.get("scale", "neutral")) / "gate_report.json"
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return failure(f"Cannot read {path}: {type(exc).__name__}. Run the impute stage first.")
+
+    gates = report.get("gates") if isinstance(report, dict) else None
+    entry = next(
+        (g for g in gates or [] if isinstance(g, dict) and g.get("name") == gate_name), None
+    )
+    if entry is None:
+        written = report.get("rounds_written") if isinstance(report, dict) else None
+        return failure(
+            f"Gate {gate_name!r} is absent from {path} (rounds_written={written}); "
+            "the fit did not converge, so no rounds exist to check."
+        )
+    passed = bool(entry.get("passed"))
+    return QualityCheckResult(
+        name=name,
+        passed=passed,
+        severity=severity,
+        actual_value=entry.get("actual"),
+        threshold=str(entry.get("threshold", threshold_raw)),
+        message="" if passed else str(entry.get("message", "")),
+    )
+
+
 MethodHandler = Callable[[str, dict[str, Any], Severity, "Connection | None"], QualityCheckResult]
 
 # A `method:` listed here is executed by its handler. Anything else falls
 # through to UNIMPLEMENTED_METHODS for its reason.
 METHOD_HANDLERS: dict[str, MethodHandler] = {
     "diagnostics_json": _check_diagnostics_json,
+    "imputation_gate": _check_imputation_gate,
 }
 
 # Why each `method:` without a handler cannot run yet. Every method named in
@@ -558,9 +623,7 @@ UNIMPLEMENTED_METHODS: dict[str, str] = {
         "(rhat, ess_bulk, divergences via ArviZ)"
     ),
     "posterior_check": "Requires the fitted posterior from the model stage",
-    "per_round_check": "Requires the imputed datasets in data/imputed/round_{n}/",
-    "range_check": "Requires the imputed values from the impute stage",
-    "statistical_test": "Requires observed and imputed distributions for a KS test",
+    "imputation_gate": "Requires data/imputed/{scale}/gate_report.json from the impute stage",
     "brier_score": "Requires held-out predictions from the evaluate stage",
     "jaccard_overlap": "Requires sensitivity variant rankings from the evaluate stage",
     "held_out_accuracy": "Requires the k-fold held-out predictions from the evaluate stage",

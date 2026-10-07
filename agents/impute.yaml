@@ -1,73 +1,162 @@
 stage: impute
 description: >
-  Multiple imputation for missing troop data. Generates N complete datasets,
-  each with plausible values drawn from a conditional model. The imputation
-  model conditions on era, polity, war, battle type, outcome, and any
-  available partial troop data. Missingness class from the classify stage
-  informs the imputation model specification.
+  Multiple imputation of missing log troop totals, by one joint Bayesian model
+  rather than MICE with predictive mean matching. Why: there is one missing
+  variable (log troops) and every other field is a covariate, so chained
+  equations would reduce to a single conditional model anyway, and PMM would
+  only borrow values from other sides. The joint model marginalises each
+  battle's shared effect analytically (one MvNormal per battle, over its
+  observed sides), which handles a battle with both sides missing with no
+  special case. Observed sides are overimputed: their latent value is redrawn
+  given reconcile's likelihood rather than copied through, because treating a
+  noisy estimate as exact puts its measurement error into the downstream
+  force ratio as signal and attenuates beta_force. Era bins, era priors and
+  hyperparameter scales live in config/imputation_priors.yaml.
+
+  Outcome is a covariate of the imputation model on purpose. Rubin's
+  compatibility condition for proper multiple imputation requires the
+  imputation model to condition on every variable the downstream analysis
+  uses; the model stage regresses outcome on the force ratio, so imputing
+  without outcome would draw ratios that are independent of it and bias the
+  slope toward zero. With overimputation there is a second route: an observed
+  side's outcome-conditioned prior mean also informs its redrawn value, so
+  observed sides carry outcome information through the prior mean as well as
+  missing ones. The cost is that the imputed ratios are partly built from the
+  outcome the model stage then explains with them. The check on that is
+  evaluate's observed_only variant (fit on observed-only data, no imputed or
+  overimputed values), which should agree with the imputed fit up to
+  precision.
+
+  Pooled 'unknown' level. A side with no polity (or no commander) falls in one
+  shared 'unknown' level of that random effect. This is a deliberate
+  missing-indicator choice: missing attribution tracks obscurity, so the
+  pooled level absorbs that shift rather than treating the side as a random
+  draw from the named polities.
+
+  Known limitation (shared reconcile error is not propagated). Reconcile's
+  neutral fit has measurement error shared across battles, g_unlabelled (the
+  unlabelled-regime offset) and a_era. Impute keeps only each battle's
+  within-battle covariance and draws battles independently in every round, so
+  that cross-battle correlation is dropped and the uncertainty in beta_force
+  is understated for battles in the mixed regime. Evaluate must run a +/-1 sd
+  g_unlabelled sensitivity to bound it; the proper fix is to export the regime
+  draws in the npz and carry them through the rounds (TODO.md, Stage 6).
+
+  Runs once per scale. neutral (primary) reads reconcile's regime-neutral
+  draws (data/processed/reconcile/neutral_draws_run{run_id}.npz) and divides
+  reconcile's side prior out of them; published (sensitivity) reads
+  battle_sides.est_troops_total and its interval, diagonally. Neutral values
+  are for force ratios only and must never be displayed as troop counts.
 
 inputs:
-  - db: battles, battle_sides, troop_reports, missing_data_log
-  - config/imputation_priors.yaml     # era/polity priors from military history literature
+  - db: battles (year_astronomical, battle_type), battle_sides, battle_commanders,
+        missing_data_log
+  - data/processed/reconcile/neutral_draws_run{run_id}.npz   # neutral scale
+  - config/imputation_priors.yaml
 
 outputs:
-  - data/imputed/round_{n}/           # one complete dataset per imputation round
-  - db: missing_data_log (was_imputed, imputation_method, imputed_value, imputed_lo/hi updated)
+  - data/imputed/{scale}/round_{n}/sides.csv      # columns side_id, battle_id, log_troops, is_imputed, scale
+  - data/imputed/{scale}/round_{n}/manifest.json
+  - data/imputed/{scale}/gate_report.json
+  - "db: model_runs (one row per invocation, model_type='imputation')"
+  - >-
+    db: missing_data_log, neutral scale only (troop_total rows of imputed sides:
+    was_imputed, imputation_method 'bayes_joint_v1_neutral_log', imputed_value
+    = exp(median over rounds), imputed_lo/hi = 2.5/97.5% of the n_imputations
+    rounds, not of every retained posterior draw; notes says so). The
+    published sensitivity run never writes this table.
 
 tools:
-  - pymc_mice           # MICE implementation in PyMC
+  - pymc_fit
   - db_update
 
 params:
-  n_imputations: 10                   # number of complete datasets to generate
-  mice_iterations: 20                 # MICE burn-in iterations
-  mice_method: predictive_mean_matching   # PMM preserves distributional shape better than regression
+  scale: neutral                      # 'neutral' (primary) or 'published' (sensitivity)
+  n_imputations: 20
+  # Primary analysis is MAR. mnar_delta is added to the imputed log value of
+  # missing sides whose missing_data_log troop row is classified 'mnar'. The
+  # evaluate stage's sensitivity grid is {-0.5, -0.25, +0.25, +0.5}; documented,
+  # not yet run.
+  mnar_delta: 0.0
+  # A side whose likelihood precision (after dividing out reconcile's prior)
+  # is at or below this carries about one sd of 1.4 of information: treated
+  # as missing.
+  min_lik_precision: 0.5
+  published_default_sd: 1.0           # log sd when a published estimate has no interval
 
-  # era-specific priors on army sizes (log-normal parameters)
-  # these are starting points, refined from config/imputation_priors.yaml
-  era_priors:
-    ancient:
-      log_mu: 9.2         # ~10,000 troops
-      log_sd: 1.5
-    medieval:
-      log_mu: 8.5         # ~5,000
-      log_sd: 1.8
-    early_modern:
-      log_mu: 9.9         # ~20,000
-      log_sd: 1.2
-    napoleonic:
-      log_mu: 10.5        # ~35,000
-      log_sd: 1.0
-    industrial:
-      log_mu: 11.0        # ~60,000
-      log_sd: 1.5
-    modern:
-      log_mu: 11.5        # ~100,000
-      log_sd: 2.0
+  imputation_priors: config/imputation_priors.yaml
+  reconcile_root: data/processed/reconcile
+  imputed_root: data/imputed
+  model_type: imputation
+
+  # sampling
+  mcmc_samples: 1000
+  mcmc_chains: 4
+  mcmc_tune: 1000
+  mcmc_target_accept: 0.9
+  mcmc_cores: 1                       # >1 respawns the interpreter under pytest on Windows
+  random_seed: 20261006
+  nuts_sampler: nutpie
+
+  # Nothing is written unless the fit meets these (same rule as reconcile).
+  write_max_rhat: 1.01
+  write_min_ess_bulk: 400
+  write_max_divergences: 0
+
+  # gate thresholds
+  ratio_limit: 4.0                    # |log force ratio| < 4, about 55x
+  value_min: 50
+  value_max: 10000000
+  ks_alpha: 0.01
+  ks_min_n: 5
 
 prompt: null   # statistical model, no LLM
 
 quality_checks:
   - name: imputation_completeness
-    check: >
-      For each imputation round, verify zero NULLs in troop totals
-      for battles that were in scope
-    method: per_round_check
+    method: imputation_gate
+    params: {gate: imputation_completeness, root: data/imputed, scale: neutral}
     severity: error
+    description: >
+      Every in-scope side has a finite value in every round.
+
+  - name: imputed_ratio_plausible
+    method: imputation_gate
+    params: {gate: imputed_ratio_plausible, root: data/imputed, scale: neutral}
+    severity: error
+    description: >
+      Median |log ratio| across rounds < 4 for every multi-sided battle with at
+      least one truly missing side; the message lists offending battle_ids.
+      Fully observed battles are reconcile's responsibility, not imputation's,
+      and a single tail round is posterior uncertainty, not a defect. Values
+      are never clipped.
 
   - name: imputed_values_plausible
-    check: >
-      No imputed troop count below 50 or above 10,000,000
-    method: range_check
+    method: imputation_gate
+    params: {gate: imputed_values_plausible, root: data/imputed, scale: neutral}
     severity: error
+    description: >
+      Published scale only: imputed troop counts between 50 and 10,000,000.
+      Passes as not applicable on the neutral scale, which is not a count.
 
   - name: distributional_check
-    check: >
-      KS test: distribution of imputed values should not significantly
-      differ from distribution of observed values within same era
-    method: statistical_test
-    threshold: "p > 0.01"
+    method: imputation_gate
+    params: {gate: distributional_check, root: data/imputed, scale: neutral}
     severity: warning
+    description: >
+      KS test within era, imputed against observed. Expected to fire under MAR
+      when missingness depends on covariates; read as information.
+
+  - name: model_convergence
+    check: "all rhat <= 1.01 and ess_bulk >= 400, no divergences"
+    method: diagnostics_json
+    params:
+      model_type: imputation
+      max_rhat: 1.01
+      min_ess_bulk: 400
+      max_divergences: 0
+    severity: error
+    description: The imputation model's sampler converged.
 
 retry_policy:
   max_stage_retries: 1

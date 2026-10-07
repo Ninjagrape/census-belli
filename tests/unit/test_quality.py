@@ -243,9 +243,6 @@ def test_prose_check_without_method_fails_rather_than_passes() -> None:
     "method",
     [
         "posterior_check",
-        "per_round_check",
-        "range_check",
-        "statistical_test",
         "brier_score",
         "jaccard_overlap",
     ],
