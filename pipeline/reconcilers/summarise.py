@@ -520,7 +520,9 @@ def _n_identifying_sides(rows: list[Report], regimes: tuple[str, ...]) -> dict[s
 
     result = {regime: 0 for regime in regimes}
     for (_side_id, regime), n in counts_by_side_regime.items():
-        if n >= 2:
+        # A regime can be absent from the design's vocabulary when every one of
+        # its rows was merged away as a duplicate of a labelled row.
+        if n >= 2 and regime in result:
             result[regime] += 1
     return result
 

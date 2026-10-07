@@ -26,7 +26,13 @@ Typical use::
 
 from __future__ import annotations
 
-from pipeline.reconcilers.claims import assign_lineages, classify_regime, era_flag, roundness
+from pipeline.reconcilers.claims import (
+    assign_lineages,
+    classify_regime,
+    era_flag,
+    merge_cross_regime_duplicates,
+    roundness,
+)
 from pipeline.reconcilers.load import (
     UnfillableSide,
     classify_sides,
@@ -65,6 +71,7 @@ __all__ = [
     "complete_model_run",
     "era_flag",
     "load_reports",
+    "merge_cross_regime_duplicates",
     "roundness",
     "start_model_run",
     "write_report",

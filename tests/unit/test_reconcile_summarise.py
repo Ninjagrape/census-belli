@@ -377,8 +377,22 @@ def test_n_identifying_sides_counts_sides_with_at_least_two_reports_of_a_regime(
         # side 2: one chronicle report only -> does not identify it
         _report(3, side_id=2, regime="chronicle", url="https://example/c", lineage_id=3),
         # side 2: two unlabelled reports -> identifies unlabelled
-        _report(4, side_id=2, regime="unlabelled", url="https://example/d", lineage_id=4),
-        _report(5, side_id=2, regime="unlabelled", url="https://example/e", lineage_id=5),
+        _report(
+            4,
+            side_id=2,
+            regime="unlabelled",
+            url="https://example/d",
+            lineage_id=4,
+            value=20_000.0,
+        ),
+        _report(
+            5,
+            side_id=2,
+            regime="unlabelled",
+            url="https://example/e",
+            lineage_id=5,
+            value=30_000.0,
+        ),
     ]
     design = _design(reports)
     inflation = InflationPrior()

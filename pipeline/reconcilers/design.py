@@ -42,7 +42,11 @@ import numpy as np
 import structlog
 
 from pipeline.extractors.records import CASUALTY_TYPES, SCOPES
-from pipeline.reconcilers.claims import collapse_lineages, era_flag
+from pipeline.reconcilers.claims import (
+    collapse_lineages,
+    era_flag,
+    merge_cross_regime_duplicates,
+)
 from pipeline.reconcilers.records import CLAIM_REGIMES, ReconcileCounts, Report, SourceKey
 
 __all__ = [
@@ -228,8 +232,12 @@ def build_design(
             priors and reports clean convergence on no evidence.
     """
     # Copies of one claim enter once; see collapse_lineages for why the
-    # model no longer carries a lineage effect instead.
-    rows = collapse_lineages([r for r in reports if r.quantity == quantity])
+    # model no longer carries a lineage effect instead. The cross-regime merge
+    # runs first so an unlabelled restatement of an attributed figure is
+    # never read as an independent, faithful report.
+    rows = collapse_lineages(
+        merge_cross_regime_duplicates([r for r in reports if r.quantity == quantity])
+    )
     if not rows:
         raise ValueError(
             f"No usable {quantity} reports. Fitting would sample the priors and "

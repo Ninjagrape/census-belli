@@ -24,6 +24,7 @@ from pipeline.reconcilers import (
     assign_lineages,
     classify_regime,
     era_flag,
+    merge_cross_regime_duplicates,
     roundness,
 )
 
@@ -44,6 +45,7 @@ def _report(
     quantity: str = "troops",
     branch: str = "total",
     reported_value: float = 10_000.0,
+    claim_regime: str = "unlabelled",
 ) -> Report:
     """Build a minimal, valid Report for the field(s) one test cares about."""
     return Report(
@@ -56,6 +58,7 @@ def _report(
         quantity=quantity,  # type: ignore[arg-type]
         reported_value=reported_value,
         branch=branch,
+        claim_regime=claim_regime,
     )
 
 
@@ -218,3 +221,42 @@ def test_a_value_does_not_override_an_unambiguous_single_regime_field() -> None:
     single = "250,000 according to Herodotus"
     assert classify_regime(single) == "ancient_claim"
     assert classify_regime(single, value=250_000) == "ancient_claim"
+
+
+# ─── merge_cross_regime_duplicates ──────────────────────────────────────────
+def test_an_unlabelled_restatement_of_a_labelled_figure_is_dropped() -> None:
+    attributed = _report(1, reported_value=1_000_000.0, claim_regime="ancient_claim")
+    infobox = _report(2, source_id=2, reported_value=1_000_000.0)
+    kept = merge_cross_regime_duplicates([attributed, infobox])
+    assert [r.report_id for r in kept] == [1]
+
+
+def test_a_near_match_within_one_percent_is_still_a_duplicate() -> None:
+    attributed = _report(1, reported_value=1_000_000.0, claim_regime="ancient_claim")
+    infobox = _report(2, source_id=2, reported_value=1_005_000.0)
+    assert [r.report_id for r in merge_cross_regime_duplicates([attributed, infobox])] == [1]
+
+
+def test_an_unlabelled_figure_with_no_labelled_match_is_kept() -> None:
+    attributed = _report(1, reported_value=1_000_000.0, claim_regime="ancient_claim")
+    other = _report(2, source_id=2, reported_value=47_000.0)
+    assert len(merge_cross_regime_duplicates([attributed, other])) == 2
+
+
+def test_the_merge_does_not_cross_sides_or_quantities() -> None:
+    attributed = _report(1, reported_value=1_000_000.0, claim_regime="ancient_claim")
+    other_side = _report(2, side_id=2, source_id=2, reported_value=1_000_000.0)
+    casualties = _report(3, source_id=3, quantity="casualties", reported_value=1_000_000.0)
+    assert len(merge_cross_regime_duplicates([attributed, other_side, casualties])) == 3
+
+
+def test_two_agreeing_unlabelled_rows_stay_independent() -> None:
+    first = _report(1, reported_value=50_000.0)
+    second = _report(2, source_id=2, reported_value=50_000.0)
+    assert len(merge_cross_regime_duplicates([first, second])) == 2
+
+
+def test_two_agreeing_labelled_rows_stay_independent() -> None:
+    first = _report(1, reported_value=50_000.0, claim_regime="chronicle")
+    second = _report(2, source_id=2, reported_value=50_000.0, claim_regime="ancient_claim")
+    assert len(merge_cross_regime_duplicates([first, second])) == 2

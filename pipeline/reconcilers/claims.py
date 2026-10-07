@@ -24,7 +24,14 @@ from typing import Final
 
 from pipeline.reconcilers.records import Report
 
-__all__ = ["assign_lineages", "classify_regime", "collapse_lineages", "era_flag", "roundness"]
+__all__ = [
+    "assign_lineages",
+    "classify_regime",
+    "collapse_lineages",
+    "era_flag",
+    "merge_cross_regime_duplicates",
+    "roundness",
+]
 
 # Citation refs -- [12], [a], [nb 1], [citation needed], [better source
 # needed] -- appear in 52.7% of real Wikipedia infobox strength strings.
@@ -184,7 +191,6 @@ def classify_regime(text: str | None, *, value: float | None = None) -> str:
     return min(hits, key=lambda hit: abs(hit[1] - anchor))[0]
 
 
-
 def _value_position(text: str, value: float | None) -> int | None:
     """Locate a reported figure inside its context text.
 
@@ -286,6 +292,7 @@ def roundness(value: float) -> float:
 # reconcile model's credible interval by roughly sqrt(N) exactly where the
 # corpus has already been fooled once, by whichever editor wrote the
 # original Wikipedia number.
+_UNLABELLED: Final[str] = "unlabelled"
 _DERIVED_SOURCE_TYPES: Final[frozenset[str]] = frozenset({"wikidata", "dbpedia"})
 _WIKIPEDIA_SOURCE_TYPES: Final[frozenset[str]] = frozenset({"wikipedia_infobox", "wikipedia_body"})
 
@@ -339,6 +346,49 @@ def collapse_lineages(reports: Sequence[Report]) -> list[Report]:
         if current is None or _origin_rank(report) < _origin_rank(current):
             kept[key] = report
     return list(kept.values())
+
+
+def merge_cross_regime_duplicates(
+    reports: Sequence[Report], *, relative_tolerance: float = 0.01
+) -> list[Report]:
+    """Drop an unlabelled row that restates a labelled row's figure.
+
+    An infobox reading "1,000,000" beside an attributed "according to
+    Herodotus" row for the same figure is one claim, not two. Left alone the
+    unlabelled copy is read as a faithful figure and drags the labelled
+    regime's bias toward zero, because the model sees a source reporting a
+    million with no inflation. Copies are matched within a side, quantity and
+    branch or casualty type, to ``relative_tolerance`` of the larger value.
+
+    Only an unlabelled row is ever dropped, and only when a labelled row
+    agrees with it. Two unlabelled rows that agree are left alone, as are two
+    labelled rows: this function cannot tell independent agreement from
+    repetition without a regime to break the tie, so it does not guess. The
+    dropped rows still count towards a side's ``n_reports``, because that
+    count is taken from the loader's full list, not from the design's rows.
+
+    Args:
+        reports: One quantity's reports.
+        relative_tolerance: How close two values must be, as a fraction of
+            the larger magnitude, to count as the same claim.
+
+    Returns:
+        The reports with unlabelled duplicates removed, in input order.
+    """
+    labelled: dict[tuple[int, str, str], list[float]] = defaultdict(list)
+    for report in reports:
+        if report.claim_regime != _UNLABELLED:
+            labelled[_report_subgroup_key(report)].append(report.reported_value)
+
+    def is_duplicate(report: Report) -> bool:
+        if report.claim_regime != _UNLABELLED:
+            return False
+        return any(
+            _values_agree(report.reported_value, other, relative_tolerance)
+            for other in labelled.get(_report_subgroup_key(report), [])
+        )
+
+    return [report for report in reports if not is_duplicate(report)]
 
 
 def _origin_rank(report: Report) -> tuple[bool, int]:
