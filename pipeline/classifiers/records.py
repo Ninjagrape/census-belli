@@ -126,8 +126,7 @@ class CommanderRow:
             collapsing the two would lose the evidence that classify itself
             has not yet decided.
         listing_order: Position in the infobox's commander list, 0 first.
-            The only ordering signal available with no article evidence;
-            see roles.py for why it stands in for seniority.
+            Kept for display and stable ordering; not used to weight or rank commanders.
         attribution_method: How the row's current weight was decided. A side
             whose rows all say ``llm`` is left alone on a re-run: its roles
             look internally consistent, and without this the fixed weight

@@ -173,7 +173,7 @@ def test_naval_and_land_without_the_word_amphibious_stays_naval() -> None:
         "Ships bombarded the coast while infantry advanced inland.",
         [],
         ["naval", "infantry"],
-        [],
+        ["12 warships"],
     )
 
     assert decision.battle_type == "naval"
@@ -194,3 +194,79 @@ def test_extract_categories_reads_names_without_the_category_prefix() -> None:
         "31 BC",
         "Battles of the Final War of the Roman Republic",
     ]
+
+
+def test_squadrons_of_cavalry_do_not_make_a_land_battle_naval() -> None:
+    decision = infer_battle_type(
+        11,
+        "Battle of the Plain",
+        "The cavalry charged the flank.",
+        [],
+        ["cavalry"],
+        ["8 squadrons of cavalry"],
+    )
+
+    assert decision.battle_type == "field"
+
+
+def test_naval_squadron_still_counts_as_ship_vocabulary() -> None:
+    decision = infer_battle_type(
+        12, "Battle of the Cape", None, [], [], ["a naval squadron of 9 ships"]
+    )
+
+    assert decision.battle_type == "naval"
+
+
+def test_battle_of_britain_with_raf_squadrons_is_aerial() -> None:
+    decision = infer_battle_type(
+        13,
+        "Battle of Britain",
+        "Fighter Command defended the skies.",
+        ["Air battles of World War II"],
+        [],
+        ["RAF: 50 squadrons", "Luftwaffe: 2,600 aircraft"],
+    )
+
+    assert decision.battle_type == "aerial"
+
+
+def test_an_aerial_category_beats_ship_vocabulary() -> None:
+    decision = infer_battle_type(
+        14,
+        "Battle of the Carrier Strike",
+        None,
+        ["Aerial operations and battles of World War II"],
+        [],
+        ["a fleet of carriers"],
+    )
+
+    assert decision.battle_type == "aerial"
+
+
+def test_a_lone_naval_branch_report_does_not_make_a_land_battle_naval() -> None:
+    decision = infer_battle_type(
+        15,
+        "Battle of the Ridge",
+        "The armies met on the ridge.",
+        [],
+        ["infantry", "naval"],
+        ["10,000 infantry", "200 sailors"],
+    )
+
+    assert decision.battle_type == "field"
+
+
+def test_a_naval_branch_with_ship_vocabulary_is_still_naval() -> None:
+    decision = infer_battle_type(
+        16, "Battle of the Reef", None, [], ["naval"], ["40 ships"]
+    )
+
+    assert decision.battle_type == "naval"
+
+
+def test_a_naval_branch_with_a_naval_category_is_still_naval() -> None:
+    decision = infer_battle_type(
+        17, "Battle of the Reef", None, ["Naval battles of antiquity"], ["naval"], []
+    )
+
+    assert decision.battle_type == "naval"

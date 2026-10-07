@@ -67,8 +67,9 @@ command_role_prompt:
        - nominal: listed for political reasons, did not meaningfully command
 
     2. The HIERARCHY: who reported to whom in this specific battle. The top
-       tactical commander has hierarchy_rank 0. Their direct reports have
-       rank 1, and so on.
+       tactical commander (the field_commander) has hierarchy_rank 0. Their
+       direct reports have rank 1, and so on. A sovereign or supreme
+       commander who did not direct the battle is rank 1, not 0.
 
     3. An ATTRIBUTION WEIGHT (0.0 to 1.0) estimating how much of the
        tactical outcome should be credited to this person. Weights for all
@@ -80,9 +81,28 @@ command_role_prompt:
     Base your classification on the article text provided. If the text does
     not give enough information to distinguish roles, default to:
     - If only one commander is listed: field_commander, weight 1.0
-    - If two are listed with no further context: split 0.6/0.4 to the
-      more senior by title, mark both as "unknown" role with low confidence
+    - If two or more are listed with no further context: split the weight
+      equally (1/n each), role "unknown", low confidence. Do not rank by
+      the order the names are listed in or by title: the listing order
+      favours heads of state over the officer who actually commanded.
     - Flag these for manual review
+
+    Output rules:
+    - Every commander listed must appear in the output exactly once, with
+      the name copied exactly as given in the input. Do not omit anyone,
+      merge two people, shorten, translate or re-spell a name, and do not
+      add anyone who was not listed.
+    - Exactly one commander has hierarchy_rank 0, unless two or more are
+      co-field_commanders, who all have rank 0. Everyone else has rank 1 or
+      higher. "reports_to" must be the exact name of another listed
+      commander on this side, or null, and must never form a loop.
+    - Weights must sum to 1.0 across the side.
+
+    Not a person: if a listed commander is not an individual (for example
+    "Army Group B", "1st Ukrainian Front", a title or a formation), return
+    command_role "unknown", attribution_weight 0, hierarchy_rank 1,
+    reports_to null, and say "not_a_person" in the reasoning. Give the
+    weight to the people instead.
 
     Specific patterns to watch for:
     - A monarch "present at" or "accompanied" the army but a named general
@@ -90,7 +110,10 @@ command_role_prompt:
     - "X commanded the left/right wing under Y" = subordinate reports to Y
     - "X directed the battle while Y remained at camp/on shore/in reserve"
       = X is field_commander, Y is nominal or sovereign
-    - Roman consuls who alternated daily command: split equally as co-field_commanders
+    - Roman consuls who alternated daily command: co-field_commanders,
+      weighted equally, unless the article says one of them commanded on
+      the day of the battle (Varro at Cannae), in which case that one is the
+      field_commander and the other is a subordinate or nominal.
 
   user_template: |
     Battle: {battle_name} ({date})

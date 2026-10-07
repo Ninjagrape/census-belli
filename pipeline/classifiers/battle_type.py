@@ -41,10 +41,13 @@ _NAVAL_CATEGORY_RE: Final = re.compile(
 )
 # Ship vocabulary in a strength string. "ship-of-the-line" and "man-of-war"
 # still match on the "ship"/"man" token: \b sits at the letter/hyphen
-# boundary either way.
+# boundary either way. Bare "squadron(s)" is deliberately absent: it is a
+# cavalry and air-force unit as often as a naval one ("8 squadrons of
+# cavalry", RAF squadrons in the Battle of Britain), so only "naval squadron"
+# counts.
 _SHIP_VOCAB_RE: Final = re.compile(
     r"\b(?:ships?|fleets?|galleys?|triremes?|frigates?|men-of-war|man-of-war"
-    r"|flotillas?|squadrons?|vessels?|warships?|men-o'-war)\b",
+    r"|flotillas?|naval squadrons?|vessels?|warships?|men-o'-war)\b",
     re.IGNORECASE,
 )
 
@@ -99,11 +102,13 @@ def infer_battle_type(
        "landing" -- two branches of evidence alone is also what a combined
        land-and-naval campaign looks like, and this function does not try
        to tell those apart without the word that names one of them.
-    3. **Naval**, from a naval category, a 'naval' troop branch (however
-       the number reached troop_reports -- a ``ships1`` infobox field, an
-       LLM extraction, doesn't matter here), or ship vocabulary in a
-       strength string.
-    4. **Aerial**, from an air-battle category.
+    3. **Naval**, from a naval category, or ship vocabulary in a strength
+       string. A 'naval' troop branch alone is not enough: a land battle can
+       carry a single naval-branch report. It only raises confidence when
+       ship vocabulary is also present.
+    4. **Aerial**, from an air-battle category. Checked before the
+       ship-vocabulary match (but after a naval category), since air battles
+       use "squadrons" and "carriers" too.
     5. **Field**, but *only* when ``article_text`` is non-empty, i.e. an
        article was actually read and carried none of the above signals.
        Defaulting to 'field' when no article was read would recreate
@@ -156,14 +161,18 @@ def infer_battle_type(
     branches_lower = {b.strip().lower() for b in troop_branches}
     has_naval_branch = "naval" in branches_lower
     ship_match = _SHIP_VOCAB_RE.search(" ".join(strength_strings))
-    naval_signal = naval_category is not None or has_naval_branch or ship_match is not None
+    aerial_category = next((c for c in categories if _AERIAL_CATEGORY_RE.search(c)), None)
 
     has_land_branch = bool(branches_lower & _LAND_BRANCHES)
     amphibious_mentioned = any(_AMPHIBIOUS_RE.search(c) for c in categories) or bool(
         article_text and _AMPHIBIOUS_RE.search(article_text)
     )
 
-    if naval_signal and has_land_branch and amphibious_mentioned:
+    # A naval branch alone is weak evidence of a naval battle (a land battle
+    # can carry one marine or naval-brigade report), but together with land
+    # troops and an explicit "amphibious"/"landing" mention it is enough.
+    naval_for_amphibious = naval_category is not None or has_naval_branch or ship_match is not None
+    if naval_for_amphibious and has_land_branch and amphibious_mentioned:
         return BattleTypeDecision(
             battle_id=battle_id,
             battle_type="amphibious",
@@ -172,24 +181,17 @@ def infer_battle_type(
             confidence=0.75,
         )
 
-    if naval_signal:
-        if naval_category is not None:
-            evidence, confidence = f"category {naval_category!r} names a naval battle", 0.9
-        elif has_naval_branch:
-            evidence, confidence = "a troop report carries the 'naval' branch", 0.75
-        else:
-            assert ship_match is not None  # naval_signal guarantees one of the three
-            evidence = f"ship vocabulary in strength text: {ship_match.group(0)!r}"
-            confidence = 0.6
+    if naval_category is not None:
         return BattleTypeDecision(
             battle_id=battle_id,
             battle_type="naval",
             fortified=None,
-            evidence=evidence,
-            confidence=confidence,
+            evidence=f"category {naval_category!r} names a naval battle",
+            confidence=0.9,
         )
 
-    aerial_category = next((c for c in categories if _AERIAL_CATEGORY_RE.search(c)), None)
+    # Before ship vocabulary: an air battle's strength text routinely says
+    # "squadrons" or "aircraft carriers", which is not evidence of a naval one.
     if aerial_category is not None:
         return BattleTypeDecision(
             battle_id=battle_id,
@@ -197,6 +199,15 @@ def infer_battle_type(
             fortified=None,
             evidence=f"category {aerial_category!r} names an air battle",
             confidence=0.85,
+        )
+
+    if ship_match is not None:
+        return BattleTypeDecision(
+            battle_id=battle_id,
+            battle_type="naval",
+            fortified=None,
+            evidence=f"ship vocabulary in strength text: {ship_match.group(0)!r}",
+            confidence=0.75 if has_naval_branch else 0.6,
         )
 
     if article_text and article_text.strip():
