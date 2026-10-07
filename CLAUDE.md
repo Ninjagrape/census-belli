@@ -20,20 +20,22 @@ Before you finish a session, update `handover.md` so the next one starts where y
 
 Every session works in an agentic coding style. This is a standing instruction to use subagents, so do not wait to be asked.
 
+The team works like an engineering team: Opus is the manager and architect, Sonnet and Haiku are the workers. This holds for the lead session and for any Opus subagent alike. **Opus designs, briefs, reviews and decides; it does not write production code, write tests, or run the test suite itself.**
+
 **Opus is the manager and technical lead.** It owns:
 - Reading `handover.md`, deciding what to do next, and breaking it into tasks small enough for one agent with a clear finish line.
-- Design and statistical decisions: schema changes, model structure, priors, attribution logic, anything that changes what the ranking means.
+- Design and statistical decisions: schema changes, model structure, priors, attribution logic, anything that changes what the ranking means. Write the design down (in the brief or in `handover.md`) before an agent implements it.
 - Writing each agent's brief, reviewing what comes back, and integrating it.
-- Verification against a live database (the rules above still apply, and an agent's "tests pass" is a claim to check, not a result).
+- Deciding what verification proves a stage, and judging the results. A Haiku agent runs the commands against the live database and reports raw output; Opus reads that output itself rather than trusting a worker's summary (the rules above still apply, and an agent's "tests pass" is a claim to check, not a result).
 - Updating `handover.md` at the end of the session.
 
 **Lighter models do the scoped work.** Pick the cheapest model that can do the task well:
 
-| Model | Use for |
-|-------|---------|
-| Haiku | Codebase searches, reading and summarising files or logs, mechanical edits across many files, fixture generation, running commands and reporting output |
-| Sonnet | Implementing a function or module against a clear spec, writing tests, fixing a failing test, code review, first-pass data audits |
-| Opus (subagent) | Only when a task needs deep reasoning Opus cannot keep in its own context, e.g. an independent second opinion on a model design |
+| Model | Role | Use for |
+|-------|------|---------|
+| Haiku | worker | Codebase searches, reading and summarising files or logs, mechanical edits across many files, fixture generation, running verification commands and reporting raw output |
+| Sonnet | worker | Implementing a function or module against a clear spec, writing tests, fixing a failing test, code review, first-pass data audits (including `historiography-reviewer` on fixture data) |
+| Opus (subagent) | architect | Design work only: an independent second opinion on a model design, the `bayesian-model-reviewer` gate, a publication-level `historiography-reviewer` pass. Never implementation |
 
 **Briefing an agent.** Each brief states the goal, the exact files it may touch, the acceptance criteria (which tests or checks must pass), and what to return. Agents start cold, so include the context they need from `handover.md` rather than assuming they have read it.
 
@@ -42,7 +44,9 @@ Every session works in an agentic coding style. This is a standing instruction t
 - Run the project reviewers as gates: `bayesian-model-reviewer` after any change to reconcile, impute, model, or WAR pooling code; `historiography-reviewer` after running extract, resolve, reconcile, or classify on real data.
 - Agents never commit or push (see Git below).
 
-**Do it inline instead** when delegating costs more than it saves: answering a question, a one-file edit, or a change Opus needs to see line by line to judge.
+- Only one agent at a time may run the integration suite against `DATABASE_URL`: every module fixture rebuilds the schema (`handover.md` §20.8). Tell every other agent not to touch the database.
+
+**Do it inline instead** only when delegating costs more than it saves: answering a question, reading code to make a design decision, or editing documentation such as this file, `handover.md`, `TODO.md` and agent specs. Code changes, however small, go to a worker.
 
 ## Project Overview
 

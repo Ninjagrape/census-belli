@@ -219,7 +219,9 @@ Built and writing estimates against live Postgres; see handover.md §19-§20.
 - [x] Convergence diagnostics + the diagnostics_json gate
 - [x] Parameter-recovery suite (tests/model, `-m model`): 13 pass, 1 xfail (censoring)
 - [x] bayesian-model-reviewer pass (handover §20.10)
-- [ ] **HIGH: regime-neutral force-ratio scale (decided, not built; handover §20.11)**
+- [x] Regime-neutral troops fit, cross-regime duplicate merge, neutral columns + npz (handover §21.1)
+- [ ] est_troops_method counts lineages the cross-regime merge dropped (§21.7)
+- [ ] Parameterise gate thresholds from the spec so integration can pass neutral_fit_converged (§21.5)
 - [ ] Width gates on the identified scale; n_identifying_sides (§20.10)
 - [x] bound_only label; [ ] ExGaussian bound likelihood later (§20.10)
 - [x] Write estimates only after convergence (§20.11)
@@ -240,18 +242,30 @@ First slice built; see handover.md §20.3.
 - [x] Integration test: Actium with a cached answer (Agrippa field_commander, Octavian sovereign)
 - [ ] Run the pending multi-commander sides through /process-llm-batch
 - [ ] Per-side defender flag (agents/model.yaml needs it; nothing records it) -- §20.5
-- [ ] historiography-reviewer pass on the classify rules (cut off by a usage limit)
+- [x] historiography-reviewer pass on the classify rules (2026-10-06, handover §21)
+  - [x] Fixed: unmatched LLM commander no longer takes weight 1.0 (answer rejected);
+        default split is 1/n, not 0.6/0.4 by listing order; co-field commanders;
+        fixed non-field weights capped at 0.30; hierarchy validation; naval regex
+  - [ ] Infobox commander order is lost (the reference file is alphabetical, bc_id is
+        insert order); carry infobox and unresolved counts into SideGroup (#8)
+  - [ ] Non-person "commanders" (Army Group B, 1st Ukrainian Front): filter in resolve (#9)
+  - [ ] Few-shot prompt cases: Actium, Munda, Mutina, Chaeronea, Salamis, Mongols, Moltke (#10)
+  - [ ] Siege per side (siege_defensive), and a campaign/operation type (#12)
+  - [ ] Missingness: casualty-specific flags, post-1914 regime suppression rule (#13)
+  - [ ] Model stage must not consume `default_split` sides without an LLM or manual role
+  - [ ] Proportional unknown-count gate; extractor confidence into rule confidence (LOW)
 
 ## Stage 6: Impute (pipeline/stages/impute.py)
-- [ ] Era/polity prior loader from config/imputation_priors.yaml
-- [ ] MICE implementation in PyMC
-  - [ ] Conditional model: troop_total ~ era + polity + war + battle_type + outcome
-  - [ ] Predictive mean matching to preserve distribution
-  - [ ] Generate N imputed datasets
-- [ ] Write imputed datasets to data/imputed/round_{n}/
-- [ ] Update missing_data_log with imputation details
-- [ ] Distributional checks (imputed values plausible within era)
-- [ ] config/imputation_priors.yaml with documented era/polity priors
+Built and verified on fixtures; see handover.md §21.4.
+- [x] config/imputation_priors.yaml (era bins on year_astronomical, priors, hyperparameter scales)
+- [x] Joint Bayesian imputation model (replaces MICE/PMM; analytic marginalisation per battle)
+- [x] Reconcile side prior divided out of the neutral posterior; weak sides treated as missing
+- [x] Overimputation: 20 rounds, every side drawn from the conditional Gaussian
+- [x] Rounds to data/imputed/{scale}/round_{n}/; only the neutral scale writes missing_data_log
+- [x] Gates: completeness, ratio plausibility on imputed battles, range (published), KS warning, convergence
+- [x] Stale draws file refused; bayesian-model-reviewer passes on design and code
+- [ ] Run on a real corpus
+- [ ] Propagate reconcile's shared measurement error: export the neutral fit's regime draws (g_unlabelled, a_era) in neutral_draws_run*.npz and carry them through the rounds, so battles in the mixed regime share their error instead of being drawn independently (beta_force uncertainty is understated until then)
 
 ## Stage 7: Model (pipeline/stages/model.py)
 - [ ] Bradley-Terry hierarchical model in PyMC
@@ -279,6 +293,7 @@ First slice built; see handover.md §20.3.
 - [ ] Brier score / calibration plot
 - [ ] Posterior predictive checks (simulate outcomes, compare to observed)
 - [ ] Sensitivity analysis runner
+  - [ ] g_unlabelled +/- 1 sd sensitivity on the neutral estimates (bounds the shared reconcile error impute does not propagate, see agents/impute.yaml)
   - [ ] Refit with each variant from agents/evaluate.yaml
   - [ ] Compute rank correlation and top-20 overlap across variants
 - [ ] Expert ranking comparison (load config/expert_rankings.yaml, compute overlap)
