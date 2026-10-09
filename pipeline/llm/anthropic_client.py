@@ -10,7 +10,13 @@ Two details of the current API shape matter here and are easy to get wrong:
 * **Sampling parameters were removed on the newer frontier models.** Sending
   ``temperature`` to Opus 4.7+, Sonnet 5, or the Fable family returns a 400
   rather than being ignored, so the parameter is gated on
-  :func:`pipeline.llm.capabilities.accepts_temperature`.
+  :func:`pipeline.llm.capabilities.accepts_temperature`. Haiku 5.5 is in this
+  group too.
+* **Thinking is on by default on Haiku 5.5.** Omitting the ``thinking``
+  parameter enables it and bills the thinking tokens against ``max_tokens``, so
+  a client that does not request thinking sends ``{"type": "disabled"}``
+  explicitly. At xhigh and max effort that value is a 400, so no thinking
+  parameter is sent and thinking stays on.
 * **Schemas must be closed.** ``output_config.format`` expects a schema with
   ``required`` and ``additionalProperties: false``. The schemas in
   ``agents/<stage>.yaml`` are passed through unmodified, so a spec missing
@@ -34,7 +40,11 @@ from pipeline.llm.base import (
     TokenUsage,
     request_hash,
 )
-from pipeline.llm.capabilities import accepts_temperature, estimate_cost
+from pipeline.llm.capabilities import (
+    accepts_temperature,
+    estimate_cost,
+    thinking_on_by_default,
+)
 from pipeline.llm.parsing import parse_structured
 from pipeline.llm.retry import (
     DEFAULT_BASE_DELAY,
@@ -48,6 +58,12 @@ __all__ = ["AnthropicClient"]
 logger = structlog.get_logger()
 
 _API_KEY_ENV = "ANTHROPIC_API_KEY"
+
+# Efforts at which ``thinking: {"type": "disabled"}`` is accepted. At xhigh and
+# max the API returns a 400, so thinking is left at its default there.
+_THINKING_DISABLE_COMPATIBLE_EFFORTS: frozenset[str | None] = frozenset(
+    {None, "low", "medium", "high"}
+)
 
 
 class _PermanentCallError(Exception):
@@ -234,6 +250,15 @@ class AnthropicClient:
 
         if self._enable_thinking:
             params["thinking"] = {"type": "adaptive"}
+        elif thinking_on_by_default(self.name, self.model):
+            if self._effort in _THINKING_DISABLE_COMPATIBLE_EFFORTS:
+                params["thinking"] = {"type": "disabled"}
+            else:
+                logger.debug(
+                    "thinking_left_on_effort_rejects_disabled",
+                    model=self.model,
+                    effort=self._effort,
+                )
 
         if request.temperature is not None and accepts_temperature(self.name, self.model):
             params["temperature"] = request.temperature

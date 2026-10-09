@@ -2758,6 +2758,32 @@ architect, Sonnet and Haiku are workers; Opus does not write production code,
 tests, or run the suite; a Haiku agent runs verification and Opus reads the
 raw output; one agent at a time on `DATABASE_URL`.
 
+2026-10-09: routing updated for Haiku 5.5 ($0.10/$0.50 per MTok against
+Sonnet 5.5's $2/$10). Haiku is now the default worker for any task with
+mechanical acceptance criteria; Sonnet is the single escalation step and owns
+anything touching the statistical stages. Rules are in `CLAUDE.md` "How to
+work".
+
+Same day, the pipeline's LLM fallback moved from `claude-haiku-4-5-20251001`
+to `claude-haiku-5-5` in `agents/extract.yaml` and `agents/resolve.yaml`.
+Nothing reads `llm_fallback_*` in code yet; it tells a human what to put in
+`llm_model` when Gemini runs out. Two things had to change for that swap to
+work, both done:
+
+- `pipeline/llm/capabilities.py` has a `claude-haiku-5-5` entry ($0.10/$0.50,
+  no sampling params). The old dated ID never matched the `claude-haiku-4-5`
+  key, so cost would have been recorded as NULL.
+- Haiku 5.5 thinks unless told not to. New trait `thinking_on_by_default`;
+  `AnthropicClient._build_params` sends `thinking: disabled` for such models
+  when thinking was not requested and effort is unset/low/medium/high (at
+  xhigh/max that is a 400, so it sends nothing). Tests in
+  `tests/unit/test_anthropic_params.py`.
+
+Verified: unit suite 681 passed, ruff clean (Haiku worker, raw output read).
+Not verified: no live call to `claude-haiku-5-5` has been made. Temperature 0
+is unavailable on it, so run `/extraction-eval` on it before relying on it
+(TODO.md).
+
 ### 21.4 The impute stage
 
 Design reviewed before coding and the code reviewed after (verdict: ready to

@@ -39,9 +39,9 @@ params:
   # Fallback when Gemini free tier is exhausted (20 req/day): use the
   # offline processing path (scripts/llm_offline.py export, then
   # /process-llm-batch in a Claude Code session under the Pro subscription,
-  # then import). Haiku 4.5 is the model if API calls are preferred instead.
+  # then import). Haiku 5.5 is the model if API calls are preferred instead.
   llm_fallback_provider: anthropic
-  llm_fallback_model: claude-haiku-4-5-20251001
+  llm_fallback_model: claude-haiku-5-5
   batch_size: 50               # process this many articles per LLM batch
   log_all_llm_calls: true
 

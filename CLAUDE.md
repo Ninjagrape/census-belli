@@ -33,9 +33,17 @@ The team works like an engineering team: Opus is the manager and architect, Sonn
 
 | Model | Role | Use for |
 |-------|------|---------|
-| Haiku | worker | Codebase searches, reading and summarising files or logs, mechanical edits across many files, fixture generation, running verification commands and reporting raw output |
-| Sonnet | worker | Implementing a function or module against a clear spec, writing tests, fixing a failing test, code review, first-pass data audits (including `historiography-reviewer` on fixture data) |
+| Haiku 5.5 (`model: haiku`) | default worker | Anything whose result can be checked mechanically: codebase searches and parallel sweeps, reading and summarising files or logs, running verification commands and reporting raw output, mechanical edits across many files, fixture generation, adding test cases that follow an existing pattern, fixing lint, type or import errors, docstring and type-hint passes, a single-file change where the brief spells out the exact edit |
+| Sonnet 5.5 (`model: sonnet`) | escalation worker | Work that needs judgement inside a clear spec: implementing a function or module, designing tests for new behaviour, diagnosing a failing test whose cause is not obvious, code review, first-pass data audits (including `historiography-reviewer` on fixture data) |
 | Opus (subagent) | architect | Design work only: an independent second opinion on a model design, the `bayesian-model-reviewer` gate, a publication-level `historiography-reviewer` pass. Never implementation |
+
+**Routing between Haiku and Sonnet.** Haiku 5.5 costs about a twentieth of Sonnet 5.5 per token and returns faster, so it is the default worker and Sonnet is the step up.
+
+- Start a task on Haiku when its acceptance criteria are mechanical (a command exits zero, a grep returns nothing, a named set of tests passes) and the brief leaves no design choice open.
+- Go straight to Sonnet when the task means choosing between approaches, when the change touches `pipeline/stages/reconcile.py`, `impute.py`, `model.py`, `pipeline/reconcilers/` or `pipeline/imputers/`, or when a wrong answer could still pass the tests (attribution, missingness classification, anything like the bug in `handover.md` §4.2).
+- Escalate once. If a Haiku result fails its acceptance check or review, give the task and the failure output to Sonnet rather than re-briefing Haiku. Judge cost per finished task, not per call.
+- Split read-only work finer than you would for Sonnet: one Haiku agent per stage, file group or log, run in parallel, with Opus reading the combined raw output. The one-agent-on-`DATABASE_URL` rule below still applies.
+- Run Haiku at `effort: "low"` for searches, summaries and running commands. Leave the default effort for edits.
 
 **Briefing an agent.** Each brief states the goal, the exact files it may touch, the acceptance criteria (which tests or checks must pass), and what to return. Agents start cold, so include the context they need from `handover.md` rather than assuming they have read it.
 
@@ -86,7 +94,7 @@ The orchestrator in `pipeline/orchestrator.py` runs stages in sequence, checks q
 - **Language**: Python 3.11+
 - **Database**: PostgreSQL 15+ (schema in `config/schema.sql`)
 - **Web scraping**: httpx + beautifulsoup4 + mwparserfromhell (for MediaWiki templates)
-- **LLM extraction**: Gemini 3.8 Flash (extract, resolve) and Anthropic claude-sonnet-4-6 (classify), routed per stage via `agents/<stage>.yaml`. Fallback: Haiku 4.5 API or offline processing via Claude Pro subscription (`/process-llm-batch`)
+- **LLM extraction**: Gemini 3.8 Flash (extract, resolve) and Anthropic claude-sonnet-4-6 (classify), routed per stage via `agents/<stage>.yaml`. Fallback: Haiku 5.5 API (`claude-haiku-5-5`) or offline processing via Claude Pro subscription (`/process-llm-batch`)
 - **Entity resolution**: Wikidata SPARQL via `SPARQLWrapper`
 - **Bayesian modelling**: PyMC 5.x (primary), CmdStanPy as fallback
 - **Data processing**: pandas, polars

@@ -5,7 +5,12 @@ from __future__ import annotations
 import pytest
 
 from pipeline.llm.base import CallStatus, LLMRequest, request_hash
-from pipeline.llm.capabilities import accepts_temperature, estimate_cost, traits_for
+from pipeline.llm.capabilities import (
+    accepts_temperature,
+    estimate_cost,
+    thinking_on_by_default,
+    traits_for,
+)
 from pipeline.llm.gemini_client import _retry_after_seconds
 from pipeline.llm.parsing import parse_structured, strip_code_fence
 from pipeline.llm.retry import TransientLLMError, with_backoff
@@ -154,6 +159,34 @@ def test_older_anthropic_models_still_accept_temperature():
 
 def test_gemini_accepts_temperature():
     assert accepts_temperature("gemini", "gemini-3.8-flash") is True
+
+
+def test_haiku_5_5_rejects_temperature():
+    assert accepts_temperature("anthropic", "claude-haiku-5-5") is False
+
+
+def test_haiku_5_5_cost_at_one_million_tokens_each_way():
+    # Arrange
+    input_tokens = 1_000_000
+    output_tokens = 1_000_000
+
+    # Act
+    cost = estimate_cost("anthropic", "claude-haiku-5-5", input_tokens, output_tokens)
+
+    # Assert
+    assert cost == pytest.approx(0.60)
+
+
+def test_haiku_5_5_thinks_by_default():
+    assert thinking_on_by_default("anthropic", "claude-haiku-5-5") is True
+
+
+def test_sonnet_4_6_does_not_think_by_default():
+    assert thinking_on_by_default("anthropic", "claude-sonnet-4-6") is False
+
+
+def test_unknown_model_does_not_think_by_default():
+    assert thinking_on_by_default("anthropic", "claude-not-a-real-model") is False
 
 
 def test_unknown_models_are_assumed_to_reject_temperature():

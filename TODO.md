@@ -172,8 +172,11 @@ against Postgres, including the enum casts and the text-array column.
             with a measurement, reusing the extrapolation in
             `.claude/commands/extraction-eval.md` section 5.
       - [x] Resolve the spec conflict: `CLAUDE.md` updated to reflect that
-            extract/resolve use Gemini, classify uses Anthropic. Haiku 4.5
-            documented as fallback in both agent specs.
+            extract/resolve use Gemini, classify uses Anthropic. Haiku 5.5
+            (was 4.5) documented as fallback in both agent specs.
+      - [ ] Run the ~20-call `/extraction-eval` on `claude-haiku-5-5` before
+            relying on it as the fallback: it cannot take temperature 0, so
+            determinism rests on the structured-output constraint alone.
 - [x] Exact match linker (name -> Wikidata ID)
 - [x] Fuzzy match with context (rapidfuzz + lifespan gate + polity tiebreak)
       - the date gate does the real work: a candidate who was not alive cannot

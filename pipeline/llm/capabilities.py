@@ -21,6 +21,7 @@ __all__ = [
     "ModelTraits",
     "accepts_temperature",
     "estimate_cost",
+    "thinking_on_by_default",
     "traits_for",
 ]
 
@@ -43,6 +44,10 @@ class ModelTraits:
             served from the provider's prompt cache.
         cache_write_multiplier: Multiple of the input price charged to place
             tokens in that cache.
+        thinking_on_by_default: Whether the model thinks when the ``thinking``
+            parameter is omitted. A caller that does not want thinking must send
+            it disabled explicitly, because leaving it on bills thinking tokens
+            and eats into max_tokens.
     """
 
     input_usd_per_mtok: float
@@ -50,12 +55,15 @@ class ModelTraits:
     accepts_sampling_params: bool
     cache_read_multiplier: float = 0.1
     cache_write_multiplier: float = 1.25
+    thinking_on_by_default: bool = False
 
 
 # Anthropic models, prices in USD per million tokens.
 #
-# Sampling parameters were removed on Opus 4.7 and later, Sonnet 5, and the
-# Fable family. They remain accepted on Opus 4.6, Sonnet 4.6 and Haiku 4.5.
+# Sampling parameters were removed on Opus 4.7 and later, Sonnet 5, Haiku 5.5
+# and the Fable family. They remain accepted on Opus 4.6, Sonnet 4.6 and Haiku
+# 4.5. Haiku 5.5 pricing above 100k prompt tokens is higher and only the lower
+# tier is modelled; battle articles sit far below that.
 _ANTHROPIC_TRAITS: dict[str, ModelTraits] = {
     "claude-opus-5": ModelTraits(5.00, 25.00, accepts_sampling_params=False),
     "claude-opus-4-8": ModelTraits(5.00, 25.00, accepts_sampling_params=False),
@@ -63,6 +71,12 @@ _ANTHROPIC_TRAITS: dict[str, ModelTraits] = {
     "claude-opus-4-6": ModelTraits(5.00, 25.00, accepts_sampling_params=True),
     "claude-sonnet-5": ModelTraits(2.00, 10.00, accepts_sampling_params=False),
     "claude-sonnet-4-6": ModelTraits(3.00, 15.00, accepts_sampling_params=True),
+    "claude-haiku-5-5": ModelTraits(
+        0.10,
+        0.50,
+        accepts_sampling_params=False,
+        thinking_on_by_default=True,
+    ),
     "claude-haiku-4-5": ModelTraits(1.00, 5.00, accepts_sampling_params=True),
     "claude-fable-5-1": ModelTraits(10.00, 50.00, accepts_sampling_params=False),
     "claude-fable-5": ModelTraits(10.00, 50.00, accepts_sampling_params=False),
@@ -148,6 +162,21 @@ def accepts_temperature(provider: str, model: str) -> bool:
         logger.debug("unknown_model_omitting_temperature", provider=provider, model=model)
         return False
     return known.accepts_sampling_params
+
+
+def thinking_on_by_default(provider: str, model: str) -> bool:
+    """
+    Whether this model thinks when the ``thinking`` parameter is omitted.
+
+    Args:
+        provider: Provider name.
+        model: Exact model identifier.
+
+    Returns:
+        True if the model thinks by default. False for unknown models.
+    """
+    known = traits_for(provider, model)
+    return known is not None and known.thinking_on_by_default
 
 
 def estimate_cost(
