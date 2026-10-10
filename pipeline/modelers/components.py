@@ -8,8 +8,8 @@ sum is. Unknown and unattributed sides are not nodes and add no edges
 that this graph deliberately does not count).
 
 Bridges use an iterative Tarjan low-link search written here rather than
-networkx, which is not a declared dependency; the unit tests cross-check it
-against networkx when that is importable.
+networkx, which is not a runtime dependency; the unit tests cross-check it
+against networkx, a dev dependency.
 """
 
 from __future__ import annotations

@@ -79,6 +79,9 @@ dev = [
     # so the lint job failed on a stub that had been present here all along.
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.21",
+    # Test-only oracle for pipeline.modelers.components.find_bridges. It was
+    # imported with importorskip, and CI fails on any skip.
+    "networkx>=3.0",
     "general-war[inspect]",
 ]
 

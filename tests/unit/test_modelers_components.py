@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import networkx as nx
 import numpy as np
-import pytest
 
 from pipeline.modelers.components import career_spans, comparison_edges, components, find_bridges
 from pipeline.modelers.design import build_design
@@ -41,7 +41,6 @@ def test_bridges_hand_built_graph() -> None:
 
 
 def test_bridges_agree_with_networkx() -> None:
-    nx = pytest.importorskip("networkx")
     rng = np.random.default_rng(3)
     for _ in range(20):
         edges = sorted(
