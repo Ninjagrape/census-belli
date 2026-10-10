@@ -6,7 +6,7 @@ Read `CLAUDE.md` first for what the project *is*. This file covers what state it
 
 `CLAUDE.md` points every session here, and asks you to update this file before you finish. Keep it current: a stale handover is worse than none, because the next agent will trust it. If you change the state of the project, change §1, §6 and §7 to match.
 
-Last updated: 2026-10-10. §21 and §22 are committed (`a9abeba`, `401e1c7`, `3c6f6f8`). Working tree dirty with §23, the model stage. Nothing from §23 is committed.
+Last updated: 2026-10-10. §21 to §23 are committed (`a9abeba`, `401e1c7`, `3c6f6f8`, `463343a`). §24 is a gap review of every built stage; its findings are in `docs/todo/*.md` (indexed by TODO.md), tagged `(gap review)`, and nothing from it is fixed yet.
 
 ---
 
@@ -129,20 +129,15 @@ Gemini was reached successfully on 2026-09-19 with the key already in the enviro
 
 Two latent spec bugs surfaced the moment they started executing. Expect more as later stages run for the first time. When a gate fails, check whether the *spec* is wrong before assuming the *code* is.
 
-Checks declaring a `method:` instead of SQL report as **not implemented** — deliberately failing rather than passing, so the gap stays visible. Eight are outstanding:
+Checks declaring a `method:` instead of SQL report as **not implemented** — deliberately failing rather than passing, so the gap stays visible. Handlers now exist for `diagnostics_json`, `imputation_gate` and `model_gate` (`METHOD_HANDLERS` in `pipeline/quality.py`); impute's old `per_round_check`/`range_check`/`statistical_test` were replaced by `imputation_gate`, and nothing uses `posterior_check` any more. Three are outstanding, all evaluate's:
 
 | Method | Used by |
 |---|---|
-| `diagnostics_json` | model.convergence, model.no_divergences, reconcile.model_convergence |
-| `posterior_check` | model.skill_distribution_sensible |
-| `per_round_check` | impute.imputation_completeness |
-| `range_check` | impute.imputed_values_plausible |
-| `statistical_test` | impute.distributional_check |
 | `brier_score` | evaluate.calibration |
 | `jaccard_overlap` | evaluate.ranking_stability |
 | `held_out_accuracy` | evaluate.held_out_accuracy |
 
-Implement each alongside the stage that produces the artefact it inspects. Register handlers in `UNIMPLEMENTED_METHODS` in `pipeline/quality.py`.
+Implement each alongside the stage that produces the artefact it inspects, and register it in `METHOD_HANDLERS`.
 
 ### 3.3 `retry_policy.on_failure` is honoured
 
@@ -433,6 +428,10 @@ session whose purpose was closing other gaps.
 Step 1 of the previous handover (stand up Postgres, run the 28 skipped tests)
 is **done**. What follows is what is left.
 
+00. **Fix the pre-pilot gaps from §24 first** (A1, A2, A4, A5, A8, A10, A13).
+   Without A1 the pilot crawl halts on its own gate; without A4 same-name
+   battles merge silently.
+
 0. **Run the curated corpus through crawl, extract and resolve.** §18 built
    `config/sources_seed_arsht.yaml`: 211 title-verified battles covering the
    generals Arsht's article names. It has never been crawled. Doing so needs no
@@ -444,7 +443,7 @@ is **done**. What follows is what is left.
    test run (§20.8).
 
 1. **Model stage: built (§23).** What is left for it is a real corpus run
-   (step 0) and the TODO.md Stage 7 items. Before any ranking is published,
+   (step 0) and the `docs/todo/07-model.md` items. Before any ranking is published,
    classify's second slice (step 2) must run: today every multi-commander side
    is `default_split`, enters the model as an unattributed latent, and credits
    nobody, so `exclusion_concentration` will fire on a real corpus.
@@ -3055,3 +3054,45 @@ tried, so it sits near the information limit; the committed seed passes.
   Both were resumed or picked up from disk without damage. Check `git status`
   and grep for the brief's items rather than trusting a cut-off worker's last
   line.
+
+## 24. Gap review of every built stage, 2026-10-10
+
+Three read-only Sonnet audits compared each `agents/<stage>.yaml` with its
+code (crawl to model, plus cross-cutting); Opus confirmed the highest-impact
+findings by grep. Static reading only: no tests run, no database touched.
+Full table: `~/.claude/plans/review-and-examine-what-spicy-wilkes.md`. Every
+new item is in `docs/todo/<stage>.md` tagged `(gap review)`.
+
+New findings, in rough order of what they cost a real run:
+
+- **A1** `crawl.min_battles_crawled` is an ERROR gate at 3000 URLs. The
+  211-battle arsht pilot (§7 step 0) halts on it.
+- **A13** `--stages all` halts at evaluate: `pipeline/stages/evaluate.py`
+  does not exist, the import fails, and `complete_with_warnings` does not
+  stop the halt (only `continue_with_logging` does).
+- **A4** Extract and resolve find battles by name (`LIMIT 1` / lowest id).
+  Two battles sharing a name collapse into one, with commanders on the
+  wrong battle.
+- **A2** `extract.no_empty_extractions` reads `crawl_log.extraction_method`
+  and `fields_extracted`, which nothing writes. It can never fail: §4.6's
+  pattern again.
+- **A5** `SqlCrawlLog.flush` swallows insert errors without rolling back. On
+  Postgres every later flush then fails silently.
+- **A8** Resolve counts mentions whose battle or side is missing from the DB
+  but does not log them, so `resolution_rate` reads high. An extract re-run
+  also clears resolve's denominator rows from `missing_data_log`.
+- **A10** Classify reads troop presence from raw `troop_reports`. Reconcile's
+  `unfillable` sides therefore look like they have troops, no missingness
+  heuristic can fire, and impute's `mnar_delta` never reaches them.
+- **A11** Reconcile centres `data_era` over all dated rows but applies it
+  only to unlabelled rows, so `a_era` acts partly as a second intercept.
+- Smaller: `battles.war_id`/`campaign_id` never populated (A3); crawl stores
+  no wikitext, so extract's template path never runs (A6); `--limit`
+  rewrites the processed JSONL with a subset (A7); `generals.born/died/era`
+  never written (A9); report/evaluate gates with no run filter at all
+  (A14); stale schema comments (A15); the inspector Model page is still a
+  placeholder querying a wrong table name (A16); unused deps, dead spec
+  params, missing `scripts.add_battle`/`quality_report` (A18).
+
+Also confirmed: every item already listed as open for reconcile, classify,
+impute and model is still open in code. None was quietly fixed.

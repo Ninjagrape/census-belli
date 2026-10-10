@@ -1,6 +1,6 @@
 Assess the current state of the project and recommend next steps.
 
-1. Read TODO.md and identify what's checked off vs remaining.
+1. Read `TODO.md` (an index with open counts per area), then only the `docs/todo/` files relevant to the question, to identify what's checked off vs remaining.
 
 2. Check which pipeline stages are implemented:
    ```

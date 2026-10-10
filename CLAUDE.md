@@ -2,7 +2,7 @@
 
 ## Start here, every session
 
-**Read `handover.md` before doing anything else, including answering a question about this repo.** It records what is actually built, what is verified against a real database versus merely written, the bugs already found and fixed, and the footguns that have cost time. It is maintained to be current; `TODO.md` is the task list, this file is the design, `handover.md` is the state.
+**Read `handover.md` before doing anything else, including answering a question about this repo.** It records what is actually built, what is verified against a real database versus merely written, the bugs already found and fixed, and the footguns that have cost time. It is maintained to be current; `TODO.md` is the index to the task list in `docs/todo/` (read only the file for the stage at hand), this file is the design, `handover.md` is the state.
 
 Then:
 

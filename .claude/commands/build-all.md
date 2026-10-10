@@ -86,6 +86,6 @@ Finally, stop and suggest the message "feat: full pipeline integration, README, 
 - If a sub-agent's output has lint or type errors, fix them before reporting the phase complete.
 - If a test fails, diagnose whether it's a test issue or an implementation issue. Fix the root cause.
 - After each phase, run the full test suite to catch regressions: `pytest tests/ -v`
-- Keep TODO.md updated throughout. Check off items as they're completed.
+- Keep the task list updated throughout (`docs/todo/<stage>.md`; `TODO.md` is the index). Check off items as they are completed.
 - Each suggested commit should be atomic and pass all tests.
 - Never run `git commit` or `git push` yourself. The user commits.

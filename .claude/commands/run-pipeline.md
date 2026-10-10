@@ -22,6 +22,6 @@ $ARGUMENTS can be "all", a single stage name, or a comma-separated range like "c
    - Generate a summary report: stages run, records processed per stage, quality check results, total duration, total API cost
    - If the model stage ran, report the top 20 generals with credible intervals
    - If the evaluate stage ran, report held-out accuracy, calibration, and sensitivity analysis highlights
-   - Update TODO.md with any new issues discovered during the run
+   - Add any new issues discovered during the run to the relevant `docs/todo/<stage>.md`
 
 5. Do not commit any fixes made during the run; list them and suggest commit messages for the user to run.

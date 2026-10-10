@@ -28,7 +28,7 @@ Follow this process exactly:
 
 7. Run the tests. Fix any failures.
 
-8. Update TODO.md: check off all items completed for this stage.
+8. Update `docs/todo/<NN>-<stage>.md`: check off all items completed for this stage (and the open count in `TODO.md` if it changes materially).
 
 9. Stop. Do not commit; report what changed and suggest the message "feat: implement $ARGUMENTS pipeline stage" for the user to run.
 
