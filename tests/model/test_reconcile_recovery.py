@@ -388,9 +388,11 @@ def all_unlabelled_fit() -> tuple[Fit, float]:
 
     60 sides (20x4, 20x2, 20x1 = 140 obs), scope fixed to 'engaged' so the
     only free nuisance term is the regime offset itself -- the point this
-    test checks. 800 draws / 800 tune / 4 chains: only max_rhat is asserted
-    here (the brief accepts < 1.02), not ess(m0), which model.py's own
-    docstring says is not meaningful on this corpus shape.
+    test checks. 1500 draws / 1500 tune / 4 chains (800/800 sat at rhat 1.02
+    on CI, since m0 and the unlabelled offset form a ridge where only their
+    sum is identified): only max_rhat is asserted here (the brief accepts
+    < 1.02), not ess(m0), which model.py's own docstring says is not
+    meaningful on this corpus shape.
     """
     rng = np.random.default_rng(SEED + 2)
     true_offset = 0.55
@@ -416,7 +418,7 @@ def all_unlabelled_fit() -> tuple[Fit, float]:
 
     inflation = load_inflation_prior()
     sampler = SamplerSettings(
-        draws=800, tune=800, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+        draws=1500, tune=1500, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
     )
     fit = run_fit(
         corpus.reports, priors=priors, inflation=inflation, sampler=sampler,
