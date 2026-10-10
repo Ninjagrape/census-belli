@@ -61,7 +61,7 @@ from pipeline.extractors import (
 )
 from pipeline.extractors.article import DEFAULT_MAX_PASSAGE_CHARS
 from pipeline.llm import LLMService
-from pipeline.stages.base import StageContext
+from pipeline.stages.base import StageContext, StageOutcome
 
 __all__ = ["RawBattle", "discover_battles", "extract_battle", "run"]
 
@@ -607,14 +607,24 @@ def _build_service(spec: dict[str, Any], context: StageContext) -> LLMService | 
     return LLMService.from_spec(spec, db_conn=context.db_conn)
 
 
-def run(spec: dict[str, Any], context: StageContext | None = None) -> None:
+def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutcome | None:
     """Run the extract stage.
+
+    In ``llm_mode: offline`` an uncached passage is deferred rather than
+    extracted. The battle is flagged for review with a "pending offline
+    processing" note, but no ``missing_data_log`` row is written for what the
+    LLM pass would have supplied, and nothing is cached. Re-running after the
+    answers are imported gives the same outputs as a run that had them.
 
     Args:
         spec: The loaded ``agents/extract.yaml``, with overrides applied.
         context: Shared services. Without one the stage runs against the
             default paths, skips the database writes and still produces the
             processed files.
+
+    Returns:
+        A :class:`StageOutcome` naming the batch file when requests were
+        deferred, otherwise None.
     """
     ctx = context or StageContext()
     params = spec.get("params") or {}
@@ -636,7 +646,7 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> None:
             raw_root=str(raw_root),
             hint="run the crawl stage first",
         )
-        return
+        return None
 
     service = _build_service(spec, ctx)
     merged: list[BattleExtraction] = []
@@ -686,8 +696,14 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> None:
     else:
         logger.info("extract_database_write_skipped", dry_run=ctx.dry_run)
 
+    outcome: StageOutcome | None = None
     if service is not None:
+        batch_file = service.flush_pending()
         service.log_summary()
+        if service.usage.deferred:
+            outcome = StageOutcome(
+                deferred_requests=service.usage.deferred, batch_file=batch_file
+            )
 
     flagged = [b for b in merged if b.needs_review]
     logger.info(
@@ -696,4 +712,6 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> None:
         flagged_for_review=len(flagged),
         troop_reports=sum(len(s.troop_reports) for b in merged for s in b.sides),
         missing_fields=sum(len(b.missing) for b in merged),
+        deferred_requests=outcome.deferred_requests if outcome else 0,
     )
+    return outcome

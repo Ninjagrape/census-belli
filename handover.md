@@ -12,8 +12,9 @@ here.
 2026-10-10. Code comments cite its section numbers ("handover-log §16.1").
 Do not read it by default; open the cited section when a comment points there.
 
-Last updated: 2026-10-10. Everything through the model stage is committed. The
-gap review findings (`docs/todo/*.md`, tagged `(gap review)`) are unfixed.
+Last updated: 2026-10-11. Everything through the model stage is committed.
+Uncommitted: Gemini removed, offline-first LLM routing (§9.4). The gap review
+findings (`docs/todo/*.md`, tagged `(gap review)`) are unfixed.
 
 ---
 
@@ -36,8 +37,8 @@ gap review findings (`docs/todo/*.md`, tagged `(gap review)`) are unfixed.
 ```bash
 export DATABASE_URL="postgresql+psycopg://general_war:general_war@127.0.0.1:5432/general_war"
 ruff check pipeline/ tests/ scripts/ alembic/   # expect: All checks passed
-python -m mypy pipeline/                         # expect: Success, 113 source files (strict)
-python -m pytest tests/ -q -m "not live and not model"   # expect: 925 passed, 0 skipped
+python -m mypy pipeline/                         # expect: Success, 112 source files (strict)
+python -m pytest tests/ -q -m "not live and not model"   # expect: 959 passed, 0 skipped
 python -m pytest tests/model -m model            # recovery suites; slow (~15 min)
 ```
 
@@ -60,10 +61,8 @@ change how those tests are collected.
   `C:\Program Files\PostgreSQL\15\bin\`, not on PATH. pip-installable Postgres
   (`pgserver`, `postgresql-wheel`) has no Windows wheel; do not retry it.
 - **`.env`** is read by `pipeline.config.load_env()` (BOM sniffed: the file here
-  is UTF-16). Exported variables win. The file holds only `GEMIINI_API_KEY`
-  (misspelt, user to fix), so export `DATABASE_URL` yourself.
-- **Gemini key prefix `AQ.A...` is valid.** Do not judge a key by its prefix;
-  make one call and read the error.
+  is UTF-16). Exported variables win. The file holds only an unused Gemini
+  key, so export `DATABASE_URL` yourself.
 - **Python 3.14 locally, 3.11 in CI.** `pymc>=5.28,<6` is pinned because it
   installs on both; pymc 6 needs 3.12. Local anthropic is 0.111 although the
   project declares `>=1.0`; mypy is clean against both, runtime under 1.x is
@@ -93,13 +92,10 @@ if not result.ok:
 Retries, schema validation, cost accounting, and a row in `llm_calls` per call.
 `llm_calls` is also the **resume cache keyed on request hash**, and the offline
 path correlates on the same hash. Providers are routed per stage in the spec
-(`params.llm_provider`): extract and resolve use gemini, classify anthropic.
-
-Resolve builds its client lazily, so a run where everything resolves
-deterministically needs no key; the first genuinely ambiguous commander raises
-`LLMConfigError` and the stage stops (`pause_and_alert`). A real resolve run
-needs `google-genai` and `GEMINI_API_KEY`. `params.candidate_source: local`
-resolves with no LLM and leaves ambiguous groups `unresolved`.
+(`params.llm_model`, `params.llm_mode`); see §9.4. In offline mode
+`complete()` returns `CallStatus.DEFERRED`, which is never written to
+`llm_calls` and is not a failure. `params.candidate_source: local` resolves
+with no LLM and leaves ambiguous groups `unresolved`.
 
 ### 3.2 Quality gates
 
@@ -218,9 +214,8 @@ floor. Recurring classes, with the log section that records each:
    title-verified battles) through crawl, extract and resolve, into a separate
    database (§5). Extract's deterministic path needs no LLM quota. This turns
    every gate threshold from unmeasured into measured.
-2. **Classify, second slice.** Run the pending multi-commander sides through the
-   offline path (`python -m scripts.llm_offline export --stage classify`,
-   `/process-llm-batch`, import); populate `is_defender`; LLM missingness for
+2. **Classify, second slice.** Run classify (offline: it writes the batch file
+   and halts), `/process-llm-batch <file>`, re-run classify; populate `is_defender`; LLM missingness for
    `unclassified` rows. Until this runs, every multi-commander side is
    `default_split`, credits nobody, and `exclusion_concentration` will fire.
 3. **Reconcile and impute open items** (`docs/todo/04-reconcile.md`,
@@ -229,9 +224,10 @@ floor. Recurring classes, with the log section that records each:
    (`docs/todo/09-report.md`).
 5. Full-pipeline integration test.
 
-**The blocker for a full corpus is not code**: the Gemini key is free tier, 20
-requests/day, and the 3,000-battle corpus needs 6,000-12,000 extract calls
-(§9.4). Settle it before planning a real run.
+**LLM throughput for a full corpus**: 6,000-12,000 extract calls, answered by
+subagents on the subscription's weekly limits (§9.4). The offline path has never
+run on a real request file; pilot it on ~50 battles first and measure requests
+per session.
 
 Say explicitly what was and was not verified against a database.
 
@@ -247,7 +243,8 @@ Say explicitly what was and was not verified against a database.
 - **`/data-audit`**: every spec's gates against the live DB plus coverage by
   era/region. **`/extraction-eval`**: prompt regression harness, waiting on the
   gold set. **`/resolve-eval`**: threshold sweep, zero LLM quota.
-  **`/process-llm-batch`**: the offline LLM path.
+  **`/process-llm-batch`**: answers a deferred-request file with
+  `llm-batch-worker` subagents (`.claude/agents/`, Read and Write only).
 - **Stage inspector**: `streamlit run scripts/inspector_app.py`, read-only by
   construction (every connection sets `default_transaction_read_only`), safe to
   point at a corpus database. DB from `INSPECT_DATABASE_URL`, else
@@ -311,20 +308,36 @@ is in the log section cited.
   ~0.62 confidence where evidence is weakest, and live probes are noisy. Measure
   the residual class with a gold set first.
 
-### 9.4 LLM routing and quota
+### 9.4 LLM routing (offline-first)
 
-- Gemini 3.8 Flash for extract and resolve, Anthropic for classify; fallback
-  `claude-haiku-5-5` (named in the specs, read by no code).
-- **Free tier, 20 requests/day**: 3,000 battles x 2-4 passages is 300-600 days.
-  The cap is the problem, not cost (one call $0.0014, corpus order $50-200).
-- The workaround is the offline path: `pipeline/llm/offline.py` exports
-  uncached requests to JSONL, `/process-llm-batch` answers them in a Claude Code
-  session, `scripts/llm_offline.py import` writes them to `llm_calls` on the
-  same `request_hash`.
-- If batching is ever revisited: provider batch APIs (independent requests, one
-  per passage, `request_hash` as `custom_id`) are fine. Cramming many battles
-  into one prompt is rejected: it breaks the per-request cache and the
-  per-passage schema.
+- **Gemini is removed** (2026-10-11). Every LLM stage names an Anthropic model:
+  `claude-haiku-5-5` for extract and resolve, `claude-sonnet-5-5` for classify.
+  Haiku 5.5 and Sonnet 5.x reject temperature, so no spec sets one.
+- `params.llm_mode: offline` (default) builds `OfflineProvider`: cache hits are
+  served from `llm_calls`, misses return `DEFERRED` and are flushed to
+  `data/llm_requests/<stage>_<ts>.jsonl` at the end of the stage. The stage
+  returns a `StageOutcome`; the orchestrator skips that stage's quality gates
+  (they measure completeness of data still waiting) and **halts the pipeline**,
+  CLI exit code 3. Deterministic outputs are still written.
+- Extract with deferred passages: battle `needs_review` with a "pending" note,
+  no `missing_data_log` rows, nothing in `llm_calls`. A re-run after import
+  equals a run that had the answers first time (integration test
+  `test_offline_extract.py`). Resolve leaves deferred groups `unresolved`
+  (method `llm_deferred`).
+- `/process-llm-batch`: `scripts/llm_offline.py split` (compact chunks, system
+  prompt and schema once per chunk, `--skip-answered` for resume after a usage
+  limit), one `llm-batch-worker` per chunk on the chunk's `agent_model`,
+  `validate`, `import --dir`. Import validates every answer against its
+  request's schema and records provider `claude_code`.
+- **The hash names the spec's provider and model**, not who answered, so an
+  offline answer and an `llm_mode: api` call share the cache. Changing
+  `llm_model` invalidates every cached answer for that stage (classify's move
+  from sonnet-4-6 to sonnet-5-5 did this; nothing real was cached).
+- Tests: `tests/conftest.py` redirects `REQUEST_DIR` to a temp dir, or offline
+  runs write batch files into the real `data/`.
+- Never cram many battles into one prompt: it breaks the per-request cache and
+  the per-passage schema. Chunking groups independent requests, it does not
+  merge them.
 
 ### 9.5 The Arsht reference set
 
@@ -454,8 +467,9 @@ Built and verified against a real Postgres: crawl, extract, resolve, and
 reconcile, classify, impute and model on fixtures. The recovery suites pass on
 synthetic data.
 
-Not proven: any real corpus past resolve, any billed LLM call (refusal and
-truncation branches untested), CI (no git remote), and every gate threshold,
+Not proven: any real corpus past resolve, the offline batch path on a real
+request file (`/process-llm-batch` has never run), any billed API call
+(refusal and truncation branches untested), CI (no git remote), and every gate threshold,
 which has only run against empty or fixture databases. The gold sets are
 agent-built and unreviewed by a human. Evaluate and report do not exist, so
 there is no ranking.

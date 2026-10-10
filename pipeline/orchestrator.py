@@ -166,9 +166,33 @@ def run_stage(
                     retries_used=attempt,
                     on_failure=on_failure,
                 )
-            runner_module.run(spec)
+            outcome = runner_module.run(spec)
 
             duration = time.time() - start
+
+            if outcome is not None and getattr(outcome, "awaiting_llm", False):
+                # The stage's deterministic outputs are written, but the
+                # gates measure completeness and would fail on data that is
+                # only waiting for its LLM pass. Reporting that as a stage
+                # failure would blame the code for a pending step, and
+                # retrying cannot help, so the gates are skipped and the
+                # result is marked incomplete instead.
+                batch = str(outcome.batch_file) if outcome.batch_file else None
+                logger.warning(
+                    "stage_quality_gates_skipped_awaiting_llm",
+                    stage=stage,
+                    deferred_requests=outcome.deferred_requests,
+                    batch_file=batch,
+                )
+                return StageResult(
+                    stage=stage,
+                    success=True,
+                    duration_seconds=duration,
+                    retries_used=attempt,
+                    on_failure=on_failure,
+                    deferred_requests=outcome.deferred_requests,
+                    batch_file=batch,
+                )
 
             # Run quality gates
             checks = run_quality_checks(spec, db_conn=db_conn)
@@ -221,6 +245,30 @@ def run_stage(
 
 # ─── Pipeline orchestrator ───────────────────────────────────────────────────
 
+# Distinct from 1 (a stage failed) so a wrapper script can tell "needs the
+# offline batch processed" from "something broke".
+EXIT_AWAITING_LLM = 3
+
+
+def _announce_deferred(result: StageResult) -> None:
+    """Tell the user which batch file to process and what to run next.
+
+    Args:
+        result: The result of a stage that deferred LLM requests.
+    """
+    logger.warning(
+        "pipeline_stopped_awaiting_offline_llm",
+        stage=result.stage,
+        deferred_requests=result.deferred_requests,
+        batch_file=result.batch_file,
+        reason="later stages would run on incomplete data",
+        next_step=(
+            f"run /process-llm-batch {result.batch_file} in Claude Code, then re-run: "
+            f"python -m pipeline.orchestrator --stages {result.stage}"
+        ),
+    )
+
+
 def run_pipeline(
     stages: list[str],
     config_overrides: dict[str, Any] | None = None,
@@ -260,6 +308,10 @@ def run_pipeline(
             duration=f"{result.duration_seconds:.1f}s",
             retries=result.retries_used,
         )
+
+        if result.awaiting_llm:
+            _announce_deferred(result)
+            break
 
         if not result.success:
             if stop_on_error and result.halts_pipeline:
@@ -385,6 +437,8 @@ def main() -> None:
     # Exit with non-zero if any stage failed
     if any(not r.success for r in results):
         sys.exit(1)
+    if any(r.awaiting_llm for r in results):
+        sys.exit(EXIT_AWAITING_LLM)
 
 
 if __name__ == "__main__":

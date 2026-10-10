@@ -47,16 +47,20 @@ params:
   processed_root: data/processed
   raw_root: data/raw
 
-  # Gemini serves this stage too. Most resolution is SPARQL plus rapidfuzz;
-  # the LLM only breaks ties the fuzzy matcher leaves ambiguous, so the
-  # judgement asked of it is narrow and well bounded.
-  llm_provider: gemini
-  llm_model: gemini-3.8-flash
-  llm_temperature: 0.0
-  # Fallback: offline processing via /process-llm-batch (Pro subscription),
-  # or Haiku 5.5 API calls. See agents/extract.yaml for the full note.
-  llm_fallback_provider: anthropic
-  llm_fallback_model: claude-haiku-5-5
+  # Most resolution is SPARQL plus rapidfuzz; the LLM only breaks ties the
+  # fuzzy matcher leaves ambiguous, so the judgement asked of it is narrow
+  # and well bounded and Haiku is enough.
+  #
+  # Offline-first: with llm_mode 'offline' an uncached request is written to
+  # data/llm_requests/ and the pipeline stops after this stage. Answer the
+  # file with /process-llm-batch (Claude Code subagents, under the
+  # subscription), then re-run the stage. 'api' sends the same requests to
+  # the Anthropic API instead. Both use the provider and model below, so the
+  # request hash is identical and the llm_calls cache is shared between modes.
+  # Haiku 5.5 rejects sampling parameters, so there is no llm_temperature.
+  llm_provider: anthropic
+  llm_model: claude-haiku-5-5
+  llm_mode: offline
 
 steps:
   # Step 1: deterministic — exact name match to Wikidata

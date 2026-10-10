@@ -111,8 +111,7 @@ cp .env.example .env
 | Variable | Needed for | Notes |
 |---|---|---|
 | `DATABASE_URL` | everything | `postgresql+psycopg://user:password@localhost:5432/general_war` |
-| `GEMINI_API_KEY` | extract, resolve | Provider is routed per stage in the agent specs |
-| `ANTHROPIC_API_KEY` | classify | |
+| `ANTHROPIC_API_KEY` | optional | Only for a stage set to `llm_mode: api`. The default, `offline`, needs no key: LLM requests go to a batch file answered by `/process-llm-batch` in Claude Code |
 | `LOG_LEVEL` | optional | `DEBUG`, `INFO` (default), `WARNING`, `ERROR` |
 
 `.env` is read on startup and never overrides a variable you have already

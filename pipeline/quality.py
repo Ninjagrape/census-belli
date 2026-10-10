@@ -72,10 +72,23 @@ class StageResult:
     # The spec's retry_policy.on_failure directive. "continue_with_logging"
     # means a failure of this stage should not halt the pipeline.
     on_failure: str = "pause_and_alert"
+    # LLM requests the stage wrote to a batch file instead of answering. A
+    # stage that deferred work is incomplete rather than failed: its own
+    # deterministic outputs exist, its quality gates were not run, and the
+    # pipeline stops until the answers are imported and the stage is re-run.
+    deferred_requests: int = 0
+    batch_file: str | None = None
+
+    @property
+    def awaiting_llm(self) -> bool:
+        """Whether the stage is waiting on offline LLM answers."""
+        return self.deferred_requests > 0
 
     @property
     def halts_pipeline(self) -> bool:
         """Whether this result should stop a pipeline running with stop_on_error."""
+        if self.awaiting_llm:
+            return True
         return not self.success and self.on_failure != "continue_with_logging"
 
 

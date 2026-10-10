@@ -457,6 +457,32 @@ def test_an_uncached_side_stays_default_split_and_is_counted_awaiting_llm(
     assert two.attribution_method == "default_split"
 
 
+def test_an_offline_run_writes_the_cache_misses_to_a_batch_file(
+    conn: Connection, tmp_path: Path
+) -> None:
+    seed = _seed_corpus(conn, tmp_path)
+    spec = _load_spec(seed["raw_root"])
+    config = llm_params(spec)
+    expected = {
+        request_hash(request, config["provider"], config["model"])
+        for _side, request in classify_stage.build_pending_role_requests(
+            conn, seed["raw_root"], spec
+        )
+    }
+
+    outcome = classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    assert outcome is not None and outcome.batch_file is not None
+    lines = [
+        json.loads(raw)
+        for raw in outcome.batch_file.read_text(encoding="utf-8").splitlines()
+        if raw.strip()
+    ]
+    assert {line["request_hash"] for line in lines} == expected
+    assert {line["agent_model"] for line in lines} == {"sonnet"}
+    assert outcome.deferred_requests == len(expected)
+
+
 def test_the_offline_script_builds_the_same_request_hash_as_the_stage(
     conn: Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

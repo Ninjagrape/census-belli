@@ -8,10 +8,16 @@ rather than a code change:
 .. code-block:: yaml
 
     params:
-      llm_provider: gemini
-      llm_model: gemini-3.8-flash
-      llm_temperature: 0.0
+      llm_provider: anthropic
+      llm_model: claude-haiku-5-5
+      llm_mode: offline
       llm_max_tokens: 4096
+
+``llm_mode`` picks how requests are served. ``offline`` (the default) defers
+uncached requests to a batch file that Claude Code subagents answer under the
+Claude subscription, and needs no SDK or key. ``api`` sends the same requests
+to the Anthropic API. Both report the spec's provider and model, so the request
+hash is identical and the ``llm_calls`` cache is shared between modes.
 
 ``llm_temperature`` is honoured only where the model accepts it. Anthropic
 removed sampling parameters on its newer frontier models, so a spec asking
@@ -28,14 +34,19 @@ import structlog
 
 from pipeline.llm.anthropic_client import AnthropicClient
 from pipeline.llm.base import LLMConfigError, LLMProvider
-from pipeline.llm.gemini_client import GeminiClient
+from pipeline.llm.offline import OfflineProvider
 from pipeline.llm.retry import DEFAULT_BASE_DELAY, DEFAULT_MAX_RETRIES
 
-__all__ = ["PROVIDER_NAMES", "build_provider", "llm_params"]
+__all__ = ["LLM_MODES", "PROVIDER_NAMES", "build_provider", "llm_params"]
 
 logger = structlog.get_logger()
 
-PROVIDER_NAMES = ("anthropic", "gemini")
+PROVIDER_NAMES = ("anthropic",)
+LLM_MODES = ("offline", "api")
+
+# Offline needs nothing installed or configured, so it is the default: a fresh
+# checkout can run every stage without a key.
+_DEFAULT_MODE = "offline"
 
 # Used when a spec names no provider. Anthropic is the conservative default:
 # every stage's prompts were written and reviewed against it, so an omitted
@@ -61,6 +72,7 @@ def llm_params(spec: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "provider": params.get("llm_provider", _DEFAULT_PROVIDER),
+        "mode": str(params.get("llm_mode", _DEFAULT_MODE)).strip().lower(),
         "model": params.get("llm_model"),
         "temperature": params.get("llm_temperature"),
         "max_tokens": params.get("llm_max_tokens", 4096),
@@ -82,15 +94,21 @@ def build_provider(spec: dict[str, Any]) -> LLMProvider:
         A ready client satisfying :class:`~pipeline.llm.base.LLMProvider`.
 
     Raises:
-        LLMConfigError: If the provider name is unknown, no model is named,
-            the provider's SDK is missing, or its credentials are absent.
-            Each of these would fail identically on every call, so they halt
-            the stage rather than degrading.
+        LLMConfigError: If the provider name or ``llm_mode`` is unknown, no
+            model is named, or (in api mode) the SDK is missing or the
+            credentials are absent. Each of these would fail identically on
+            every call, so they halt the stage rather than degrading.
     """
     config = llm_params(spec)
     provider = config["provider"]
     model = config["model"]
+    mode = config["mode"]
     stage = spec.get("stage", "unknown")
+
+    if mode not in LLM_MODES:
+        raise LLMConfigError(
+            f"Stage {stage} sets llm_mode {mode!r}. Valid modes: {', '.join(LLM_MODES)}"
+        )
 
     if provider not in PROVIDER_NAMES:
         raise LLMConfigError(
@@ -105,15 +123,10 @@ def build_provider(spec: dict[str, Any]) -> LLMProvider:
             "wrong guess here would be billed on every article in the batch."
         )
 
-    logger.info("llm_provider_selected", stage=stage, provider=provider, model=model)
+    logger.info("llm_provider_selected", stage=stage, provider=provider, model=model, mode=mode)
 
-    if provider == "gemini":
-        return GeminiClient(
-            model=model,
-            max_retries=config["max_retries"],
-            base_delay=config["base_delay"],
-            thinking_level=config["effort"],
-        )
+    if mode == "offline":
+        return OfflineProvider(provider, model)
 
     return AnthropicClient(
         model=model,

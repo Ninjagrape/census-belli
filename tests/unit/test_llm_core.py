@@ -11,7 +11,6 @@ from pipeline.llm.capabilities import (
     thinking_on_by_default,
     traits_for,
 )
-from pipeline.llm.gemini_client import _retry_after_seconds
 from pipeline.llm.parsing import parse_structured, strip_code_fence
 from pipeline.llm.retry import TransientLLMError, with_backoff
 
@@ -43,8 +42,8 @@ def test_identical_requests_hash_identically():
     second = make_request()
 
     # Act
-    a = request_hash(first, "gemini", "gemini-3.8-flash")
-    b = request_hash(second, "gemini", "gemini-3.8-flash")
+    a = request_hash(first, "anthropic", "claude-haiku-5-5")
+    b = request_hash(second, "anthropic", "claude-haiku-5-5")
 
     # Assert
     assert a == b
@@ -55,8 +54,8 @@ def test_hash_changes_when_the_model_changes():
     request = make_request()
 
     # Act
-    a = request_hash(request, "gemini", "gemini-3.8-flash")
-    b = request_hash(request, "gemini", "gemini-3.1-flash-lite")
+    a = request_hash(request, "anthropic", "claude-haiku-5-5")
+    b = request_hash(request, "anthropic", "claude-sonnet-5-5")
 
     # Assert: a re-run on a different model must not reuse cached extractions
     assert a != b
@@ -68,7 +67,7 @@ def test_hash_ignores_metadata():
     with_meta = make_request(metadata={"battle_id": 412})
 
     # Act / Assert
-    assert request_hash(without, "gemini", "m") == request_hash(with_meta, "gemini", "m")
+    assert request_hash(without, "anthropic", "m") == request_hash(with_meta, "anthropic", "m")
 
 
 def test_hash_is_stable_across_schema_key_order():
@@ -76,8 +75,8 @@ def test_hash_is_stable_across_schema_key_order():
     reordered = dict(reversed(list(SCHEMA.items())))
 
     # Act / Assert
-    assert request_hash(make_request(), "gemini", "m") == request_hash(
-        make_request(json_schema=reordered), "gemini", "m"
+    assert request_hash(make_request(), "anthropic", "m") == request_hash(
+        make_request(json_schema=reordered), "anthropic", "m"
     )
 
 
@@ -157,8 +156,8 @@ def test_older_anthropic_models_still_accept_temperature():
     assert accepts_temperature("anthropic", "claude-sonnet-4-6") is True
 
 
-def test_gemini_accepts_temperature():
-    assert accepts_temperature("gemini", "gemini-3.8-flash") is True
+def test_sonnet_5_5_rejects_temperature():
+    assert accepts_temperature("anthropic", "claude-sonnet-5-5") is False
 
 
 def test_haiku_5_5_rejects_temperature():
@@ -197,7 +196,7 @@ def test_unknown_models_are_assumed_to_reject_temperature():
 
 def test_cost_is_none_for_an_unpriced_model():
     # Better a NULL cost column than an authoritative-looking wrong number
-    assert estimate_cost("gemini", "gemini-unreleased", 1000, 500) is None
+    assert estimate_cost("anthropic", "claude-unreleased", 1000, 500) is None
 
 
 def test_cost_uses_published_rates():
@@ -292,8 +291,8 @@ def test_only_ok_avoids_manual_review():
 def test_a_named_retry_delay_beats_the_computed_backoff(monkeypatch):
     # Blind backoff answers "retry in 29s" with about 2.5s, fails again, and
     # burns every remaining attempt on a limit that was never going to lift.
-    # A free-tier Gemini key did exactly that on 2026-09-19, and it looked
-    # like a hang rather than a quota error.
+    # A quota-limited free-tier key did exactly that on 2026-09-19, and it
+    # looked like a hang rather than a quota error.
     slept: list[float] = []
     monkeypatch.setattr("pipeline.llm.retry.time.sleep", slept.append)
 
@@ -351,30 +350,3 @@ def test_no_named_delay_leaves_the_backoff_alone(monkeypatch):
         with_backoff(operation, max_retries=1, base_delay=2.0)
 
     assert slept and 2.0 <= slept[0] <= 3.0
-
-
-class _ErrorWithHeaders(Exception):
-    """An SDK error carrying a Retry-After header."""
-
-    def __init__(self, message: str, headers: dict[str, str]) -> None:
-        super().__init__(message)
-        self.response_headers = headers
-
-
-def test_retry_after_is_read_from_the_header_when_present():
-    error = _ErrorWithHeaders("429 too many requests", {"Retry-After": "42"})
-    assert _retry_after_seconds(error) == 42.0
-
-
-def test_retry_after_is_read_from_geminis_prose_when_there_is_no_header():
-    # Gemini states the delay in the message body rather than only a header.
-    error = Exception(
-        "Error code: 429 - {'error': {'message': 'Rate limit exceeded for model "
-        "gemini-3.8-flash (limit: 20 requests per day on Free Tier). "
-        "Please retry in 29s or upgrade your tier.'}}"
-    )
-    assert _retry_after_seconds(error) == 29.0
-
-
-def test_retry_after_is_none_when_nothing_says_so():
-    assert _retry_after_seconds(Exception("500 internal error")) is None

@@ -11,7 +11,11 @@ stage fails before the pipeline starts rather than partway through.
 
 A stage module must expose::
 
-    def run(spec: dict, context: StageContext | None = None) -> None: ...
+    def run(spec: dict, context: StageContext | None = None) -> StageOutcome | None: ...
+
+A stage returns None when it finished everything it set out to do. A stage
+running LLM work offline returns a :class:`StageOutcome` naming the batch file
+of requests it deferred, which tells the orchestrator to stop after it.
 
 ``context`` is optional so that a stage needing nothing but its spec can
 declare ``run(spec)`` and still conform.
@@ -21,12 +25,14 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
+from pathlib import Path
 from types import ModuleType
 from typing import Any, Protocol, runtime_checkable
 
 __all__ = [
     "StageConformanceError",
     "StageContext",
+    "StageOutcome",
     "StageRunner",
     "check_conforms",
     "conforms",
@@ -54,15 +60,38 @@ class StageContext:
     limit: int | None = None
 
 
+@dataclass(frozen=True)
+class StageOutcome:
+    """What a stage reports back when it could not finish all of its work.
+
+    Attributes:
+        deferred_requests: LLM requests written to ``batch_file`` for offline
+            processing. Downstream stages would run on incomplete data until
+            they are answered and imported.
+        batch_file: The request file, or None if none was written.
+    """
+
+    deferred_requests: int = 0
+    batch_file: Path | None = None
+
+    @property
+    def awaiting_llm(self) -> bool:
+        """Whether the stage is waiting on offline LLM answers."""
+        return self.deferred_requests > 0
+
+
 @runtime_checkable
 class StageRunner(Protocol):
     """Structural type for a stage module."""
 
-    def run(self, spec: dict[str, Any]) -> None:
+    def run(self, spec: dict[str, Any]) -> StageOutcome | None:
         """Execute the stage.
 
         Args:
             spec: The loaded agent spec, with overrides already applied.
+
+        Returns:
+            None, or a :class:`StageOutcome` when LLM requests were deferred.
         """
         ...
 

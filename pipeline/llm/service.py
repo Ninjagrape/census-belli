@@ -15,6 +15,7 @@ hash, and a hit returns the stored object without a round trip.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -47,6 +48,9 @@ class StageUsage:
         self.calls = 0
         self.cache_hits = 0
         self.failures = 0
+        # Requests written to a batch file for offline processing. Not
+        # failures: the answer has simply not arrived yet.
+        self.deferred = 0
         self.input_tokens = 0
         self.output_tokens = 0
         self.cost_usd = 0.0
@@ -67,6 +71,9 @@ class StageUsage:
         self.calls += 1
         if cached:
             self.cache_hits += 1
+            return
+        if response.status is CallStatus.DEFERRED:
+            self.deferred += 1
             return
 
         self.input_tokens += response.usage.input_tokens
@@ -89,6 +96,7 @@ class StageUsage:
             "calls": self.calls,
             "cache_hits": self.cache_hits,
             "failures": self.failures,
+            "deferred": self.deferred,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "cost_usd": round(self.cost_usd, 4),
@@ -195,8 +203,10 @@ class LLMService:
             temperature: Override the stage default.
 
         Returns:
-            The outcome. A non-OK status means the caller should record the
-            record in ``missing_data_log`` and continue rather than abort.
+            The outcome. A non-OK status means the caller should flag the
+            record for review and continue rather than abort. DEFERRED means
+            the request awaits offline processing; the record is flagged but
+            nothing failed.
         """
         request = LLMRequest(
             system=system,
@@ -216,6 +226,11 @@ class LLMService:
         response = self.provider.complete(request)
         self.usage.record(response, cached=False)
 
+        if response.status is CallStatus.DEFERRED:
+            # Nothing to cache or audit: a deferred row in llm_calls must
+            # never be mistaken for a completed call.
+            return response
+
         log_call(self._conn, self.stage, request, response)
 
         if not response.ok:
@@ -228,6 +243,28 @@ class LLMService:
             )
 
         return response
+
+    def flush_pending(self) -> Path | None:
+        """
+        Write requests the offline provider deferred to a batch file.
+
+        Returns:
+            The batch file path, or None when the provider defers nothing
+            (an API provider) or had nothing pending.
+        """
+        flush = getattr(self.provider, "flush", None)
+        if flush is None:
+            return None
+        count = int(getattr(self.provider, "pending", self.usage.deferred))
+        path: Path | None = flush(self.stage)
+        if path is not None:
+            logger.info(
+                "llm_requests_deferred",
+                stage=self.stage,
+                count=count,
+                path=str(path),
+            )
+        return path
 
     def log_summary(self) -> None:
         """Emit this stage's token and cost totals."""

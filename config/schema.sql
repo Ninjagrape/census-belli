@@ -463,7 +463,7 @@ CREATE INDEX idx_crawl_battle ON crawl_log (battle_id);
 CREATE TABLE llm_calls (
     call_id             BIGSERIAL PRIMARY KEY,
     stage               TEXT NOT NULL,          -- extract | resolve | classify
-    provider            TEXT NOT NULL,          -- anthropic | gemini
+    provider            TEXT NOT NULL,          -- anthropic | claude_code (offline import)
     model               TEXT NOT NULL,          -- exact model identifier, never an alias
     input_hash          TEXT NOT NULL,          -- sha256 of provider+model+prompt+schema
     status              TEXT NOT NULL,

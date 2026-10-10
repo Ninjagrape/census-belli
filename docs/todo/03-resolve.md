@@ -9,17 +9,16 @@ Built and verified against live Wikidata and Postgres. Decisions to keep:
 - Live regression tests: tests/integration/test_resolve_live.py, gated on
   GENERAL_WAR_LIVE_CRAWL=1.
 
-- [ ] **Blocker for any real run: the Gemini key is free tier, 20 requests per
-      day.** 3,000 battles x 2-4 passages is 6,000-12,000 extract calls, so
-      300-600 days. The cap is the problem, not cost (one measured call $0.0014,
-      corpus order $50-200), so any paid tier removes it. handover-log §16.8.
-      Workaround built: offline path (`pipeline/llm/offline.py`,
-      `/process-llm-batch`, `scripts/llm_offline.py import`), correlated on
-      `request_hash`.
-      - [ ] ~50-battle cost pilot on both providers, reusing the extrapolation
-            in `.claude/commands/extraction-eval.md` section 5
+- [ ] **LLM quota for a real run.** 3,000 battles x 2-4 passages is 6,000-12,000
+      extract calls. Gemini is gone; every stage defaults to `llm_mode: offline`,
+      answered by `/process-llm-batch` (Haiku workers, 15 requests per chunk)
+      on the Claude subscription's weekly limits. The command is resumable
+      (`split --skip-answered`), so a corpus spreads over several sessions.
+      - [ ] ~50-battle pilot through the offline path: measure requests per
+            session before a weekly limit binds, and spot-check answers for
+            outside knowledge
       - [ ] Run the ~20-call `/extraction-eval` on `claude-haiku-5-5` before
-            relying on it as fallback: it cannot take temperature 0, so
+            trusting it on the corpus: it cannot take temperature 0, so
             determinism rests on the structured-output constraint alone
 - [ ] Label search (wbsearchentities / SPARQL CONTAINS): deferred, not dropped.
       It would fire only on zero-candidate names, where its hit is usually the

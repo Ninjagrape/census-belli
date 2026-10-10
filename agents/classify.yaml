@@ -28,22 +28,24 @@ params:
   # on, and it is the wrong place to economise: it is also far lower volume
   # than extract, since only multi-commander sides need a call at all.
   #
-  # claude-sonnet-5 is both newer and cheaper than the model below
-  # ($2/$10 per Mtok against $3/$15), but it rejects sampling parameters
-  # outright. Moving to it means deleting llm_temperature and relying on the
-  # structured output constraint for determinism, so it is a deliberate
-  # change to make and re-validate, not a drop-in swap.
+  # Sonnet 5.5 rejects sampling parameters outright, so there is no
+  # llm_temperature: determinism comes from the structured output constraint.
+  # Its answers differ from the earlier claude-sonnet-4-6 ones, and the model
+  # is part of the request hash, so a corpus classified under the old model
+  # is re-requested rather than silently reused.
   llm_provider: anthropic
-  llm_model: claude-sonnet-4-6
-  llm_temperature: 0.0
+  llm_model: claude-sonnet-5-5
 
   # Stage wiring (added when the stage runner was built; the prompts and
   # gates above are unchanged).
   #
   # 'offline' looks up each pending side's command-role request in llm_calls
-  # by its exact hash and applies a cached answer; nothing left uncached is
-  # guessed at, and no API client is built. 'api' sends the request live,
-  # using the provider/model/temperature above. See pipeline/stages/classify.py.
+  # by its exact hash and applies a cached answer; every miss is written to
+  # data/llm_requests/ for /process-llm-batch (Claude Code subagents, under
+  # the subscription) and the pipeline stops after this stage. No API client
+  # is built. 'api' sends the request live using the provider and model
+  # above; the hash is the same, so the cache is shared between modes.
+  # See pipeline/stages/classify.py.
   llm_mode: offline
   processed_root: data/processed
   raw_root: data/raw

@@ -40,6 +40,7 @@ METHODS: Final[tuple[str, ...]] = (
     "new_entity",  # no viable candidate; a corpus-local identity
     "placeholder",  # the mention names nobody ("Unknown", "various")
     "llm_failed",  # the disambiguation call did not return usable data
+    "llm_deferred",  # the disambiguation request awaits offline processing
 )
 
 DecisionStatus = Literal["linked", "new", "ambiguous", "unresolved"]

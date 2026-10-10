@@ -29,6 +29,7 @@ __all__ = [
     "CasualtyReport",
     "CommanderMention",
     "Disagreement",
+    "DEFERRED_STATUS",
     "ExtractionFailure",
     "MissingField",
     "Provenance",
@@ -294,6 +295,11 @@ class MissingField:
     notes: str = ""
 
 
+# ``CallStatus.DEFERRED.value``, kept as a literal so this module does not
+# import the LLM layer.
+DEFERRED_STATUS = "deferred"
+
+
 @dataclass(frozen=True)
 class ExtractionFailure:
     """One extraction attempt that did not produce usable data.
@@ -325,6 +331,11 @@ class BattleExtraction:
     n_sources: int = 0
 
     @property
+    def deferred_failures(self) -> list[ExtractionFailure]:
+        """Passages whose LLM pass is waiting on offline processing."""
+        return [f for f in self.failures if f.status == DEFERRED_STATUS]
+
+    @property
     def needs_review(self) -> bool:
         """Whether a human should look at this battle before it is modelled."""
         return bool(self.failures) or bool(self.disagreements)
@@ -333,9 +344,13 @@ class BattleExtraction:
     def review_notes(self) -> str:
         """A one-line summary of why the battle is flagged, or an empty string."""
         reasons: list[str] = []
-        if self.failures:
-            statuses = sorted({f.status for f in self.failures})
-            reasons.append(f"{len(self.failures)} extraction failure(s): {', '.join(statuses)}")
+        deferred = self.deferred_failures
+        failed = [f for f in self.failures if f.status != DEFERRED_STATUS]
+        if deferred:
+            reasons.append(f"LLM pass pending offline processing ({len(deferred)} passage(s))")
+        if failed:
+            statuses = sorted({f.status for f in failed})
+            reasons.append(f"{len(failed)} extraction failure(s): {', '.join(statuses)}")
         if self.disagreements:
             fields = sorted({d.field_name for d in self.disagreements})
             reasons.append(f"source disagreement on {', '.join(fields)}")

@@ -1,7 +1,7 @@
 ## Setup and infrastructure
 
 Built: schema, Alembic, orchestrator with a real DB connection, LLM client
-(anthropic + gemini, routed per stage), quality check runner, CI, pre-commit.
+(anthropic API or offline batch via Claude Code subagents, per stage), quality check runner, CI, pre-commit.
 
 Standing rules worth knowing before changing these:
 - Every schema change goes in both an Alembic migration and `config/schema.sql`:
@@ -17,14 +17,14 @@ Standing rules worth knowing before changing these:
 - Postgres 15 runs natively; docker-compose.yml has never been run.
 
 ## Open
-- [ ] **.env spells the key GEMIINI_API_KEY (two I's) and holds nothing else,
-      no DATABASE_URL, no ANTHROPIC_API_KEY.** Credentials file, user to fix.
+- [ ] **.env holds only a now-unused GEMIINI_API_KEY**, no DATABASE_URL. Credentials
+      file, user to fix.
 - [ ] CI has never run: there is no git remote
 - [ ] `pre-commit install` has not been run on this machine
-- [ ] Smoke-test the Gemini path against a live key (refusal + truncation
-      branches). Harness: tests/integration/test_llm_live.py, gated on
-      GENERAL_WAR_LIVE_LLM=1, never run, blocked on the free-tier quota. Either
-      branch mistaken for success writes wrong data with an ok status.
+- [ ] Smoke-test the `llm_mode: api` path against a live Anthropic key (refusal +
+      truncation branches). Harness: tests/integration/test_llm_live.py, gated on
+      GENERAL_WAR_LIVE_LLM=1, never run. Either branch mistaken for success
+      writes wrong data with an ok status. Optional while every stage is offline.
 - [ ] Quality gates have only run against an empty database: SQL proven valid,
       thresholds not
 - [ ] tests/fixtures/gold/: 20 hand-labelled battles for /extraction-eval

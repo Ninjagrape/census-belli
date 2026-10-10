@@ -14,8 +14,9 @@ set by ``params.llm_mode``:
 
 - ``offline`` (the default): look up each pending side's request in
   ``llm_calls`` by its exact hash. A hit is applied; a miss is left at the
-  deterministic fallback and counted, not guessed at. No network, no API
-  client is built.
+  deterministic fallback, counted, and written to a batch file under
+  ``data/llm_requests/`` for ``/process-llm-batch``. No network, no API
+  client is built, and the orchestrator stops after the stage.
 - ``api``: build an :class:`pipeline.llm.LLMService` lazily -- most runs
   settle everything deterministically or from the cache and never need
   one -- and send the request live. A failed call leaves the deterministic
@@ -77,7 +78,8 @@ from pipeline.llm import LLMService
 from pipeline.llm.base import LLMConfigError, LLMRequest, request_hash
 from pipeline.llm.call_log import find_completed_call
 from pipeline.llm.factory import llm_params
-from pipeline.stages.base import StageContext
+from pipeline.llm.offline import OfflineProvider
+from pipeline.stages.base import StageContext, StageOutcome
 
 __all__ = ["LazyService", "build_pending_role_requests", "run"]
 
@@ -311,6 +313,7 @@ def _resolve_pending_roles(
     service: LazyService,
     counts: ClassifyCounts,
     dry_run: bool,
+    offline: OfflineProvider | None = None,
 ) -> dict[int, list[RoleDecision]]:
     """Resolve every pending side's request, offline or live.
 
@@ -327,6 +330,8 @@ def _resolve_pending_roles(
             ``llm_calls``, whether it is served from the cache, sent live, or
             (in a dry run) not attempted at all.
         dry_run: When True, requests are counted but never looked up or sent.
+        offline: Collects the offline-mode cache misses for the batch file.
+            Without one, a miss is only left at the fallback.
 
     Returns:
         Final role decisions for every side an answer was found for, keyed
@@ -345,6 +350,8 @@ def _resolve_pending_roles(
             cached = find_completed_call(conn, digest)
             if cached is not None:
                 resolved[side.side_id] = apply_llm_classification(side, cached)
+            elif offline is not None:
+                offline.complete(request)
             continue
 
         client = service.get()
@@ -451,13 +458,17 @@ def _classify_missingness_rows(
     return decisions
 
 
-def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> None:
+def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | None:
     """Run the stage against an already-open connection.
 
     Args:
         spec: The loaded ``agents/classify.yaml``.
         ctx: The stage context (dry run, row limit).
         conn: An open database connection.
+
+    Returns:
+        A :class:`StageOutcome` naming the batch file when offline requests
+        were deferred, otherwise None.
 
     Raises:
         ValueError: If ``params.llm_mode`` is neither 'offline' nor 'api'.
@@ -494,6 +505,7 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> None:
         else lambda: LLMService.from_spec(spec, db_conn=conn)
     )
 
+    offline = OfflineProvider(provider, model) if llm_mode == "offline" else None
     resolved = _resolve_pending_roles(
         pairs,
         conn,
@@ -503,6 +515,7 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> None:
         service=service,
         counts=counts,
         dry_run=ctx.dry_run,
+        offline=offline,
     )
     decisions_by_side.update(resolved)
 
@@ -519,7 +532,7 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> None:
 
     if ctx.dry_run:
         logger.info("classify_dry_run", **counts.as_dict())
-        return
+        return None
 
     write_role_decisions(conn, all_role_decisions)
     write_battle_type_decisions(conn, battle_type_decisions)
@@ -528,10 +541,19 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> None:
     if service.built is not None:
         service.built.log_summary()
 
+    outcome: StageOutcome | None = None
+    if offline is not None and offline.pending:
+        pending_count = offline.pending
+        batch_file = offline.flush("classify")
+        logger.info("llm_requests_deferred", stage="classify", count=pending_count,
+                    path=str(batch_file))
+        outcome = StageOutcome(deferred_requests=pending_count, batch_file=batch_file)
+
     logger.info("classify_complete", **counts.as_dict())
+    return outcome
 
 
-def run(spec: dict[str, Any], context: StageContext | None = None) -> None:
+def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutcome | None:
     """Run the classify stage.
 
     Args:
@@ -546,10 +568,12 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> None:
         ValueError: If ``params.llm_mode`` is neither 'offline' nor 'api'.
         DatabaseConfigError: If no database connection was given and none
             can be opened.
+
+    Returns:
+        A :class:`StageOutcome` when requests were deferred, else None.
     """
     ctx = context or StageContext()
     if ctx.db_conn is not None:
-        _run(spec, ctx, ctx.db_conn)
-    else:
-        with get_connection() as conn:
-            _run(spec, ctx, conn)
+        return _run(spec, ctx, ctx.db_conn)
+    with get_connection() as conn:
+        return _run(spec, ctx, conn)

@@ -46,7 +46,6 @@ dependencies = [
     # anthropic 1.x is a major-version break from 0.x (httpx2, removed
     # deprecated params); pipeline/llm/anthropic_client.py targets 1.x.
     "anthropic>=1.0",
-    "google-genai>=2.3",
     "jsonschema>=4.21",
 
     # entity resolution
@@ -105,12 +104,6 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-
-# google-genai ships no py.typed marker, so its types are unavailable.
-# Scoped to that package rather than relaxing the global setting.
-[[tool.mypy.overrides]]
-module = ["google.*"]
-ignore_missing_imports = true
 
 # The PyMC stack is untyped at the boundary: pymc and arviz ship no py.typed,
 # and pytensor's symbolic tensors have no static type mypy can follow. Scoped

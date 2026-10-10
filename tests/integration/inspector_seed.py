@@ -187,7 +187,8 @@ def _seed_logs(conn: Any, ids: dict[str, int]) -> None:
         text(
             "INSERT INTO llm_calls (stage, provider, model, input_hash, status, prompt_tokens, "
             "completion_tokens, cost_usd, latency_ms, response_json, battle_id) "
-            "VALUES ('extract', 'gemini', 'gemini-test', 'h1', 'ok', 100, 20, 0.0012, 350, "
+            "VALUES ('extract', 'claude_code', 'claude-code-test', 'h1', 'ok', 100, 20, 0.0012, "
+            "350, "
             "CAST('{\"troops\": 1}' AS JSONB), :b)"
         ),
         {"b": ids["b0"]},

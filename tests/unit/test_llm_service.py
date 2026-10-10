@@ -80,8 +80,8 @@ def test_reads_provider_settings_from_the_spec():
     spec = {
         "stage": "extract",
         "params": {
-            "llm_provider": "gemini",
-            "llm_model": "gemini-3.8-flash",
+            "llm_provider": "anthropic",
+            "llm_model": "claude-sonnet-4-6",
             "llm_temperature": 0.0,
             "llm_max_tokens": 2048,
         },
@@ -91,8 +91,9 @@ def test_reads_provider_settings_from_the_spec():
     config = llm_params(spec)
 
     # Assert
-    assert config["provider"] == "gemini"
-    assert config["model"] == "gemini-3.8-flash"
+    assert config["provider"] == "anthropic"
+    assert config["model"] == "claude-sonnet-4-6"
+    assert config["mode"] == "offline"
     assert config["temperature"] == 0.0
     assert config["max_tokens"] == 2048
 
@@ -108,24 +109,10 @@ def test_rejects_an_unknown_provider():
 
 def test_rejects_a_spec_with_no_model():
     # Arrange: there is no safe default, since a wrong guess is billed per article
-    spec = {"stage": "extract", "params": {"llm_provider": "gemini"}}
+    spec = {"stage": "extract", "params": {"llm_provider": "anthropic"}}
 
     # Act / Assert
     with pytest.raises(LLMConfigError, match="no llm_model"):
-        build_provider(spec)
-
-
-def test_gemini_client_refuses_to_start_without_a_key(monkeypatch):
-    # Arrange
-    pytest.importorskip("google.genai")
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    spec = {
-        "stage": "extract",
-        "params": {"llm_provider": "gemini", "llm_model": "gemini-3.8-flash"},
-    }
-
-    # Act / Assert: fail once at startup, not once per article
-    with pytest.raises(LLMConfigError, match="GEMINI_API_KEY"):
         build_provider(spec)
 
 

@@ -6,17 +6,26 @@ Usage::
     # Show what is pending for a stage
     python -m scripts.llm_offline status --stage extract
 
-    # Export uncached requests to a JSONL file
+    # Export uncached requests to a JSONL file (a stage run also writes one)
     python -m scripts.llm_offline export --stage extract
 
+    # Split a request file into compact chunks for Claude Code subagents
+    python -m scripts.llm_offline split --file data/llm_requests/extract_<ts>.jsonl
+
+    # Check responses against the request schemas, without touching the database
+    python -m scripts.llm_offline validate --responses data/llm_responses/extract_<ts>/
+
     # Import completed responses
-    python -m scripts.llm_offline import --file data/llm_responses/extract_results.jsonl
+    python -m scripts.llm_offline import --dir data/llm_responses/extract_<ts>/
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -30,8 +39,13 @@ from pipeline.llm.call_log import find_completed_call
 from pipeline.llm.factory import llm_params
 from pipeline.llm.offline import (
     REQUEST_DIR,
+    RESPONSE_DIR,
+    answered_hashes,
+    build_chunks,
     export_pending,
     import_responses,
+    index_requests,
+    validate_responses,
 )
 
 logger = structlog.get_logger()
@@ -326,31 +340,215 @@ def cmd_export(args: argparse.Namespace) -> None:
     if result.exported:
         print(f"File: {result.path}")
         print()
-        print("Process these requests, then import the responses:")
-        print("  python -m scripts.llm_offline import --file <response_file>.jsonl")
+        print("Process these requests (/process-llm-batch), then import the responses:")
+        print("  python -m scripts.llm_offline import --dir data/llm_responses/<stem>/")
 
 
-def cmd_import(args: argparse.Namespace) -> None:
+def _response_files(file: str | None, directory: str | None) -> list[Path]:
+    """Resolve ``--file`` / ``--dir`` to response files.
+
+    Args:
+        file: A single response file, or None.
+        directory: A directory whose ``*.jsonl`` files are all used, or None.
+
+    Returns:
+        The files, sorted for a directory.
+    """
+    if file:
+        return [Path(file)]
+    if directory:
+        return sorted(Path(directory).glob("*.jsonl"))
+    return []
+
+
+def cmd_import(args: argparse.Namespace) -> int:
     """Import completed responses into llm_calls."""
     load_env()
-    path = Path(args.file)
-    if not path.exists():
-        print(f"File not found: {path}", file=sys.stderr)
-        sys.exit(1)
+    files = _response_files(args.file, args.dir)
+    missing = [f for f in files if not f.exists()]
+    if not files or missing:
+        target = ", ".join(str(m) for m in missing) or str(args.dir)
+        print(f"No response files found: {target}", file=sys.stderr)
+        return 1
 
+    index = index_requests([Path(p) for p in args.requests] if args.requests else None)
+    imported = skipped = errors = 0
     eng = get_engine()
     with eng.connect() as conn:
-        result = import_responses(
-            path,
-            conn,
-            provider=args.provider or "offline",
-            model=args.model or "claude-pro-subscription",
-        )
+        for path in files:
+            result = import_responses(path, conn, model=args.model, index=index)
+            print(
+                f"{path}: imported {result.imported}, skipped {result.skipped}, "
+                f"errors {result.errors}"
+            )
+            imported += result.imported
+            skipped += result.skipped
+            errors += result.errors
         conn.commit()
 
-    print(f"Imported: {result.imported}")
-    print(f"Skipped (already cached): {result.skipped}")
-    print(f"Errors: {result.errors}")
+    print(f"Imported: {imported}")
+    print(f"Skipped (already cached): {skipped}")
+    print(f"Errors: {errors}")
+    return 0
+
+
+@dataclass(frozen=True)
+class SplitSummary:
+    """What a split wrote."""
+
+    chunk_dir: Path
+    chunks: list[dict[str, Any]]
+    requests: int
+
+
+def run_split(
+    request_file: Path,
+    *,
+    chunk_size: int,
+    skip_answered: bool,
+    response_dir: Path | None = None,
+    conn: Any = None,
+) -> SplitSummary:
+    """Write a request file's compact chunks.
+
+    Args:
+        request_file: The batch file to split.
+        chunk_size: Maximum requests per chunk.
+        skip_answered: Drop hashes already completed in ``llm_calls`` (when
+            ``conn`` is given) or present in the response directory.
+        response_dir: Where responses for this file live; defaults to
+            ``data/llm_responses/<request file stem>/``.
+        conn: Database connection for the cache check, or None.
+
+    Returns:
+        The chunk directory and chunks written.
+    """
+    stem = request_file.stem
+    skip: set[str] = set()
+    if skip_answered:
+        skip |= answered_hashes(response_dir or RESPONSE_DIR / stem)
+        if conn is not None:
+            skip |= {
+                digest
+                for digest in index_requests([request_file])
+                if find_completed_call(conn, digest) is not None
+            }
+
+    chunks = build_chunks(request_file, chunk_size=chunk_size, skip=skip)
+
+    chunk_dir = request_file.parent / "chunks" / stem
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    # A re-split must not leave chunks from an earlier, larger split behind.
+    for stale in chunk_dir.glob("chunk_*.json"):
+        stale.unlink()
+    for number, chunk in enumerate(chunks, 1):
+        path = chunk_dir / f"chunk_{number:03d}.json"
+        path.write_text(json.dumps(chunk, ensure_ascii=False, separators=(",", ":")), "utf-8")
+
+    return SplitSummary(
+        chunk_dir=chunk_dir,
+        chunks=chunks,
+        requests=sum(len(c["requests"]) for c in chunks),
+    )
+
+
+def cmd_split(args: argparse.Namespace) -> int:
+    """Split a request file into compact chunks for subagents."""
+    load_env()
+    request_file = Path(args.file)
+    if not request_file.exists():
+        print(f"File not found: {request_file}", file=sys.stderr)
+        return 1
+
+    conn = None
+    eng = None
+    if args.skip_answered:
+        try:
+            eng = get_engine()
+            conn = eng.connect()
+        except Exception as e:
+            logger.warning("no_database_connection_skipping_only_by_response_files", error=str(e))
+
+    try:
+        summary = run_split(
+            request_file,
+            chunk_size=args.chunk_size,
+            skip_answered=args.skip_answered,
+            conn=conn,
+        )
+    finally:
+        if conn is not None:
+            conn.close()
+        if eng is not None:
+            eng.dispose()
+
+    print(f"Chunk directory: {summary.chunk_dir}")
+    print(f"Chunks: {len(summary.chunks)}")
+    print(f"Requests: {summary.requests}")
+    for number, chunk in enumerate(summary.chunks, 1):
+        print(
+            f"  chunk_{number:03d}.json  agent_model={chunk['agent_model']}  "
+            f"requests={len(chunk['requests'])}"
+        )
+    return 0
+
+
+def run_validate(
+    responses: Path,
+    *,
+    request_files: Sequence[Path] | None = None,
+    request_dir: Path | None = None,
+) -> int:
+    """Validate response files against their requests and print a report.
+
+    Args:
+        responses: A response file or a directory of ``*.jsonl`` files.
+        request_files: Explicit request files; by default every ``*.jsonl``
+            in ``request_dir``.
+        request_dir: Request directory, defaulting to ``data/llm_requests/``.
+
+    Returns:
+        0 when every line is valid, 1 when any line failed or no response
+        file was found.
+    """
+    directory = request_dir or REQUEST_DIR
+    files = sorted(responses.glob("*.jsonl")) if responses.is_dir() else [responses]
+    files = [f for f in files if f.exists()]
+    if not files:
+        print(f"No response files found at {responses}", file=sys.stderr)
+        return 1
+
+    index = index_requests(request_files, directory)
+
+    stem = responses.name if responses.is_dir() else responses.parent.name
+    matching = directory / f"{stem}.jsonl"
+    expected = set(index_requests([matching])) if matching.exists() else set()
+
+    answered: set[str] = set()
+    failed = False
+    for path in files:
+        report = validate_responses(path, index=index)
+        answered |= report.answered
+        print(f"{path}: ok {report.ok}, errors {len(report.errors)}")
+        for prefix, reason in report.errors:
+            print(f"  {prefix}: {reason}")
+            failed = True
+
+    if expected:
+        unanswered = sorted(expected - answered)
+        print(f"Requests in {matching.name} with no valid response yet: {len(unanswered)}")
+        for digest in unanswered[:20]:
+            print(f"  {digest[:12]}")
+        if len(unanswered) > 20:
+            print(f"  ... and {len(unanswered) - 20} more")
+
+    return 1 if failed else 0
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    """Validate responses without writing to the database."""
+    requests = [Path(p) for p in args.requests] if args.requests else None
+    return run_validate(Path(args.responses), request_files=requests)
 
 
 def cmd_list(args: argparse.Namespace) -> None:
@@ -385,10 +583,27 @@ def main() -> None:
     p_export.add_argument("--output", help="Output directory override")
     p_export.set_defaults(func=cmd_export)
 
+    p_split = sub.add_parser("split", help="Split a request file into subagent chunks")
+    p_split.add_argument("--file", required=True, help="Request JSONL file")
+    p_split.add_argument("--chunk-size", type=int, default=15, help="Requests per chunk")
+    p_split.add_argument(
+        "--skip-answered",
+        action="store_true",
+        help="Drop requests already in llm_calls or in data/llm_responses/<stem>/",
+    )
+    p_split.set_defaults(func=cmd_split)
+
+    p_validate = sub.add_parser("validate", help="Validate responses, no database writes")
+    p_validate.add_argument("--responses", required=True, help="Response file or directory")
+    p_validate.add_argument("--requests", nargs="*", help="Request files (default: all)")
+    p_validate.set_defaults(func=cmd_validate)
+
     p_import = sub.add_parser("import", help="Import completed responses")
-    p_import.add_argument("--file", required=True, help="Response JSONL file")
-    p_import.add_argument("--provider", help="Provider name for audit trail")
-    p_import.add_argument("--model", help="Model name for audit trail")
+    source = p_import.add_mutually_exclusive_group(required=True)
+    source.add_argument("--file", help="Response JSONL file")
+    source.add_argument("--dir", help="Directory of response *.jsonl files")
+    p_import.add_argument("--requests", nargs="*", help="Request files (default: all)")
+    p_import.add_argument("--model", help="Model name for lines without model_used")
     p_import.set_defaults(func=cmd_import)
 
     p_list = sub.add_parser("list", help="List exported request files")
@@ -396,7 +611,9 @@ def main() -> None:
     p_list.set_defaults(func=cmd_list)
 
     args = parser.parse_args()
-    args.func(args)
+    code = args.func(args)
+    if code:
+        sys.exit(code)
 
 
 if __name__ == "__main__":

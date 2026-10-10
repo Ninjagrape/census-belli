@@ -33,7 +33,7 @@ from typing import Any, Final
 import structlog
 
 from pipeline.extractors.article import render_template
-from pipeline.llm import LLMService
+from pipeline.llm import CallStatus, LLMService
 from pipeline.resolvers.records import Candidate, Decision, MentionGroup
 
 __all__ = [
@@ -201,7 +201,7 @@ def disambiguate(
 
     Returns:
         A final decision: ``linked``, ``new``, or ``unresolved`` when the
-        call itself failed.
+        call itself failed or is deferred to offline processing.
     """
     user = render_template(template, _prompt_values(group, candidates))
 
@@ -212,6 +212,17 @@ def disambiguate(
         schema_name=OUTPUT_SCHEMA_NAME,
         metadata={"group": group.key, "mentions": len(group.mentions)},
     )
+
+    if response.status is CallStatus.DEFERRED:
+        # Not a failure: the request is in the batch file. The group stays
+        # unresolved until the answer is imported and the stage re-run.
+        return Decision(
+            status="unresolved",
+            canonical_name=group.display_name,
+            method="llm_deferred",
+            candidates_considered=len(candidates),
+            reasoning="disambiguation pending offline processing",
+        )
 
     if not response.ok or response.data is None:
         logger.warning(

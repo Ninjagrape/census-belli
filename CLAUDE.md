@@ -94,7 +94,7 @@ The orchestrator in `pipeline/orchestrator.py` runs stages in sequence, checks q
 - **Language**: Python 3.11+
 - **Database**: PostgreSQL 15+ (schema in `config/schema.sql`)
 - **Web scraping**: httpx + beautifulsoup4 + mwparserfromhell (for MediaWiki templates)
-- **LLM extraction**: Gemini 3.8 Flash (extract, resolve) and Anthropic claude-sonnet-4-6 (classify), routed per stage via `agents/<stage>.yaml`. Fallback: Haiku 5.5 API (`claude-haiku-5-5`) or offline processing via Claude Pro subscription (`/process-llm-batch`)
+- **LLM extraction**: offline-first. Each stage names its model in `agents/<stage>.yaml` (`claude-haiku-5-5` for extract and resolve, `claude-sonnet-5-5` for classify). With `llm_mode: offline` (the default) a stage answers from the `llm_calls` cache, writes uncached requests to `data/llm_requests/<stage>_<ts>.jsonl` and stops the pipeline; `/process-llm-batch` answers the file with `llm-batch-worker` subagents on the subscription's usage limits, then the stage is re-run. `llm_mode: api` sends the same requests to the Anthropic API and shares the cache
 - **Entity resolution**: Wikidata SPARQL via `SPARQLWrapper`
 - **Bayesian modelling**: PyMC 5.x (primary), CmdStanPy as fallback
 - **Data processing**: pandas, polars

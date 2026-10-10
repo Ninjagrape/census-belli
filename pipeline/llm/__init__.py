@@ -18,8 +18,9 @@ Typical use in a stage runner::
             metadata={"battle_id": article.battle_id},
         )
         if not result.ok:
-            continue  # already logged and flagged for review
+            continue  # failed or deferred; the record is flagged for review
         upsert(result.data)
+    service.flush_pending()  # offline mode: write the batch file
     service.log_summary()
 """
 
@@ -40,6 +41,7 @@ from pipeline.llm.factory import PROVIDER_NAMES, build_provider, llm_params
 from pipeline.llm.offline import (
     ExportResult,
     ImportResult,
+    OfflineProvider,
     export_pending,
     import_responses,
     pending_count,
@@ -57,6 +59,7 @@ __all__ = [
     "LLMRequest",
     "LLMResponse",
     "LLMService",
+    "OfflineProvider",
     "StageUsage",
     "TokenUsage",
     "accepts_temperature",

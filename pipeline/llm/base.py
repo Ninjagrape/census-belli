@@ -67,6 +67,9 @@ class CallStatus(Enum):
     API_ERROR = "api_error"
     # Response was cut off by the output token ceiling, so the JSON is partial.
     TRUNCATED = "truncated"
+    # The request was written to a batch file for offline processing. Not an
+    # LLM failure: the answer simply has not arrived yet, so nothing is cached.
+    DEFERRED = "deferred"
 
     @property
     def needs_review(self) -> bool:

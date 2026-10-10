@@ -70,6 +70,7 @@ _ANTHROPIC_TRAITS: dict[str, ModelTraits] = {
     "claude-opus-4-7": ModelTraits(5.00, 25.00, accepts_sampling_params=False),
     "claude-opus-4-6": ModelTraits(5.00, 25.00, accepts_sampling_params=True),
     "claude-sonnet-5": ModelTraits(2.00, 10.00, accepts_sampling_params=False),
+    "claude-sonnet-5-5": ModelTraits(2.00, 10.00, accepts_sampling_params=False),
     "claude-sonnet-4-6": ModelTraits(3.00, 15.00, accepts_sampling_params=True),
     "claude-haiku-5-5": ModelTraits(
         0.10,
@@ -82,49 +83,8 @@ _ANTHROPIC_TRAITS: dict[str, ModelTraits] = {
     "claude-fable-5": ModelTraits(10.00, 50.00, accepts_sampling_params=False),
 }
 
-# Gemini models, paid-tier prices in USD per million tokens, verified against
-# https://ai.google.dev/gemini-api/docs/pricing on 2026-09-18.
-#
-# Two caveats on these numbers:
-#
-# * The 3.7 and 3.8 Flash rates below are promotional and double on
-#   2027-01-01 (input $1.50, output $7.50, cache $0.15). Revisit before then;
-#   from that date the cost column would silently understate spend.
-# * The Pro models are tiered on prompt length and only the <=200k rate is
-#   modelled here. Battle articles sit far below that, so the tier never
-#   binds in this pipeline, but a long-context experiment would be underpriced.
-#
-# Gemini accepts sampling parameters on every current model, so temperature 0
-# remains available here even though Anthropic has removed it on its newer
-# models. Explicit context caching is billed by storage duration rather than
-# per written token, so cache_write_multiplier stays at zero.
-_GEMINI_TRAITS: dict[str, ModelTraits] = {
-    "gemini-3.8-flash": ModelTraits(
-        0.75, 3.75, accepts_sampling_params=True, cache_write_multiplier=0.0
-    ),
-    "gemini-3.7-flash": ModelTraits(
-        0.75, 3.75, accepts_sampling_params=True, cache_write_multiplier=0.0
-    ),
-    "gemini-3.5-flash": ModelTraits(
-        1.50, 9.00, accepts_sampling_params=True, cache_write_multiplier=0.0
-    ),
-    "gemini-3.1-flash-lite": ModelTraits(
-        0.25, 1.50, accepts_sampling_params=True, cache_write_multiplier=0.0
-    ),
-    "gemini-3.1-pro-preview": ModelTraits(
-        2.00, 12.00, accepts_sampling_params=True, cache_write_multiplier=0.0
-    ),
-    "gemini-2.5-pro": ModelTraits(
-        1.25, 10.00, accepts_sampling_params=True, cache_write_multiplier=0.0
-    ),
-    "gemini-2.5-flash": ModelTraits(
-        0.30, 2.50, accepts_sampling_params=True, cache_write_multiplier=0.0
-    ),
-}
-
 _TRAITS_BY_PROVIDER: dict[str, dict[str, ModelTraits]] = {
     "anthropic": _ANTHROPIC_TRAITS,
-    "gemini": _GEMINI_TRAITS,
 }
 
 

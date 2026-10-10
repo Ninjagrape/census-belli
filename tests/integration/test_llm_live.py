@@ -12,11 +12,11 @@ real money and real quota:
     GENERAL_WAR_LIVE_LLM=1 python -m pytest tests/integration/test_llm_live.py -v
 
 They are written and wired but **have not been run**. docs/handover-log.md 14.5
-records the blocker: the Gemini key on this machine is free tier, twenty
-requests per day, and that quota was exhausted on 2026-09-19. No code change
-fixes it -- it needs a paid tier, or a different provider for the bulk stages.
-The harness exists so that the moment a usable key is available, verifying
-this path is one command rather than an afternoon.
+records the blocker: no usable API key was available on this machine. The
+harness forces ``llm_mode: api``, because the specs default to offline mode
+and an offline service would defer every request instead of calling out. The
+moment a key is available, verifying this path is one command rather than an
+afternoon.
 
 What they check is the branches a fixture cannot reach honestly:
 
@@ -106,7 +106,7 @@ def service() -> Iterator[Any]:
     if not _database_available():
         pytest.skip("needs DATABASE_URL: llm_calls is where the evidence lands")
 
-    spec = load_agent_spec("extract")
+    spec = load_agent_spec("extract", {"llm_mode": "api"})
     engine = get_engine()
     conn = engine.connect()
     try:

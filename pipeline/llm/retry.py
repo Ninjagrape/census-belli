@@ -2,7 +2,7 @@
 Retry policy for transient LLM failures.
 
 The project's error-handling rule is three retries with exponential backoff
-from a 2 second base. Both vendor SDKs retry some failures internally, so
+from a 2 second base. The vendor SDK retries some failures internally, so
 this wrapper is configured to cover what they do not: it counts attempts
 across the whole call so that a stage's log shows the true number of round
 trips, and it treats only transient conditions as retryable.
@@ -10,8 +10,8 @@ trips, and it treats only transient conditions as retryable.
 **A rate limiter that says when to come back is obeyed.** Blind exponential
 backoff answers "retry in 29s" with 2.5 seconds, fails again, and burns every
 remaining attempt on a limit that was never going to lift -- which is what a
-free-tier Gemini key did on 2026-09-19, turning a quota error into what looked
-like a hang. When a provider supplies a delay, :class:`TransientLLMError`
+quota-limited free-tier key did on 2026-09-19, turning a quota error into what
+looked like a hang. When a provider supplies a delay, :class:`TransientLLMError`
 carries it and it wins over the computed one.
 """
 

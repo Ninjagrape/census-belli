@@ -535,7 +535,11 @@ def merge_battle(
         # read the other, and they can disagree.
         n_sources=len({(s.provenance.source_type, s.provenance.source_ref) for s in sources}),
     )
-    battle.missing = missing_fields(battle)
+    # A deferred passage is an answer that has not arrived, not a field no
+    # source reported. Logging troop_total and friends as missing now would
+    # write rows that the post-import re-run then has to retract, and the
+    # classify stage could label them before the truth is known.
+    battle.missing = [] if battle.deferred_failures else missing_fields(battle)
 
     logger.debug(
         "battle_merged",

@@ -21,27 +21,25 @@ outputs:
 
 tools:
   - mwparserfromhell_parse    # deterministic MediaWiki template parser
-  - llm_extract               # Anthropic API call with structured output
+  - llm_extract               # structured output; offline batch file by default, Anthropic API with llm_mode: api
   - wikidata_map              # map Wikidata JSON fields to schema columns
   - db_upsert
 
 params:
-  # Gemini serves this stage. It is the highest-volume and lowest-judgement
-  # LLM work in the pipeline, one call per battle article, and flash-tier
-  # pricing runs several times cheaper per article than the Anthropic
-  # equivalent for what is essentially structured transcription.
-  # Cheaper still: gemini-3.1-flash-lite, if extraction quality holds on a
-  # sample. Verify against the held-out labels before switching.
-  llm_provider: gemini
-  llm_model: gemini-3.8-flash
-  llm_temperature: 0.0         # honoured: Gemini still accepts sampling params
+  # This is the highest-volume and lowest-judgement LLM work in the pipeline,
+  # one call per passage of a battle article, so it runs on Haiku.
+  #
+  # Offline-first: with llm_mode 'offline' an uncached passage is written to
+  # data/llm_requests/ and the pipeline stops after this stage. Answer the
+  # file with /process-llm-batch (Claude Code subagents, under the
+  # subscription), then re-run the stage. 'api' sends the same requests to
+  # the Anthropic API instead. Both use the provider and model below, so the
+  # request hash is identical and the llm_calls cache is shared between modes.
+  # Haiku 5.5 rejects sampling parameters, so there is no llm_temperature.
+  llm_provider: anthropic
+  llm_model: claude-haiku-5-5
+  llm_mode: offline
   llm_max_tokens: 4096
-  # Fallback when Gemini free tier is exhausted (20 req/day): use the
-  # offline processing path (scripts/llm_offline.py export, then
-  # /process-llm-batch in a Claude Code session under the Pro subscription,
-  # then import). Haiku 5.5 is the model if API calls are preferred instead.
-  llm_fallback_provider: anthropic
-  llm_fallback_model: claude-haiku-5-5
   batch_size: 50               # process this many articles per LLM batch
   log_all_llm_calls: true
 

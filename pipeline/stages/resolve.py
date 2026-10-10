@@ -69,7 +69,7 @@ from pipeline.resolvers import (
 )
 from pipeline.resolvers.battles import DEFAULT_NAME_THRESHOLD, DEFAULT_YEAR_SLACK
 from pipeline.resolvers.candidates import DEFAULT_BATCH_SIZE, DEFAULT_MAX_NAMES_PER_GROUP
-from pipeline.stages.base import StageContext
+from pipeline.stages.base import StageContext, StageOutcome
 
 __all__ = ["LazyService", "resolve_groups", "run"]
 
@@ -598,7 +598,7 @@ def _write_database(
     return duplicates
 
 
-def run(spec: dict[str, Any], context: StageContext | None = None) -> None:
+def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutcome | None:
     """Run the resolve stage.
 
     Args:
@@ -606,6 +606,10 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> None:
         context: Shared services. Without a database connection the stage
             still resolves and still writes the resolution log, and skips the
             row writes.
+
+    Returns:
+        A :class:`StageOutcome` naming the batch file when disambiguation
+        requests were deferred to offline processing, otherwise None.
 
     Raises:
         ValueError: If the spec is incomplete or names an unknown candidate
@@ -635,7 +639,7 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> None:
             path=str(processed_root / _COMMANDERS_FILE),
             hint="run the extract stage first",
         )
-        return
+        return None
 
     groups = group_mentions(mentions)
     if ctx.limit is not None:
@@ -676,7 +680,14 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> None:
     _write_resolution_log(processed_root / _RESOLUTION_LOG, groups, decisions, identities)
     _write_jsonl(processed_root / _DUPLICATE_BATTLES, [pair.as_dict() for pair in duplicates])
 
+    outcome: StageOutcome | None = None
     if service.built is not None:
+        batch_file = service.built.flush_pending()
         service.built.log_summary()
+        if service.built.usage.deferred:
+            outcome = StageOutcome(
+                deferred_requests=service.built.usage.deferred, batch_file=batch_file
+            )
 
     logger.info("resolve_complete", **counts.as_dict())
+    return outcome

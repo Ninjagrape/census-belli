@@ -133,7 +133,7 @@ def _env_encoding(path: Path) -> str:
 
     # "utf-16" rather than "utf-16-le": the explicit-endianness codecs keep
     # the BOM as a character, which then rides along on the first key name and
-    # produces a variable called "﻿GEMINI_API_KEY" that nothing reads.
+    # produces a variable called "﻿ANTHROPIC_API_KEY" that nothing reads.
     if head.startswith(b"\xff\xfe\x00\x00"):
         return "utf-32"
     if head.startswith((b"\xff\xfe", b"\xfe\xff")):
