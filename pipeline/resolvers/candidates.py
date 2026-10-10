@@ -90,7 +90,7 @@ DEFAULT_BATCH_SIZE: Final[int] = 25
 # name spelled the same in every language does not need one label per
 # language. Horatio Nelson (Q83235) has **no en label at all**: his labels are
 # en-gb "Horatio Nelson, 1st Viscount Nelson" and mul "Horatio Nelson". An
-# en-only literal cannot see him, and handover 14.6 mistook that for him
+# en-only literal cannot see him, and handover-log 14.6 mistook that for him
 # genuinely lacking the name. Every commander whose label has migrated is
 # invisible to an en-only lookup, and the class grows as the migration runs.
 #
@@ -147,7 +147,7 @@ LIMIT {limit}
 
 # The two country/occupation FILTERs above stay English-only on purpose. They
 # are tiebreaks that never make a match (matcher._tiebreak_bonus), and they are
-# the multi-valued joins whose cross-product cost handover 14.2 thirty seconds
+# the multi-valued joins whose cross-product cost handover-log 14.2 thirty seconds
 # a batch. Widening them would grow the GROUP_CONCAT inputs for no decision
 # value. Do not "finish" the mul migration into them.
 

@@ -235,7 +235,7 @@ def test_only_total_branch_troop_reports_are_loaded(conn: Connection) -> None:
 def test_a_naval_ship_count_never_enters_the_personnel_reports(conn: Connection) -> None:
     # reported_value carries no unit and a real infobox reads "250-400
     # galleys". A ship count in the same covariate as a head count is the
-    # handover 4.2 class of error.
+    # handover-log 4.2 class of error.
     battle = _battle(conn, "Actium", "0031-09-02 BC")
     side = _side(conn, battle, "Octavian")
     source = _source(conn)

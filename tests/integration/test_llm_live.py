@@ -1,7 +1,7 @@
 """
 The LLM path against a live provider.
 
-handover.md 1 and 11.2 both list "any real LLM call" as unverified, and 5.1b
+docs/handover-log.md 1 and 11.2 both list "any real LLM call" as unverified, and 5.1b
 records why that matters: the extract stage makes one call per article
 passage, so a credential or quota problem surfaces part-way through a corpus
 rather than at the start of it.
@@ -11,7 +11,7 @@ real money and real quota:
 
     GENERAL_WAR_LIVE_LLM=1 python -m pytest tests/integration/test_llm_live.py -v
 
-They are written and wired but **have not been run**. handover.md 14.5
+They are written and wired but **have not been run**. docs/handover-log.md 14.5
 records the blocker: the Gemini key on this machine is free tier, twenty
 requests per day, and that quota was exhausted on 2026-09-19. No code change
 fixes it -- it needs a paid tier, or a different provider for the bulk stages.
@@ -135,7 +135,7 @@ def test_a_real_call_returns_schema_valid_json(service: Any) -> None:
 def test_an_identical_second_call_is_served_from_the_cache(service: Any) -> None:
     """A re-run must not pay twice. llm_calls is keyed on the request hash.
 
-    handover.md 3.1 claimed this and 13.3 demonstrated it once by hand. This
+    docs/handover-log.md 3.1 claimed this and 13.3 demonstrated it once by hand. This
     is the assertion that keeps it true.
     """
     kwargs: dict[str, Any] = {

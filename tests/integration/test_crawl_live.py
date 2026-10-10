@@ -2,7 +2,7 @@
 The crawl stage against live Wikipedia.
 
 Every systematic bug this project has found came from contact with something
-real rather than from reading code: the naval mislabelling (handover.md 4.2),
+real rather than from reading code: the naval mislabelling (docs/handover-log.md 4.2),
 the robots.txt rule that silently disabled every SPARQL query (4.7), the
 alias matches thrown away after the query found them (14.1). In each case a
 fixture suite agreed with the code because both had been written from the
@@ -54,7 +54,7 @@ pytestmark = [
 # titles whose parentheses the URL rules must survive, one of them
 # non-ASCII. Every title here was checked against the live API rather than
 # recalled: an earlier draft of this list invented Battle_of_Hałycz, which
-# 404s, and handover.md 14.6 records the same mistake made with a Q-id.
+# 404s, and docs/handover-log.md 14.6 records the same mistake made with a Q-id.
 LIVE_BATTLES: tuple[str, ...] = (
     "https://en.wikipedia.org/wiki/Battle_of_Cannae",
     "https://en.wikipedia.org/wiki/Battle_of_Actium",
@@ -147,7 +147,7 @@ def live_results() -> list[FetchResult]:
 def test_every_battle_article_is_fetched(live_results: list[FetchResult]) -> None:
     """The configured rate limit survives ten consecutive Wikipedia requests.
 
-    This is the assertion handover.md 5.2 asked for: a smoke test at 1.5s
+    This is the assertion docs/handover-log.md 5.2 asked for: a smoke test at 1.5s
     spacing drew a 429, and 1.0 was the configured value. If the spec is
     still too fast, this fails with the status rather than corrupting a real
     crawl months later.
@@ -225,7 +225,7 @@ def test_live_articles_still_parse_into_infoboxes(live_results: list[FetchResult
 def test_no_naval_battle_is_labelled_a_land_engagement(
     live_results: list[FetchResult],
 ) -> None:
-    """The regression test for handover.md 4.2, asserted against live HTML.
+    """The regression test for docs/handover-log.md 4.2, asserted against live HTML.
 
     Wikipedia uses the generic ``{{Infobox military conflict}}`` template for
     essentially every battle including naval ones, so a parser that reads
@@ -250,7 +250,7 @@ def test_no_naval_battle_is_labelled_a_land_engagement(
 
     assert not mislabelled, (
         f"a naval battle was given a non-naval battle_type from the infobox: "
-        f"{mislabelled}. This is handover.md 4.2 recurring."
+        f"{mislabelled}. This is docs/handover-log.md 4.2 recurring."
     )
 
 

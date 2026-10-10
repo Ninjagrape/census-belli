@@ -1,6 +1,6 @@
 """Configuration for the impute stage: era bins, priors and run parameters.
 
-Era bins are on ``battles.year_astronomical`` (handover.md 5.1), where 31 BC
+Era bins are on ``battles.year_astronomical`` (docs/handover-log.md 5.1), where 31 BC
 is -30 and BC years are negative, so one comparison against an exclusive upper
 bound puts every BC battle in 'ancient' without special-casing.
 """

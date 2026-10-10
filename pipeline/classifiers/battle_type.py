@@ -1,5 +1,5 @@
 """
-Battle-type inference, the covariate handover.md §4.2 left null.
+Battle-type inference, the covariate docs/handover-log.md §4.2 left null.
 
 ``pipeline/extractors/infobox.py`` used to set ``battle_type`` from which
 infobox template a battle used. That broke because Wikipedia uses the

@@ -72,7 +72,7 @@ params:
   regime_deviation_prior_sd: 0.3      # tau_a, source_type x claim-regime interaction
   sigma_deviation_prior_sd: 0.3       # tau_sigma
   # lineage_prior_sd removed 2026-10-02: copies of one claim are collapsed to
-  # one row in build_design, so the model has no lineage term (handover 20.10).
+  # one row in build_design, so the model has no lineage term (handover-log 20.10).
   scope_offset_prior_sd: 0.4
   scope_unknown_dispersion_sd: 0.4
   estimate_dispersion_sd: 0.3
@@ -204,7 +204,7 @@ quality_checks:
         AND bs.est_troops_total_lo > 0
         AND bs.est_troops_total_hi > 0
     # Was "< 2.2", which no fit can meet: in a corpus where nearly every
-    # report is `unlabelled` (handover.md 19.2, 19.9) the unlabelled offset is
+    # report is `unlabelled` (docs/handover-log.md 19.2, 19.9) the unlabelled offset is
     # prior-driven and shared by every side, and its prior sd of ~0.94 alone
     # puts a floor of ~3.7 under LN(hi/lo) (3.3-3.7 across regimes, computed
     # from config/inflation_priors.yaml). Measured 4.13 on the 5-battle seeded

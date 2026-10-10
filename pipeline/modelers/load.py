@@ -1,7 +1,7 @@
 """Reading the model stage's inputs: the database and the imputed rounds.
 
 Years come from ``battles.year_astronomical``, never ``date_start``: a BC date
-cannot be decoded in Python (handover.md 5.1).
+cannot be decoded in Python (docs/handover-log.md 5.1).
 
 The imputed rounds are files, so they can outlive the database they were made
 against. Every round's manifest carries the ``run_id`` of the impute run that

@@ -85,7 +85,7 @@ _DUPLICATE_BATTLES: Final[str] = "duplicate_battles.jsonl"
 _WIKIDATA_DIR: Final[str] = "wikidata"
 
 # The query service is a shared, unpaid resource and it is stricter than the
-# article API. One request every two seconds is slower than handover §5.2's
+# article API. One request every two seconds is slower than handover-log §5.2's
 # floor for Wikipedia, deliberately.
 _DEFAULT_SPARQL_RATE_LIMIT: Final[float] = 2.0
 _DEFAULT_TIMEOUT_S: Final[float] = 60.0

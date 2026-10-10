@@ -1,14 +1,14 @@
 # Resolve Gold Set
 
 Agent-labelled, unreviewed. Every Q-id was verified against live Wikidata
-in sessions recorded in handover.md (§13, §14, §16), not recalled from memory.
+in sessions recorded in docs/handover-log.md (§13, §14, §16), not recalled from memory.
 
 ## Provenance
 
 - Created: 2026-09-21
-- Labelled by: Claude (agent), from handover.md verified live lookups
+- Labelled by: Claude (agent), from docs/handover-log.md verified live lookups
 - Reviewed by: **not yet reviewed by a human**
-- Candidate data: synthetic fixtures built from handover.md descriptions of
+- Candidate data: synthetic fixtures built from docs/handover-log.md descriptions of
   live SPARQL results, not raw endpoint captures
 
 ## Coverage

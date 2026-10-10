@@ -454,7 +454,7 @@ async def test_retries_stop_at_the_configured_maximum() -> None:
 async def test_a_429_waits_as_long_as_the_server_asked() -> None:
     """Wikipedia's Retry-After beats the formula, which would answer 29s with 2s.
 
-    This is the defect handover.md 5.2 recorded on the crawl side and 14.4 on
+    This is the defect docs/handover-log.md 5.2 recorded on the crawl side and 14.4 on
     the LLM side: blind doubling spends every attempt inside a window the
     limit was never going to lift in.
     """

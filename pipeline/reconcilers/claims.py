@@ -327,7 +327,7 @@ def collapse_lineages(reports: Sequence[Report]) -> list[Report]:
     lineage effect, failed twice: with singleton lineages the effect's scale
     was unidentified and stalled the sampler, and with only shared lineages
     modelled, their near-zero scatter dragged the source noise scale down and
-    made every non-copied report overconfident (handover.md 20.10). The
+    made every non-copied report overconfident (docs/handover-log.md 20.10). The
     copies stay in the stage's report counts; they are dropped only here.
 
     Args:

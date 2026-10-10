@@ -2,7 +2,7 @@
 Writing classify's decisions into the database.
 
 Three things about the writes are load-bearing, all following from
-handover.md §12.3's rule for this stage specifically: classify is the last
+docs/handover-log.md §12.3's rule for this stage specifically: classify is the last
 writer of ``command_role``, and unlike resolve it does not need to defer to
 anything already on the row.
 

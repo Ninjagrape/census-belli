@@ -6,7 +6,7 @@ Create Date: 2026-10-06
 
 The reconcile stage now fits troops a second time with the unlabelled claim
 regime read as an ordinary modern count, so a force ratio is not tilted by the
-unlabelled-regime prior (handover 20.10). Its per-side output lives in five new
+unlabelled-regime prior (handover-log 20.10). Its per-side output lives in five new
 columns on battle_sides. is_defender is added unpopulated: NULL means unknown,
 and the classify stage fills it later.
 

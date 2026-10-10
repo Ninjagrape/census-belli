@@ -43,7 +43,7 @@ description: >
   equal number of draws from each round, with Rubin's rules alongside:
   skill_sd and war_sd store sqrt(T), and the intervals are mixture quantiles
   widened by sqrt(T / mixture variance). FMI is a lower bound while the
-  shared-error limitation (handover 21.7) stands. rhat and ESS are per round
+  shared-error limitation (handover-log 21.7) stands. rhat and ESS are per round
   only. Nothing is written unless every round meets the write thresholds; a
   failing round is re-run once with a new seed and target_accept 0.95.
 
@@ -146,7 +146,7 @@ quality_checks:
     severity: warning
     description: >
       If it fires, raise n_imputations to 40. FMI is a lower bound while the
-      shared-error limitation (handover 21.7) stands.
+      shared-error limitation (handover-log 21.7) stands.
 
   - name: circularity_check
     check: "joint latent fit agrees with the pooled imputed fit"

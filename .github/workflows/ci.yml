@@ -6,7 +6,7 @@
 # tests skip rather than fail when DATABASE_URL is unset -- by design, so the
 # suite stays runnable on a machine without Postgres. The cost is that a green
 # run with every integration test skipped looks almost identical to a green run
-# with none, and handover.md records two occasions where that hid a real
+# with none, and docs/handover-log.md records two occasions where that hid a real
 # defect: apply_schema() had never once applied the schema, and a quality gate
 # divided a column by itself and read 1.0 forever. A CI without a database
 # would reproduce exactly that blind spot, so this one provisions postgres:15
@@ -32,7 +32,7 @@ concurrency:
 
 env:
   # schema.sql uses box-drawing characters in its section headers, which a
-  # non-UTF-8 console cannot encode. See handover.md 5.3.
+  # non-UTF-8 console cannot encode. See docs/handover-log.md 5.3.
   PYTHONIOENCODING: utf-8
 
 jobs:

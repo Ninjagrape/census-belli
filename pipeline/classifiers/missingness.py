@@ -10,7 +10,7 @@ reviewer or a later LLM pass wants to double check, not called from here.
 The one rule that matters more than any heuristic: **a row that already
 carries a class other than 'unclassified' is never touched.** Resolve writes
 'mnar' directly onto ``commander_general_id`` rows for an unresolved mention
-(see ``pipeline.resolvers.store.UNRESOLVED_FIELD`` and handover.md §12.3's
+(see ``pipeline.resolvers.store.UNRESOLVED_FIELD`` and docs/handover-log.md §12.3's
 sibling rule for ``command_role``), and this stage has no business
 overwriting a decision another stage already made for a different reason.
 """
@@ -58,7 +58,7 @@ class MissingnessInput:
         current_class: The row's ``missingness_class`` right now. Anything
             other than 'unclassified' short-circuits to no decision.
         year_astronomical: The battle's year, astronomical numbering
-            (handover.md §4.5), or None when undated.
+            (docs/handover-log.md §4.5), or None when undated.
         this_side_has_troops: Whether *this* side already has a troop
             number (only meaningful for 'troop_total'/'casualties'; ignored
             for the template fields).

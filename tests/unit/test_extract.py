@@ -1170,7 +1170,7 @@ def test_a_stage_spec_without_a_prompt_is_rejected(spec: dict[str, Any]) -> None
 # ─── DBpedia mapper ──────────────────────────────────────────────────────────
 #
 # The fixture is the real Actium resource, captured from the live endpoint on
-# 2026-09-19 and trimmed to the one resource the mapper reads. handover.md 4.2
+# 2026-09-19 and trimmed to the one resource the mapper reads. docs/handover-log.md 4.2
 # is the standing warning that a fixture written from the code's assumptions
 # proves only that the code agrees with itself, so this one was taken from the
 # thing it describes rather than composed.

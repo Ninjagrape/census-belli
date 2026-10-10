@@ -2,7 +2,7 @@
 
 This is the check that catches a mis-specified model before its estimates
 reach the database: a wrong model still samples, converges, and emits
-plausible numbers (``handover.md`` records that happening three separate
+plausible numbers (``docs/handover-log.md`` records that happening three separate
 times in this file's own history), so the test has to simulate data from a
 *known* truth and check the fit against it, not merely check that it runs.
 
@@ -19,7 +19,7 @@ sides -- 300 at the spec's own report-count mix (90 sides x 4 reports, 90 x
 2, 120 x 1) plus 2 extra sides purpose-built for the lineage test -- and a
 genuine mix of claim regimes, including ``modern_scholarly`` anchor rows, so
 ``m0`` is identified in this corpus (see ``model.py``'s module docstring and
-``handover.md`` sections 19.8-19.9 for why an all-unlabelled corpus is a
+``docs/handover-log.md`` sections 19.8-19.9 for why an all-unlabelled corpus is a
 different case, covered separately below).
 
 ## Judgement calls, collected here rather than scattered in comments
@@ -71,12 +71,12 @@ pytestmark = pytest.mark.model
 
 SEED = 20260923
 
-# The main fit's own sampler settings: proven in handover.md §19.9 to reach
+# The main fit's own sampler settings: proven in docs/handover-log.md §19.9 to reach
 # ess(m0) > 400 and rhat < 1.02 at 1000 draws / 1000 tune / 4 chains on a
 # similarly-shaped corpus.
 # The spec's own budget (agents/reconcile.yaml mcmc_samples). At 1000 draws
 # corpus_level reached only ess 312; at 2000 it passes both this suite and the
-# production gate (reviewer measurement, handover.md 20.10).
+# production gate (reviewer measurement, docs/handover-log.md 20.10).
 MAIN_SAMPLER = SamplerSettings(
     draws=2000, tune=1000, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
 )
@@ -360,7 +360,7 @@ def censoring_ablation() -> tuple[Fit, Fit, np.ndarray]:
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "Open model design question, handover.md 20.4: pure censoring carries no "
+        "Open model design question, docs/handover-log.md 20.4: pure censoring carries no "
         "information on how far below an 'up to X' figure the truth lies, so with "
         "80% bound reports the censored fit is worse (RMSE 1.95) than ignoring the "
         "bounds (0.36). strict=True makes this fail loudly once the design is fixed."

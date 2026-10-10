@@ -20,7 +20,7 @@ in a way a fixture would not show:
   written rows by written rows.
 - **The gates run.** Each of the stage's five quality checks has to execute
   against a schema that exists, which is the failure mode §4.1 and §11.4 of
-  handover.md each found the hard way.
+  docs/handover-log.md each found the hard way.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ BATTLE_NAME = "Battle of Actium"
 SIDE_LABEL = "Octavian"
 OTHER_SIDE = "Antony and Cleopatra"
 # 31 BC. Astronomical -30: there is a year zero, so the historical year is one
-# further from the epoch than the astronomical one (handover §4.5).
+# further from the epoch than the astronomical one (handover-log §4.5).
 BATTLE_DATE = "0031-09-02 BC"
 BATTLE_YEAR = -30
 
@@ -529,7 +529,7 @@ def _gates(conn: Connection) -> dict[str, Any]:
 
 
 def test_every_resolve_gate_executes_against_the_real_schema(conn: Connection) -> None:
-    # §4.1 and §11.4 of handover.md are both this failure: a gate whose SQL
+    # §4.1 and §11.4 of docs/handover-log.md are both this failure: a gate whose SQL
     # names something the schema does not have, which can only ever error.
     _seed_battle(conn)
     _write(conn, _identity("Agrippa", qid="Q48174", mentions=[_mention("Agrippa")]))

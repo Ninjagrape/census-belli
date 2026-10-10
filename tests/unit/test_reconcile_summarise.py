@@ -2,7 +2,7 @@
 
 Every ``InferenceData`` here is built by hand with ``az.from_dict`` from known
 draws, never sampled from a real model: a real fit takes seconds to minutes
-(see ``handover.md`` §19.5), and what these tests pin down is the arithmetic
+(see ``docs/handover-log.md`` §19.5), and what these tests pin down is the arithmetic
 in ``summarise.py``, not whether PyMC converges. Nothing here carries the
 ``model`` marker.
 """
@@ -170,7 +170,7 @@ def test_the_point_estimate_is_the_exponentiated_posterior_median_not_the_mean_o
     design = _design(reports)
     inflation = InflationPrior()
 
-    # sd = 0.74 is the figure handover.md §19.7 and model.py's module docstring
+    # sd = 0.74 is the figure docs/handover-log.md §19.7 and model.py's module docstring
     # cite: exp(sd**2/2) ~= 1.32, so a naive mean(exp(mu)) overstates the
     # median-based estimate by about 32% here.
     mu_samples = np.random.default_rng(1).normal(9.2, 0.74, size=(2, 2000))

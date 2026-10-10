@@ -170,7 +170,7 @@ class RosterEntry:
 # Those are the figures a reader can check us against without downloading
 # anything, so a divergence there is the one that needs an explanation.
 #
-# The second is chosen for the failure modes this project's own handover
+# The second is chosen for the failure modes this project's own handover-log
 # records: naval battles the infobox parser mislabelled (§4.2), BC dates that
 # cannot round-trip through Python's date type (§5.1), shared command that the
 # battle_commanders attribution columns exist to model, and names whose
@@ -539,7 +539,7 @@ def fetch_infobox_scrape(
     His ``Ships`` column matters more than its size suggests. It is the only
     machine-readable naval signal available without re-reading every article,
     and this project mislabelled every naval battle as a land engagement once
-    already (handover §4.2).
+    already (handover-log §4.2).
 
     Args:
         client: An open HTTP client.
@@ -660,7 +660,7 @@ def parse_wikidata_year(time_value: str) -> int | None:
     precision is coarser than a day. Neither ``datetime`` nor ``date`` can hold
     that -- ``date.MINYEAR`` is 1, and month precision has no valid day -- so
     the year is taken with a regex and kept as an integer, which is the same
-    conclusion handover §5.1 reached for this project's own dates.
+    conclusion handover-log §5.1 reached for this project's own dates.
 
     Args:
         time_value: The raw ``time`` field of a Wikidata time datavalue.
@@ -1283,7 +1283,7 @@ def write_seed_config(battles: dict[str, dict[str, Any]], path: Path) -> int:
         "# Curated pilot corpus: the battles of the generals named in Ethan Arsht's",
         "# 2018 analysis, the work this project sets out to improve on, plus the",
         "# commanders chosen to cover this project's known failure modes -- naval",
-        "# battles (handover §4.2), BC dates (§5.1) and shared command.",
+        "# battles (handover-log §4.2), BC dates (§5.1) and shared command.",
         "#",
         "# Every title here was resolved against the live MediaWiki API, so these are",
         "# canonical article URLs, not the redirects his corpus carried.",

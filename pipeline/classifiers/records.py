@@ -110,7 +110,7 @@ class CommanderRow:
     This is what a ``battle_commanders`` row (joined to ``generals`` for the
     name) looks like before classify has touched it. ``command_role`` is
     whatever resolve already wrote -- usually 'unknown', but see
-    handover.md §12.3: a re-run must not clobber a role classify already set.
+    docs/handover-log.md §12.3: a re-run must not clobber a role classify already set.
 
     Attributes:
         bc_id: The ``battle_commanders`` primary key.
@@ -159,7 +159,7 @@ class SideGroup:
         side_label: The side's label, e.g. "Roman Republic (Octavian)".
         battle_name: The battle's name, for prompts.
         year_astronomical: The battle's year in astronomical numbering
-            (negative for BC, matching handover.md §4.5), or None when
+            (negative for BC, matching docs/handover-log.md §4.5), or None when
             undated.
         commanders: Every commander on this side, in listing order.
     """

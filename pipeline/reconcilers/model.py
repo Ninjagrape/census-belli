@@ -29,7 +29,7 @@ level identifies nothing if that level is not in the data.**
 That rule is the whole of this section, and it was learned the hard way: the
 first version of this model pinned the anchor regime to zero, and on a corpus
 where no report carries the anchor -- which is about 98% of real reports, see
-``handover.md`` §19.2 -- the unlabelled offset became the intercept under
+``docs/handover-log.md`` §19.2 -- the unlabelled offset became the intercept under
 another name. The two were confounded to corr -0.993 and ``m0`` sampled at
 ess 5.3. Both priors were proper, so the run completed and reported a number;
 it was a prior compromise, reproducible by algebra with no likelihood term.
@@ -143,7 +143,7 @@ _FALLBACK_SD: Final[float] = 0.90
 # gold set labels every case by construction, so it contains no unlabelled
 # rows to fit against. At 0.5 it implies a median inflation of about 2.5x
 # applied to every unmarked figure in the corpus. It is the single most
-# consequential constant in this stage; see handover.md §19.9.
+# consequential constant in this stage; see docs/handover-log.md §19.9.
 _UNLABELLED_WEIGHT: Final[float] = 0.5
 
 # The prior on `level` after the rotation. Wider than the spec's

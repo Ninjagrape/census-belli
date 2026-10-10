@@ -2,7 +2,7 @@
 Integration tests for the reconcile stage's write path, against a real PostgreSQL.
 
 No reconcile estimate has ever been written to a database before this file
-(handover.md §19.6). Everything upstream -- the loader, the design matrix,
+(docs/handover-log.md §19.6). Everything upstream -- the loader, the design matrix,
 the model, the posterior summary -- has only ever been exercised on synthetic
 data or a fixture database with the model itself stubbed out. These tests
 drive the real stage runner (:mod:`pipeline.stages.reconcile`) end to end: a
@@ -395,7 +395,7 @@ def test_a_side_with_one_report_gets_an_interval_spanning_more_than_a_factor_of_
     assert lo is not None and hi is not None
     assert lo > 0
     # A factor of 2 is LN(2) = 0.693 on the log scale; a singleton side's
-    # honest uncertainty (source bias sd alone is ~0.85, handover.md §19.7)
+    # honest uncertainty (source bias sd alone is ~0.85, docs/handover-log.md §19.7)
     # should clear it comfortably.
     assert math.log(float(hi) / float(lo)) > math.log(2.0)
 

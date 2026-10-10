@@ -111,7 +111,7 @@ def circularity_check(
     ``slope_sd_factor`` joint sds, skill means correlate (Spearman) at least
     ``min_spearman`` over generals with ``min_battles`` or more battles, and
     the top-``n`` sets share at least ``min(min_overlap, 0.8 n)`` generals.
-    This does not test the shared-error limitation (handover 21.7).
+    This does not test the shared-error limitation (handover-log 21.7).
 
     Args:
         general_ids: Raw ids, aligned with every per-general array.
@@ -173,7 +173,7 @@ def circularity_check(
             "top_overlap_required": required,
             "top_rank_shift_max": int(shifts.max()) if shifts.size else 0,
             "top_rank_shift_median": float(np.median(shifts)) if shifts.size else 0.0,
-            "limitation": "does not test the shared-error limitation (handover 21.7)",
+            "limitation": "does not test the shared-error limitation (handover-log 21.7)",
         },
     )
 

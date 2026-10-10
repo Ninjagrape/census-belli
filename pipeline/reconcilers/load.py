@@ -10,7 +10,7 @@ Three things here are load-bearing.
 
 **`battles.year_astronomical`, never `battles.date_start`.** `datetime.date`
 has ``MINYEAR == 1``, so a BC ``date_start`` cannot be constructed or decoded
-from Python at all, and this corpus is heavily ancient (handover.md §5.1).
+from Python at all, and this corpus is heavily ancient (docs/handover-log.md §5.1).
 `year_astronomical` is the generated, readable projection, joined in on every
 report so :func:`pipeline.reconcilers.claims.era_flag` has something to work
 with.
@@ -137,7 +137,7 @@ class UnfillableSide:
     """A side with rows in ``troop_reports`` but not one this stage can use.
 
     Distinct from a side with *no* reports at all, which the extract stage
-    already logs to ``missing_data_log`` (handover.md, agents/reconcile.yaml).
+    already logs to ``missing_data_log`` (docs/handover-log.md, agents/reconcile.yaml).
     This is the gap one stage further in: rows exist, and every one of them
     failed an exclusion rule.
 

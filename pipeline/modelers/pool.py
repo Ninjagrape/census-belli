@@ -9,7 +9,7 @@ round, concatenated. Rubin's rules are computed alongside per quantity::
 Reported ``sd`` is ``sqrt(T)``, and intervals are the mixture quantiles
 widened about the mixture mean by ``sqrt(T / Var_mixture)``. FMI uses no
 degrees-of-freedom correction and is a lower bound while the shared-error
-limitation (handover 21.7) stands. rhat and ESS are never computed on
+limitation (handover-log 21.7) stands. rhat and ESS are never computed on
 concatenated rounds: :func:`round_convergence` is per round, and
 :func:`combine_rounds` takes worst cases.
 

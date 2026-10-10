@@ -14,10 +14,10 @@ way a fixture-only unit test would not show:
   real article excerpt -- not a hash asserted from memory.
 - **Idempotency and the resolve/classify boundary.** Re-running classify, and
   re-running resolve's own upsert after classify, both have to leave the
-  right rows alone -- handover.md §12.3's rule, now also owed to classify's
+  right rows alone -- docs/handover-log.md §12.3's rule, now also owed to classify's
   own writes.
 - **The quality gates execute against the real schema.** §4.1 and §11.4 of
-  handover.md are both a gate whose SQL names something that turned out not
+  docs/handover-log.md are both a gate whose SQL names something that turned out not
   to exist, which can only ever be caught by running it.
 """
 
@@ -58,7 +58,7 @@ ACTIUM_URL = "https://en.wikipedia.org/wiki/Battle_of_Actium"
 ACTIUM_SIDE = "Octavian"
 ACTIUM_OTHER_SIDE = "Antony and Cleopatra"
 # 31 BC. Astronomical -30: there is a year zero, so the historical year is one
-# further from the epoch than the astronomical one (handover.md §4.5).
+# further from the epoch than the astronomical one (docs/handover-log.md §4.5).
 ACTIUM_DATE = "0031-09-02 BC"
 ACTIUM_YEAR = -30
 

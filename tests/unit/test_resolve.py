@@ -616,7 +616,7 @@ def test_escaping_a_name_cannot_terminate_the_literal_early() -> None:
 def test_a_name_is_asked_for_in_both_english_and_multilingual_form() -> None:
     # Wikidata began migrating person labels from en to mul in 2024. Nelson
     # (Q83235) has no en label at all, so an en-only literal cannot reach him
-    # and handover 14.6 mistook that for the name being absent from Wikidata.
+    # and handover-log 14.6 mistook that for the name being absent from Wikidata.
     assert _sparql_literals("Horatio Nelson") == (
         '"Horatio Nelson"@en',
         '"Horatio Nelson"@mul',
@@ -718,7 +718,7 @@ async def test_a_query_is_sent_with_the_literals_the_batch_asked_for() -> None:
 async def test_an_entity_whose_only_label_is_multilingual_is_still_found() -> None:
     # Q83235 has no en label at all: en-gb "Horatio Nelson, 1st Viscount
     # Nelson" and mul "Horatio Nelson". Verified live 2026-09-20, and the
-    # reason handover 14.6's diagnosis was wrong.
+    # reason handover-log 14.6's diagnosis was wrong.
     body = json.dumps(
         {
             "results": {

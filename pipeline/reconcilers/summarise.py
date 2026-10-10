@@ -30,7 +30,7 @@ real fit runs, instead of a parallel one that only looks similar.
 :func:`pipeline.quality._check_diagnostics_json`, which looks for a ``worst``
 object carrying ``max_rhat``, ``min_ess_bulk`` and ``divergences``. Convergence
 alone is not enough to trust an estimate on this model, though: see
-``pipeline/reconcilers/model.py``'s module docstring and ``handover.md`` §19.9
+``pipeline/reconcilers/model.py``'s module docstring and ``docs/handover-log.md`` §19.9
 for why a perfectly converged run can still be reporting an entirely-prior
 number when a corpus carries no observations of the anchor regime.
 ``identified_level`` (``m0 + offset_bar``) and the prior-to-posterior
@@ -295,7 +295,7 @@ def _side_estimates(
         # Every report bounds the side from the same direction ("up to X" and
         # nothing else): the estimate is the hierarchical prior truncated at X,
         # not evidence of where below X the truth lies. Flagged so downstream
-        # stages can down-weight it (handover.md 20.10, MEDIUM 4).
+        # stages can down-weight it (docs/handover-log.md 20.10, MEDIUM 4).
         if side_reports and (
             all(r.is_upper_bound and not r.is_lower_bound for r in side_reports)
             or all(r.is_lower_bound and not r.is_upper_bound for r in side_reports)
@@ -403,7 +403,7 @@ def _convergence(
     which is every free and deterministic variable the model registered --
     the non-centred ``z_*`` offsets included, since a ridge in one of those
     is exactly the failure mode that sampled cleanly on ``mu_side`` while
-    ``ess(m0) = 5.3`` in the case §19.8 of ``handover.md`` records. Restricting
+    ``ess(m0) = 5.3`` in the case §19.8 of ``docs/handover-log.md`` records. Restricting
     to a hand-picked variable list would have hidden that case by
     construction. Deterministics are included too: they are cheap here (no
     extra sampling, just a reduction over an already-materialised array), and
@@ -485,7 +485,7 @@ def _identified_level_stats(idata: az.InferenceData) -> dict[str, float | None]:
     """Posterior mean and sd of ``m0 + offset_bar``, the quantity the data identify.
 
     ``m0`` alone is not identified on an all-unlabelled corpus (see
-    ``model.py``'s module docstring and ``handover.md`` §19.9); this is the
+    ``model.py``'s module docstring and ``docs/handover-log.md`` §19.9); this is the
     corresponding rotated quantity that is.
 
     Args:

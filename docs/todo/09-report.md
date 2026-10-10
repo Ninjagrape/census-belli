@@ -1,5 +1,4 @@
 ## Stage 9: Report (pipeline/stages/report.py)
-- [x] agents/report.yaml spec
 - [ ] BLOCKING before report is built: its gates select MAX(run_id) FROM model_runs; change to
       MAX(run_id) WHERE model_type='bradley_terry_hierarchical' AND diagnostics->>'converged'='true'
 - [ ] BLOCKING: treat the model's exclusion_concentration warning as an error (do not publish

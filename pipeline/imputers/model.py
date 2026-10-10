@@ -21,7 +21,7 @@ conditional Gaussian, in :mod:`pipeline.imputers.conditional`.
 
 Battles are grouped by their number of observed sides and each group is one
 batched ``MvNormal``. Every per-observation array enters as ``pm.Data``
-(handover.md 20.2 item 7: numpy constants make nutpie's compile time explode),
+(docs/handover-log.md 20.2 item 7: numpy constants make nutpie's compile time explode),
 and no variable is named like a dimension (20.2 item 1).
 
 pymc is imported inside the functions, not at module scope, for the reason

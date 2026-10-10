@@ -3,7 +3,7 @@ The reconcile stage: conflicting troop and casualty reports to single estimates.
 
 Everything upstream of this module -- the loader, the design matrix, the
 hierarchical model, the posterior summary -- has existed since 2026-09-24
-(handover.md §19) and has been exercised only against synthetic data or a
+(docs/handover-log.md §19) and has been exercised only against synthetic data or a
 fixture database. This module is what finally calls all of it in sequence
 against a real connection and commits the first estimate this project has
 ever published. There is no fallback path that skips the database: reconcile

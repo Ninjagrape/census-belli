@@ -82,7 +82,7 @@ Each `ambiguous` decision at the recommended settings is one LLM call. Project:
 
 - At the gold set's ambiguity rate, how many calls per 1,000 commanders?
 - At the crawl target of 3,000 battles and ~2 commanders per side per battle, how many total LLM calls?
-- At the measured cost of $0.0014 per call (handover.md 13.3), what is the projected LLM spend for the resolve stage?
+- At the measured cost of $0.0014 per call (docs/handover-log.md 13.3), what is the projected LLM spend for the resolve stage?
 
 State the figure. It is the number that decides whether the disambiguation step is affordable.
 

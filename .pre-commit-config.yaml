@@ -57,7 +57,7 @@ repos:
     rev: v1.11.2
     hooks:
       - id: mypy
-        # The project is mypy --strict clean and handover.md 9 asks for it to
+        # The project is mypy --strict clean and docs/handover-log.md 9 asks for it to
         # stay that way; it has caught several Any leaks.
         files: ^pipeline/
         args: [--strict, --ignore-missing-imports]

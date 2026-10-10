@@ -273,7 +273,7 @@ def test_unparseable_time_literal_is_reported_as_no_year() -> None:
     "historical, astronomical",
     [
         (-334, -333),  # Granicus
-        (-31, -30),  # Actium, the worked example in handover §5.1
+        (-31, -30),  # Actium, the worked example in handover-log §5.1
         (-1, 0),  # 1 BC is astronomical year zero
         (1, 1),
         (1805, 1805),

@@ -1,7 +1,7 @@
 """
 Unit tests for battle-type inference.
 
-The one test that matters most here is Actium: handover.md §4.2 records that
+The one test that matters most here is Actium: docs/handover-log.md §4.2 records that
 the infobox parser used to hardcode ``battle_type="field"`` for every battle
 using the generic "Infobox military conflict" template, which is nearly
 every battle on Wikipedia including every naval one, and that the fix left

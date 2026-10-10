@@ -5,7 +5,7 @@ Only a side whose deterministic decision (:func:`pipeline.classifiers.roles.
 classify_side_roles`) came back ``attribution_method == "default_split"``
 needs this: a single commander is unambiguous, and a side whose roles are
 already consistent needs no model at all. That is deliberate, and matches
-handover.md's note that classify makes far fewer calls than extract -- most
+docs/handover-log.md's note that classify makes far fewer calls than extract -- most
 sides never reach here.
 
 The request is built entirely from :class:`pipeline.classifiers.records.SideGroup`
@@ -46,7 +46,7 @@ def _format_date(year_astronomical: int | None) -> str:
     """Render a battle year for the prompt.
 
     Args:
-        year_astronomical: Astronomical-numbering year (handover.md §4.5),
+        year_astronomical: Astronomical-numbering year (docs/handover-log.md §4.5),
             or None when undated.
 
     Returns:

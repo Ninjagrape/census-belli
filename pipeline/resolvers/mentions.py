@@ -15,7 +15,7 @@ surface form that joined the group is a name the person was published under.
 Battle context comes from ``data/processed/battles.jsonl``, written in the
 same run by the same stage. The year is read as an **astronomical** integer,
 never as a ``datetime.date``: much of this corpus is BC and ``date`` cannot
-hold it (handover §5.1).
+hold it (handover-log §5.1).
 """
 
 from __future__ import annotations

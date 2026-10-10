@@ -4,7 +4,7 @@ These sample for real (``pytest.mark.model``) because the claim is about the
 exact fit, not an approximation of it. Each fixture has two sides, so a force
 ratio is the difference of the two sides' posterior ``mu_side``.
 
-The Gaugamela fixture is the motivating case (handover 20.10, HIGH 2): the
+The Gaugamela fixture is the motivating case (handover-log 20.10, HIGH 2): the
 Persian side carries a labelled ancient claim and a labelled modern figure,
 the Macedonian side two unlabelled ones. Seven fully labelled background
 battles share the same source types across both sides so the corpus identifies

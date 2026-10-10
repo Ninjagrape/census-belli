@@ -3,7 +3,7 @@ Unit tests for the process-level infrastructure: env loading and logging.
 
 Both are the kind of code whose failure is silent. An env loader that reads
 nothing leaves DATABASE_URL unset, and the integration suite then *skips*
-rather than fails -- handover.md 1 records that a green run with skips looks
+rather than fails -- docs/handover-log.md 1 records that a green run with skips looks
 almost identical to a green run without. A logging configuration that never
 runs is not an error either: structlog falls back to a default, so the
 pipeline keeps logging, just not the way anyone decided.

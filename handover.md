@@ -1,3098 +1,461 @@
 # Handover
 
-For the next session or agent picking this project up cold.
+The state of the project, the decisions that constrain future work, and the
+traps that have already cost time. `CLAUDE.md` is the design; this is the state.
 
-Read `CLAUDE.md` first for what the project *is*. This file covers what state it is **in**, what is verified versus merely written, and the traps that have already cost time.
+Keep it current and short. Update §1, §7 and §10 when the state changes. Record
+a decision or footgun here only if a future session would otherwise get it
+wrong; session narratives, changed-file lists and commit messages do not belong
+here.
 
-`CLAUDE.md` points every session here, and asks you to update this file before you finish. Keep it current: a stale handover is worse than none, because the next agent will trust it. If you change the state of the project, change §1, §6 and §7 to match.
+`docs/handover-log.md` is the full session-by-session history up to
+2026-10-10. Code comments cite its section numbers ("handover-log §16.1").
+Do not read it by default; open the cited section when a comment points there.
 
-Last updated: 2026-10-10. §21 to §23 are committed (`a9abeba`, `401e1c7`, `3c6f6f8`, `463343a`). §24 is a gap review of every built stage; its findings are in `docs/todo/*.md` (indexed by TODO.md), tagged `(gap review)`, and nothing from it is fixed yet.
+Last updated: 2026-10-10. Everything through the model stage is committed. The
+gap review findings (`docs/todo/*.md`, tagged `(gap review)`) are unfixed.
 
 ---
 
-## 1. Current state in one table
+## 1. Current state
 
-| Stage | Spec | Implemented | Unit tested | Verified against a database |
-|---|---|---|---|---|
-| crawl | yes | yes | 41 tests | **yes**, plus 5 live against Wikipedia |
-| extract | yes | yes | 79 tests | **yes** |
-| resolve | yes | yes | 59 unit + 18 integration | **yes**, incl. an end-to-end run |
-| reconcile | yes | **yes** (§19-§21), incl. the regime-neutral troops fit | unit + integration + model (§21.6) | **yes**, on fixtures; never run on a real corpus |
-| classify | yes | **first slice** (§20), review fixes (§21.2) | unit + 11 integration | **yes**, on fixtures; LLM path offline/cache only, no billed call |
-| impute | yes | **yes** (§21.4) | unit + 11 integration + 5 model | **yes**, on fixtures; never run on a real corpus |
-| model | yes | **yes** (§23) | unit (`test_modelers_*`) + 12 integration + 6 model | **yes**, on fixtures; never run on a real corpus |
-| evaluate | yes | **no** | — | — |
-| report | yes | **no** | — | — |
+| Stage | Implemented | Verified against a database |
+|---|---|---|
+| crawl | yes | **yes**, plus live against Wikipedia |
+| extract | yes | **yes** (deterministic path; LLM path fixture-only) |
+| resolve | yes | **yes**, incl. an end-to-end run and live Wikidata |
+| reconcile | yes, incl. the regime-neutral fit | on fixtures; never on a real corpus |
+| classify | first slice | on fixtures; LLM path offline/cache only, no billed call |
+| impute | yes | on fixtures; never on a real corpus |
+| model | yes | on fixtures; never on a real corpus |
+| evaluate | **no** | — |
+| report | **no** | — |
 
-Infrastructure is complete: `pipeline/db.py`, `config.py`, `quality.py`, `logging_config.py`, `stages/base.py`, `llm/` (9 modules), `orchestrator.py`, Alembic with `config/schema.sql` as baseline, `docker-compose.yml`, `Makefile`, `.env.example`, `.github/workflows/ci.yml`, `.pre-commit-config.yaml`, `README.md`.
-
-**Verify the state yourself before trusting this file:**
+**Verify before trusting this file:**
 
 ```bash
 export DATABASE_URL="postgresql+psycopg://general_war:general_war@127.0.0.1:5432/general_war"
 ruff check pipeline/ tests/ scripts/ alembic/   # expect: All checks passed
 python -m mypy pipeline/                         # expect: Success, 113 source files (strict)
-python -m pytest tests/ -q -m "not live and not model"   # expect: 925 passed, 0 skipped (with DB)
-python -m pytest tests/model -m model            # the recovery suite; slow, see §20.4
+python -m pytest tests/ -q -m "not live and not model"   # expect: 925 passed, 0 skipped
+python -m pytest tests/model -m model            # recovery suites; slow (~15 min)
 ```
 
-Without DATABASE_URL set the integration tests skip rather than fail, by
-design, and a green run with skips looks almost identical to a green run
-without. **Set it, or you are not testing the half of the project that
-matters.**
+Without `DATABASE_URL` the integration tests skip rather than fail, and a green
+run with skips looks almost identical to one without. **Any skip under that
+marker means you are not testing the half of the project that matters.** The
+live tests (`test_crawl_live.py`, `test_llm_live.py`, `test_resolve_live.py`)
+are gated on `GENERAL_WAR_LIVE_CRAWL=1` / `GENERAL_WAR_LIVE_LLM=1`.
 
-`rapidfuzz` was installed on 2026-09-19 (`pip install "rapidfuzz>=3.6"`). It
-was declared in `pyproject.toml` and had never actually been installed, so
-importing `pipeline.resolvers` fails without it.
-
-**Fifteen skips are now correct and expected**, and they are not the old
-database skips. They are the opt-in live tests: five in
-`tests/integration/test_crawl_live.py` (real Wikipedia), five in
-`tests/integration/test_llm_live.py` (real, billed LLM calls), and five in
-`tests/integration/test_resolve_live.py` (real Wikidata SPARQL, added §17.3).
-All are gated on an environment variable so they cannot run by accident. A skip
-count *above* fifteen means DATABASE_URL is unset and you are not running the
-integration suite at all.
-
-A warning about `asyncio_mode` is expected: `pytest-asyncio` is declared in
-the dev extras and is still not installed, and the coroutine tests drive their
-own event loop instead (§6).
+The `asyncio_mode` warning is expected: `pytest-asyncio` is declared but not
+installed, and the crawl tests drive their own event loop. Installing it would
+change how those tests are collected.
 
 ---
 
-## 2. The database exists now
+## 2. Environment
 
-**Resolved 2026-09-19.** PostgreSQL 15.19 is installed natively on this Windows
-machine via `winget install PostgreSQL.PostgreSQL.15`. No Docker, no podman,
-no `make` -- those are still absent and still not needed.
-
-```
-host 127.0.0.1  port 5432  db general_war  user general_war  password general_war
-DATABASE_URL=postgresql+psycopg://general_war:general_war@127.0.0.1:5432/general_war
-```
-
-`psql` lives under `C:\Program Files\PostgreSQL\15\bin\` and is not on PATH.
-
-**Nothing loads `.env`.** There is no `python-dotenv` anywhere in the project,
-so `DATABASE_URL` must be exported in the shell. `.env` is read only by
-docker-compose, which is unused here. This surprises people; it surprised this
-session. The same applies to the API keys.
-
-Do not bother re-checking pip-installable Postgres (`pgserver`,
-`postgresql-wheel`): neither ships a Windows wheel. That avenue is closed.
-
-All 28 formerly-skipped tests now execute and pass. Running them found **three
-real bugs in one sitting** (§4.3, §4.4, §4.5), all in code that had never
-touched a database, plus two broken quality gates (§11.4).
+- **Postgres 15.19, native** (winget). No Docker, podman or `make`.
+  `host 127.0.0.1 port 5432 db/user/password general_war`. `psql` is under
+  `C:\Program Files\PostgreSQL\15\bin\`, not on PATH. pip-installable Postgres
+  (`pgserver`, `postgresql-wheel`) has no Windows wheel; do not retry it.
+- **`.env`** is read by `pipeline.config.load_env()` (BOM sniffed: the file here
+  is UTF-16). Exported variables win. The file holds only `GEMIINI_API_KEY`
+  (misspelt, user to fix), so export `DATABASE_URL` yourself.
+- **Gemini key prefix `AQ.A...` is valid.** Do not judge a key by its prefix;
+  make one call and read the error.
+- **Python 3.14 locally, 3.11 in CI.** `pymc>=5.28,<6` is pinned because it
+  installs on both; pymc 6 needs 3.12. Local anthropic is 0.111 although the
+  project declares `>=1.0`; mypy is clean against both, runtime under 1.x is
+  untested.
+- **No C compiler**, so PyTensor's Python fallback is unusably slow. `nutpie`
+  (numba) is the default `nuts_sampler`.
+- CI installs only what is declared. Stub packages (`types-*`) are invisible at
+  runtime and easy to forget. After adding a top-level directory, run
+  `pip install -e . --dry-run` (package discovery is pinned to `pipeline*`).
 
 ---
 
-## 3. Read this before writing any code
+## 3. Read before writing code
 
-### 3.1 `pipeline/llm` is a package, not a module
+### 3.1 `pipeline/llm` is a package
 
-There is **no `pipeline/llm.py`** and there must not be — a module and a package of that name cannot coexist. `.claude/commands/build-all.md` Task 1.4 says "implement pipeline/llm.py"; **that instruction is stale.** The package already does everything it asks for and more.
-
-Public API:
+There is no `pipeline/llm.py` and must not be.
 
 ```python
 from pipeline.llm import LLMService
-
 service = LLMService.from_spec(spec, db_conn=conn)
-result = service.complete(
-    system=spec["prompt"]["system"],
-    user=article_text,
-    json_schema=schema,
-    metadata={"battle_id": battle_id},
-)
+result = service.complete(system=..., user=..., json_schema=schema, metadata={"battle_id": bid})
 if not result.ok:
     continue          # already logged and flagged for review
-upsert(result.data)
-service.log_summary()
 ```
 
-It handles retries, JSON-schema validation, cost accounting, and logs every call to `llm_calls`. That table doubles as a **resume cache keyed on request hash**, so a re-run must not re-pay for work already done. Read `pipeline/llm/service.py` before using it.
+Retries, schema validation, cost accounting, and a row in `llm_calls` per call.
+`llm_calls` is also the **resume cache keyed on request hash**, and the offline
+path correlates on the same hash. Providers are routed per stage in the spec
+(`params.llm_provider`): extract and resolve use gemini, classify anthropic.
 
-Providers are routed per stage in the spec, not in code:
+Resolve builds its client lazily, so a run where everything resolves
+deterministically needs no key; the first genuinely ambiguous commander raises
+`LLMConfigError` and the stage stops (`pause_and_alert`). A real resolve run
+needs `google-genai` and `GEMINI_API_KEY`. `params.candidate_source: local`
+resolves with no LLM and leaves ambiguous groups `unresolved`.
 
-| Stage | `params.llm_provider` |
-|---|---|
-| extract | gemini |
-| resolve | gemini |
-| classify | anthropic |
+### 3.2 Quality gates
 
-Gemini was reached successfully on 2026-09-19 with the key already in the environment, whose prefix is `AQ.A...` -- **not** the `AIza...` AI Studio form this file previously insisted on. A real call to `gemini-3.8-flash` returned a schema-valid answer, cost $0.0014 and wrote its `llm_calls` row. Do not assume a key is wrong because of its prefix; make one call and read the error.
+`pipeline/quality.py` executes each spec's `quality_checks`. Each check runs in
+its own SAVEPOINT. When a gate fails, **check whether the spec is wrong before
+assuming the code is**: several gates have measured tables their stage never
+writes (see §4). `method:` checks dispatch through `METHOD_HANDLERS`
+(`diagnostics_json`, `imputation_gate`, `model_gate`); an unregistered method
+reports "not implemented" rather than passing. Outstanding, all evaluate's:
+`brier_score`, `jaccard_overlap`, `held_out_accuracy`.
 
-### 3.2 The quality gates are real now, and they bite
+`pipeline/quality.py`'s `Connection` protocol has **two** test doubles:
+`StubConnection` (tests/unit/test_quality.py) and `ScriptedConnection`
+(tests/integration/test_orchestrator_gates.py). Change both.
 
-`pipeline/quality.py` executes the `quality_checks` SQL in each agent spec. Until recently `_run_single_check` was a stub returning `passed=True` unconditionally, so **every gate in every spec was inert**.
+### 3.3 Stage contract and retry policy
 
-Two latent spec bugs surfaced the moment they started executing. Expect more as later stages run for the first time. When a gate fails, check whether the *spec* is wrong before assuming the *code* is.
+Every stage exposes `run(spec)` or `run(spec, context=None)`; the orchestrator
+calls `check_conforms()` on import so a bad signature fails before the pipeline
+starts. `retry_policy.on_failure: continue_with_logging` does not halt the
+pipeline; `pause_and_alert` and `complete_with_warnings` do
+(`StageResult.halts_pipeline`).
 
-Checks declaring a `method:` instead of SQL report as **not implemented** — deliberately failing rather than passing, so the gap stays visible. Handlers now exist for `diagnostics_json`, `imputation_gate` and `model_gate` (`METHOD_HANDLERS` in `pipeline/quality.py`); impute's old `per_round_check`/`range_check`/`statistical_test` were replaced by `imputation_gate`, and nothing uses `posterior_check` any more. Three are outstanding, all evaluate's:
+### 3.4 Schema changes go in two places
 
-| Method | Used by |
-|---|---|
-| `brier_score` | evaluate.calibration |
-| `jaccard_overlap` | evaluate.ranking_stability |
-| `held_out_accuracy` | evaluate.held_out_accuracy |
-
-Implement each alongside the stage that produces the artefact it inspects, and register it in `METHOD_HANDLERS`.
-
-### 3.3 `retry_policy.on_failure` is honoured
-
-`continue_with_logging` (extract, classify) does not halt the pipeline; `pause_and_alert` does. This lives on `StageResult.halts_pipeline`. It was previously read and discarded.
-
-### 3.4 Stage contract
-
-Every stage module exposes `run(spec: dict) -> None`, optionally `run(spec, context=None)`. The orchestrator calls `check_conforms()` immediately after import, so a mistyped or mis-signed `run` fails **before** the pipeline starts rather than hours in. A contract violation returns immediately without consuming retries, because retrying cannot fix a defect.
+Every schema change needs an Alembic migration **and** the same change in
+`config/schema.sql`: integration fixtures build the database with
+`apply_schema()`, which never runs Alembic. Guard the migration with
+`IF NOT EXISTS` so both paths converge. `apply_schema()` and the baseline
+migration use a raw driver cursor because psycopg reads the `%` in schema
+comments as a placeholder, even through `exec_driver_sql`.
 
 ---
 
-## 4. Bugs found, and the lesson
+## 4. The lesson
 
-Five systematic bugs have been found. **Not one was found by writing code.**
-Every one surfaced from pointing the code at something real -- live
-Wikipedia, or a live Postgres. 4.1 and 4.2 are from 2026-09-18; 4.3 to 4.5
-are from 2026-09-19, the first session with a database.
+Almost every serious defect in this project was invisible to a green suite and
+found by pointing code at something real: live Wikipedia, live Wikidata, a real
+Postgres, or a number a reader thought looked wrong. Treat "the tests pass" as a
+floor. Recurring classes, with the log section that records each:
 
-### 4.1 The crawl gate could never pass
-
-`agents/crawl.yaml`'s `min_battles_crawled` counted `DISTINCT battle_id` from `crawl_log`. But `battle_id` is a FK to `battles`, and `battles` has no rows until the **extract** stage. So during crawl it is necessarily NULL, the count is always 0, and as an ERROR gate with `pause_and_alert` it would have halted the pipeline after every crawl. Now counts `DISTINCT url`.
-
-### 4.2 Every naval battle was labelled a land engagement
-
-This is the important one.
-
-`pipeline/extractors/infobox.py` mapped `{{Infobox military conflict}}` to a "land" variant that hardcoded `battle_type="field"`. But Wikipedia uses that generic template for **essentially every battle** — the naval-specific templates the code expected are rare. Live checks:
-
-| Battle | Template | Extracted `battle_type` |
-|---|---|---|
-| Actium | Infobox military conflict | `field` |
-| Trafalgar | Infobox military conflict | `field` |
-| Midway | Infobox military conflict | `field` |
-
-None carries a `ships=` or `vessels=` field to fall back on; Wikipedia puts ship counts in `strength` as free text.
-
-`battle_type` is a covariate in `agents/model.yaml`, so the error fell precisely on the commanders whose ranking depends on it: Nelson, Yi Sun-sin, Themistocles, de Ruyter.
-
-**This passed 73 unit tests.** The fixtures encoded the same wrong assumption as the code. It was caught only by running the parser against live Wikipedia.
-
-> **Lesson for the next agent:** fixture-only testing validates that your code agrees with your assumptions. For a project whose entire output is a claim about the real world, periodically point the parsers at real data. It costs three HTTP requests.
-
-Fixed: the generic template now leaves `battle_type` unset with a note, matching what the siege and rendered-HTML paths already did. **Consequence: nothing sets `battle_type` any more. `classify` must infer it** (from ship/fleet vocabulary, terrain, categories). Until then the covariate is always NULL.
-
-### 4.3 `apply_schema()` could never apply the schema
-
-`config/schema.sql` contains five `%` characters, all in comments like
-`-- 95% CI lower bound`. psycopg reads `%` as a parameter placeholder, so the
-whole file was rejected with `incomplete placeholder: '%'`.
-
-The author had already anticipated the neighbouring problem -- `text()` chokes
-on the `:` in casts -- and used `exec_driver_sql` to dodge it. But
-`exec_driver_sql` still hands psycopg an empty parameter set, which is enough
-to trigger placeholder parsing. Only a raw driver cursor called with no
-parameter argument at all skips it.
-
-**The schema had never once been applied by the code that exists to apply it.**
-
-### 4.4 ...and then silently failed to commit it
-
-With that fixed, `apply_schema(drop_existing=True)` still left an empty
-database, and reported success.
-
-The raw cursor's work is invisible to SQLAlchemy's transaction tracking. In
-the `drop_existing` branch the DROP/CREATE is committed first, so by the time
-the DDL runs there is no SQLAlchemy-level transaction open; `conn.commit()`
-then finds nothing to commit, does nothing, and the DDL is rolled back on
-close. The commit has to go to the driver connection that ran the statement.
-
-That branch is what every integration fixture uses, so it affected all of
-them. Both bugs are fixed in `pipeline/db.py`.
-
-### 4.5 The BC-date test asserted a fact that was not true
-
-`test_bc_date_is_stored_as_bc` asserted `EXTRACT(YEAR FROM date_start) == -30`
-for 31 BC, commented "there is no year zero". Postgres returns **-31**:
-`EXTRACT` negates the historical BC year, it does not use astronomical
-numbering.
-
-The comment's intent was right and the assertion was wrong, and the
-distinction is not cosmetic. Only the astronomical form subtracts correctly
-across the boundary -- 31 BC to 1 AD is 30.3 actual years, matching -30, not
--31. Left unexamined it would have put a silent off-by-one into every
-date-derived covariate for the entire ancient corpus.
-
-This is §4.2's pattern exactly: a fixture encoding an assumption, passing
-because nothing had ever checked it against the thing it described.
-
-### 4.6 Two more gates that could not measure what they claimed
-
-Both found on 2026-09-19 while building resolve. Same family as §4.1, §11.4.
-
-**`extract.commander_extraction_rate` counted a table extract does not
-write.** §11.4 rewrote it from the non-existent `data.commanders_raw` to
-`battle_commanders`, which does exist -- but `battle_commanders.general_id`
-is NOT NULL, so the extract stage cannot write it and deliberately does not
-(`pipeline/extractors/store.py` says so in its docstring: commander mentions
-wait in `commanders_raw.jsonl` until resolve has canonical generals). The gate
-therefore reported 0.0 for every extract run. It is now `sides_per_battle`,
-measuring `battle_sides`, which extract does write; the commanders-per-battle
-version moved to `agents/resolve.yaml` where it is true.
-
-That is the third distinct rewrite of one gate. The pattern each time: the SQL
-was written from the *spec's* idea of what the stage produces, and never run
-against a database that had been through the stage.
-
-**`resolve.resolution_rate` divided a number by itself.** As written it was:
-
-```sql
-SELECT COUNT(*) FILTER (WHERE general_id IS NOT NULL)::float / NULLIF(COUNT(*), 0)
-FROM battle_commanders
-```
-
-`general_id` is NOT NULL. Every row counts in both the numerator and the
-denominator, so the gate reads exactly 1.0 no matter how many commander
-mentions the stage failed to resolve -- a permanently green light on the one
-number that says whether the stage worked.
-
-The fix needed a denominator that exists outside the table being measured.
-Resolve now writes every mention it could not place to `missing_data_log`
-under `field_name = 'commander_general_id'`, and the gate is written rows over
-written rows plus logged failures. `test_the_resolution_rate_gate_can_actually_fail`
-pins that it moves: one resolved mention and nine unresolved reads 0.1.
-
-### 4.7 robots.txt silently disabled every SPARQL query in the project
-
-Found on 2026-09-19 by pointing the resolve stage's candidate lookup at the
-real endpoint for the first time. The sixth bug, and the sixth found by
-contact with something real rather than by reading code.
-
-`https://query.wikidata.org/robots.txt` is:
-
-```
-User-agent: *
-Disallow: /sparql
-Disallow: /bigdata
-```
-
-`Fetcher` honours robots by default, and `run_query` went through
-`Fetcher.fetch`. So **every SPARQL query this project has ever issued returned
-`robots_disallowed` without a request leaving the machine**, and both callers
-degraded quietly:
-
-- **crawl** -- `_crawl_wikidata` discovered no battles from Wikidata at all.
-  The stage still reported success. §1 called crawl "verified against a
-  database"; that was true of its article path and never true of this one.
-- **resolve** -- every name would have found no candidate, every commander
-  would have become a corpus-local entity, and the published ranking would
-  have had no Wikidata identity in it anywhere.
-
-The fix is one line in `pipeline/crawlers/wikidata.py`: queries go through
-`fetch_raw`, the same robots exemption the code already makes for robots.txt
-itself. robots.txt governs crawlers; WDQS is a documented public API whose own
-policy asks for a descriptive user agent and considerate rates, and both are
-still enforced -- the rate limiter, the retries and the user agent are
-untouched. Only the crawler rule, which was never about API clients, no longer
-applies.
-
-**Two defences were added, because the silence was the real defect.**
-`fetch_candidates` now raises `CandidateLookupError` when *every* batch fails,
-rather than returning empty results: graceful degradation is for when part of
-a system errors, and a total failure is a configuration problem that must stop
-the run. And the stub fetcher in `tests/unit/test_resolve.py` implements only
-`fetch_raw`, so a future change routing queries back through the robots gate
-fails loudly instead of quietly returning nothing.
-
-**If you add any other API call to this project, ask whether robots.txt
-applies to it before wrapping it in `Fetcher.fetch`.**
+- **Fixtures encoding the code's own assumption.** Every naval battle labelled
+  `field` passed 73 unit tests (log §4.2); a BC-year test asserted the wrong
+  convention (§4.5); the circularity comparator passed its integration test with
+  a fake force ratio in it (§23.2).
+- **Gates whose SQL measures something the stage does not write**, or divides a
+  number by itself: log §4.1, §4.6, §11.4, gap review A2.
+- **robots.txt applied to an API.** `query.wikidata.org` disallows `/sparql`,
+  and routing SPARQL through `Fetcher.fetch` silently disabled every query in
+  the project (log §4.7). `www.wikidata.org/w/api.php` is also disallowed. API
+  calls go through `fetch_raw`; ask before wrapping any new one in `fetch`.
+- **Identifiers recalled from memory are wrong.** Q-ids (Nelson, Agrippa, Red
+  Cliffs, Hannibal) and article titles have each been wrong when recalled.
+  Look them up live.
+- **Exists is not correct.** Disambiguation pages and redirects to campaign
+  articles return 200 and pass title checks (log §18.3, §18.9).
+- **Year-shaped non-years.** Arsht's `-5000` sentinel, Wikidata dates at
+  precision below 9 (decade, century), and Wikidata's signed years (`+1850-...`;
+  a fixture writing `1850-01-01` is rejected).
+- **Clean diagnostics, prior-only posterior.** A parameter the data cannot
+  identify samples at rhat 1.00 and returns its prior (log §19.8-19.9). Check
+  prior-to-posterior contraction, not just rhat.
 
 ---
 
----
+## 5. Footguns
 
-## 5. Known constraints and footguns
-
-### 5.1 BC dates cannot round-trip through Python -- use `year_astronomical`
-
-`datetime.date` has `MINYEAR == 1`. No BC date can be constructed, bound as a
-parameter, or **decoded from a result**. Postgres stores them fine.
-
-```python
-date(-30, 9, 2)   # ValueError: year must be in 1..9999
-```
-
-**Resolved 2026-09-19 by adding `battles.year_astronomical`**, a generated
-STORED integer column. Read that instead of `date_start` whenever you need a
-year in Python. It is generated, so it cannot drift from the date it mirrors,
-and Postgres rejects any attempt to write it.
-
-```sql
-year_astronomical INT GENERATED ALWAYS AS (
-    CASE WHEN EXTRACT(YEAR FROM date_start) < 0
-         THEN EXTRACT(YEAR FROM date_start)::int + 1
-         ELSE EXTRACT(YEAR FROM date_start)::int END
-) STORED
-```
-
-Astronomical numbering, **not** Postgres's: 31 BC is -30 here and -31 from a
-bare `EXTRACT`. See §4.5 for why that difference matters. NULL `date_start`
-gives NULL year, so a battle known only by year must still be written as
-`YYYY-01-01` with `date_precision='year'`.
-
-It lives in **both** `config/schema.sql` and Alembic migration
-`b2c3d4e5f6a7`. That looks redundant and is not: the integration fixtures
-build their database with `apply_schema()`, which executes `schema.sql`
-directly and never runs Alembic, so a migration-only change would be invisible
-to every test. The migration is guarded with `IF NOT EXISTS` so both paths
-converge. **Any future schema change needs the same treatment.**
-
-Verified: migration applies to a database built from the original baseline,
-downgrades, and re-upgrades with correct values on real BC rows. Pinned by
-three tests in `tests/integration/test_db.py`.
-
-`date_start` itself still cannot be read into Python, and the test pinning
-that (`test_bc_dates_cannot_round_trip_through_python`) still stands.
-
-### 5.1b The LLM step needs `google-genai`, now installed
-
-`agents/resolve.yaml` routes the disambiguation step to Gemini.
-**`google-genai` 2.24.0 was installed on 2026-09-19** and a real call has now
-been made (§12.7).
-
-Resolve builds its LLM client lazily (`LazyService` in
-`pipeline/stages/resolve.py`), so a corpus where every commander resolves
-deterministically runs fine with no package and no API key. The moment one
-group is genuinely ambiguous, `LLMService.from_spec` raises `LLMConfigError`
-and the stage stops. That is intended -- `retry_policy.on_failure` for resolve
-is `pause_and_alert`, and quietly turning ambiguous commanders into new
-entities would bury a configuration problem in the data -- but it means **a
-real resolve run needs `pip install google-genai` and a `GEMINI_API_KEY`
-exported**, and it will not tell you until it is part-way through.
-
-To resolve without any LLM at all, set `params.candidate_source: local` and
-accept that ambiguous groups end up `unresolved` and logged.
-
-### 5.2 RESOLVED: Wikipedia rate limiting
-
-**Fixed 2026-09-19 (§15.1).** `rate_limit_wikipedia` is now 2.0, and
-`Fetcher` honours `Retry-After` on any retryable status, preferring it over
-the computed backoff and capping it at `MAX_SERVER_BACKOFF_S` (120s). Both
-header forms RFC 9110 allows are read: an integer seconds count and an
-HTTP-date.
-
-Measured live: ten consecutive article fetches at the new spacing, **zero
-retries and zero 429s**. `tests/integration/test_crawl_live.py` asserts that
-and fails if any fetch needs a second attempt, so the spec being too fast
-again is a test failure rather than a corrupted crawl.
-
-### 5.3 Windows encoding
-
-`alembic ... --sql` dies with `UnicodeEncodeError` because `config/schema.sql` uses box-drawing characters in its section headers and the console is cp1252. Set `PYTHONIOENCODING=utf-8`. The Makefile targets already do.
-
-### 5.4 Shell heredocs are unreliable here
-
-Writing long Python files via `cat <<'EOF'` failed mid-file more than once. Use the file-writing tool for substantial source files; keep Bash for inspection, patching via a short Python script, and git.
+- **BC dates cannot round-trip through Python** (`datetime.date` MINYEAR is 1).
+  Read `battles.year_astronomical`, a generated column: 31 BC is -30 there and
+  -31 from a bare `EXTRACT(YEAR ...)`. Only astronomical numbering subtracts
+  correctly across 1 BC/AD. Wikidata and Arsht both write historical years, so
+  convert on the way in and join on `year_astronomical`. A battle known only by
+  year is written `YYYY-01-01` with `date_precision='year'`.
+- **One integration suite at a time against `DATABASE_URL`.** Every module
+  fixture drops and rebuilds `public`. Overlapping runs hang silently or throw
+  `UndefinedTable`; check `pg_stat_activity` / `pg_blocking_pids()` before
+  suspecting the code. Load any real corpus into a separate database
+  (e.g. `general_war_corpus`). `python -m tests.integration.inspector_seed`
+  also drops `DATABASE_URL`.
+- **Module-scoped fixtures that run a stage need `try/finally` rollback**, or an
+  exception leaks a connection holding row locks and later tests wait forever.
+- **PyMC:** never name a variable like a dimension (ArviZ returns the
+  dimension's labels); pass every per-observation array as `pm.Data`, because
+  numpy constants are compiled into nutpie's code and compile time explodes
+  with corpus size.
+- `yaml.safe_load` turns `2026-09-24` into a `date`; convert before writing
+  JSON.
+- `logging_config.configure()` is process-global; a test that calls it needs
+  the restore fixture in tests/unit/test_infrastructure.py.
+- `alembic ... --sql` needs `PYTHONIOENCODING=utf-8` on Windows (box-drawing
+  characters in schema.sql).
+- Shell heredocs mangle backslashes and have failed mid-file. Use the
+  file-writing tool for source files and Windows paths.
+- Workers: tell them to format only files they own (one ran `ruff format`
+  across the tree). A worker cut off by a usage limit may have finished more or
+  less than its last line says; check `git status` and the brief's items.
+- `claude-haiku-5-5` thinks unless told not to (handled by the
+  `thinking_on_by_default` trait) and cannot take temperature 0.
 
 ---
 
 ## 6. What is missing
 
-`LICENSE` now exists (GPL-3.0); the previous handover listed it as missing.
-
-Two config files are referenced by agent specs but **do not exist**. Each blocks its stage:
-
-| File | Blocks |
-|---|---|
-| `config/expert_rankings.yaml` | evaluate |
-| `config/sensitivity_specs.yaml` | evaluate |
-
-`README.md`, CI config, pre-commit hooks and the structlog configuration
-were all written on 2026-09-19 (§15) and are no longer outstanding.
-
-The resolve gold set now exists at `tests/fixtures/gold/resolve/` (§17.4),
-agent-labelled and unreviewed. The extraction gold set (`tests/fixtures/gold/`
-for `/extraction-eval`) is still outstanding (see §8).
-
-`pytest-asyncio` is declared in `pyproject.toml` dev extras but **not
-installed**, which is the `asyncio_mode` warning you will see. The crawl tests
-work around it with a local `asyncio.run` decorator. Installing it would let
-that go, and was deliberately not done in §15: `asyncio_mode = "auto"` would
-change how those tests are collected, and that is not a change to make in a
-session whose purpose was closing other gaps.
+- `config/expert_rankings.yaml` and `config/sensitivity_specs.yaml`, referenced
+  by `agents/evaluate.yaml`.
+- The extraction gold set (`tests/fixtures/gold/` for `/extraction-eval`).
+- Everything in `docs/todo/`.
 
 ---
 
 ## 7. Next steps, in order
 
-Step 1 of the previous handover (stand up Postgres, run the 28 skipped tests)
-is **done**. What follows is what is left.
+0. **Fix the pre-pilot gap review items** (A1, A2, A4, A5, A8, A10, A13). Without
+   A1 the pilot crawl halts on its own gate; without A4 same-name battles merge.
+1. **Run the curated corpus** (`config/sources_seed_arsht.yaml`, 211
+   title-verified battles) through crawl, extract and resolve, into a separate
+   database (§5). Extract's deterministic path needs no LLM quota. This turns
+   every gate threshold from unmeasured into measured.
+2. **Classify, second slice.** Run the pending multi-commander sides through the
+   offline path (`python -m scripts.llm_offline export --stage classify`,
+   `/process-llm-batch`, import); populate `is_defender`; LLM missingness for
+   `unclassified` rows. Until this runs, every multi-commander side is
+   `default_split`, credits nobody, and `exclusion_concentration` will fire.
+3. **Reconcile and impute open items** (`docs/todo/04-reconcile.md`,
+   `06-impute.md`), above all propagating the shared reconcile error into impute.
+4. **Evaluate and report.** Fix the two BLOCKING report items first
+   (`docs/todo/09-report.md`).
+5. Full-pipeline integration test.
 
-00. **Fix the pre-pilot gaps from §24 first** (A1, A2, A4, A5, A8, A10, A13).
-   Without A1 the pilot crawl halts on its own gate; without A4 same-name
-   battles merge silently.
+**The blocker for a full corpus is not code**: the Gemini key is free tier, 20
+requests/day, and the 3,000-battle corpus needs 6,000-12,000 extract calls
+(§9.4). Settle it before planning a real run.
 
-0. **Run the curated corpus through crawl, extract and resolve.** §18 built
-   `config/sources_seed_arsht.yaml`: 211 title-verified battles covering the
-   generals Arsht's article names. It has never been crawled. Doing so needs no
-   LLM quota if extract's deterministic path is used, and it is what turns
-   every gate threshold below from unmeasured into measured.
-   **Use a separate database for it** (e.g. `general_war_corpus`): every
-   integration test module drops and rebuilds the `public` schema of
-   `DATABASE_URL`, so a corpus loaded into `general_war` is wiped by the next
-   test run (§20.8).
-
-1. **Model stage: built (§23).** What is left for it is a real corpus run
-   (step 0) and the `docs/todo/07-model.md` items. Before any ranking is published,
-   classify's second slice (step 2) must run: today every multi-commander side
-   is `default_split`, enters the model as an unattributed latent, and credits
-   nobody, so `exclusion_concentration` will fire on a real corpus.
-2. **Classify, second slice.** Run the pending multi-commander sides through
-   the offline LLM path (`python -m scripts.llm_offline export --stage
-   classify`, then `/process-llm-batch`, then import); populate
-   `is_defender`; LLM missingness classification for rows the heuristics
-   leave `unclassified`; the deferred historiography findings in TODO.md.
-3. **Reconcile, the remaining §20.10 items**: identified-scale width gates,
-   `n_identifying_sides`, the `z_side` ridge, `max_rhat: 1.01`, era
-   centring within unlabelled rows, the `b_type` reference-type note. Plus
-   §21.7's open items (shared measurement error into impute, the
-   `est_troops_method` lineage count, the neutral gate's hard-coded ESS).
-4. **Phase 5 — evaluate and report.** `agents/report.yaml` already exists and
-   is fairly prescriptive. Two BLOCKING report items are in TODO.md (§23.6):
-   its gates read `MAX(run_id)` unfiltered, and `exclusion_concentration` must
-   block publication.
-5. **Phase 6 — full-pipeline integration test, README, CI.**
-
-Both of the "smaller things" this section used to list are done: the
-Wikipedia 429 backoff (§15.1) and the `google-genai` install (§5.1b).
-
-**The one thing standing between this project and a real corpus is not code.**
-It is the free-tier LLM quota in §15.7. Crawl, extract and resolve are built
-and verified; extract makes one LLM call per article passage and resolve one
-per ambiguous commander, and twenty requests a day runs neither. Settle that
-before planning a real run, not during one.
-
-Verification gates for phases 3–6 all require a database, and there now is
-one. **`export DATABASE_URL` before running the suite or you are testing
-nothing** — the integration tests skip silently without it, and a green run
-with 28 skips looks almost identical to a green run with none. Say explicitly
-what was and was not verified.
-
-## 8. Project-specific tooling
-
-Four additions exist that a generic agent will not know about.
-
-**Agents** (`.claude/agents/`):
-
-- **`bayesian-model-reviewer`** — inference correctness for the PyMC stages: Bradley-Terry identifiability (skills are identified only up to an additive constant — needs a sum-to-zero constraint), centred vs non-centred parameterisation, ordered cutpoints, Rubin's rules pooling, imputation circularity, replacement-level uncertainty. **Use before committing Phase 4.** A mis-specified model still samples, still converges, and still emits a plausible ranking; nothing downstream will catch it.
-- **`historiography-reviewer`** — domain plausibility of extracted data: ancient source inflation, troop-number scope conflation, command misattribution, anachronistic polities, BC dates, corpus selection bias. Reviews data, not code. It would have caught §4.2.
-
-**Commands** (`.claude/commands/`):
-
-- **`/data-audit`** — runs every spec's quality gates against the live database plus coverage-by-era/region. Distinct from `/status`, which is code health.
-- **`/extraction-eval`** — prompt regression harness against hand-labelled battles. **The gold set does not exist yet**; building it is the real work, and it also unblocks `/test-stage extract`.
-
-Both agents and both commands are unexercised. They are written, not proven.
-
-**Stage inspector** (§22): `streamlit run scripts/inspector_app.py`, a
-read-only dashboard over every built stage. Use it to eyeball a stage's output
-before trusting its gates.
+Say explicitly what was and was not verified against a database.
 
 ---
 
-## 9. Conventions worth restating
+## 8. Project tooling
 
-From `CLAUDE.md`, plus what was actually enforced:
+- **`bayesian-model-reviewer`** agent: gate after any change to reconcile,
+  impute, model or WAR pooling. A mis-specified model still samples and still
+  ranks; nothing downstream catches it.
+- **`historiography-reviewer`** agent: domain plausibility of extracted data.
+  Reviews data, not code.
+- **`/data-audit`**: every spec's gates against the live DB plus coverage by
+  era/region. **`/extraction-eval`**: prompt regression harness, waiting on the
+  gold set. **`/resolve-eval`**: threshold sweep, zero LLM quota.
+  **`/process-llm-batch`**: the offline LLM path.
+- **Stage inspector**: `streamlit run scripts/inspector_app.py`, read-only by
+  construction (every connection sets `default_transaction_read_only`), safe to
+  point at a corpus database. DB from `INSPECT_DATABASE_URL`, else
+  `DATABASE_URL`. The Model page is still a placeholder (gap review A16).
 
-- Type hints on every signature; Google-style docstrings on every public function.
-- `structlog` only, never `print()` in pipeline code.
-- f-strings only.
-- SQLAlchemy **Core**, parameterised. Never interpolate into SQL.
-- `mypy --strict` must pass. It currently does, across 37 files. Keep it that way — it caught several `Any` leaks.
-- Comment on **why**, not what.
-- Never commit without the user asking. Attribution lines are disabled globally.
-- Check `.env` is not staged before every commit. It exists, is gitignored, and contains real keys.
+---
+
+## 9. Standing design decisions
+
+What a future session needs before changing a stage. The reasoning behind each
+is in the log section cited.
+
+### 9.1 Crawl
+
+- `Fetcher` honours `Retry-After` (both RFC 9110 forms); a server delay raises
+  the wait, never lowers it, capped at 120s. `rate_limit_wikipedia` is 2.0
+  (1.5 drew 429s). The live crawl test fails if any fetch needs a retry.
+- Named corpora come from `wikipedia_battle_articles:` in the seed file. An
+  evaluation corpus names no list pages or SPARQL queries, so its membership
+  cannot drift with Wikipedia edits.
+
+### 9.2 Extract
+
+- **Log a missing field only if a downstream stage consumes it** (log §11.3).
+  `battle_type`, `terrain`, `fortified` are logged; `weather` is not.
+  `fortified=False` is an answer, an empty list is an absence.
+- The generic `{{Infobox military conflict}}` template asserts no `battle_type`;
+  classify infers it.
+- DBpedia contributes no sides: it flattens combatants and commanders into
+  unordered lists, and a commander on the wrong side is an error the model
+  cannot see. They go to notes, "unassigned to sides". Infobox wikitext is the
+  only source of side assignment.
+
+### 9.3 Resolve
+
+- **Prefer a split to a merge.** A false merge pools two careers invisibly; a
+  false split is visible. A link must clear the fuzzy threshold, be
+  date-compatible, and beat the runner-up by a margin; `UNCERTAIN` from the LLM
+  splits.
+- **The lifespan date gate does the real work.** It abstains when either side
+  is undated. Among exact matches, date-confirmed candidates beat dateless
+  namesakes. A half-dated candidate is bounded by `MAX_PLAUSIBLE_AGE_YEARS`
+  (100), or an ancient with no death date is eligible for every later battle.
+  Polity is a tiebreak only.
+- "Unknown" never becomes a general; a failed LLM call leaves the group
+  unresolved, not new; grouping is exact-key only, and spellings reunite later
+  through their shared Q-id.
+- Resolve upserts `battle_commanders` and sets only the columns it owns, so a
+  re-run never undoes classify.
+- **Duplicate battles are reported, never merged**
+  (`data/processed/duplicate_battles.jsonl`). Merging needs its own evidence and
+  review step.
+- Lookups ask in `en` and `mul` (Wikidata person labels are migrating to `mul`;
+  Nelson has no `en` label). The label service returns a bare Q-id when it finds
+  no label; `_preferred_name` and `_publishable_name` stop that being published
+  as a name.
+- The SPARQL query aggregates with `GROUP_CONCAT`; the multi-valued OPTIONAL
+  cross-product made it 15x slower.
+- **Label search (`wbsearchentities`) is deferred on purpose**: its hit is
+  usually the sole candidate, which skips the ambiguity margin and auto-links at
+  ~0.62 confidence where evidence is weakest, and live probes are noisy. Measure
+  the residual class with a gold set first.
+
+### 9.4 LLM routing and quota
+
+- Gemini 3.8 Flash for extract and resolve, Anthropic for classify; fallback
+  `claude-haiku-5-5` (named in the specs, read by no code).
+- **Free tier, 20 requests/day**: 3,000 battles x 2-4 passages is 300-600 days.
+  The cap is the problem, not cost (one call $0.0014, corpus order $50-200).
+- The workaround is the offline path: `pipeline/llm/offline.py` exports
+  uncached requests to JSONL, `/process-llm-batch` answers them in a Claude Code
+  session, `scripts/llm_offline.py import` writes them to `llm_calls` on the
+  same `request_hash`.
+- If batching is ever revisited: provider batch APIs (independent requests, one
+  per passage, `request_hash` as `custom_id`) are fine. Cramming many battles
+  into one prompt is rejected: it breaks the per-request cache and the
+  per-passage schema.
+
+### 9.5 The Arsht reference set
+
+`tests/fixtures/gold/arsht/` and `config/sources_seed_arsht.yaml`, rebuilt by
+`python -m scripts.arsht_reference --verify-titles --with-infobox --write-seed`.
+22 generals, 211 battles, all dated.
+
+- **A reference set, not a gold set.** His numbers are one model's output on one
+  corpus. Use them for roster coverage, a correlation target, and hygiene
+  findings, never as facts. Napoleon's total matches the article (16.678 vs
+  16.679); other generals differ by up to 0.4, so the article and the published
+  pages are two runs.
+- `arsht_infobox.jsonl` (raw infobox strength text beside his parsed numbers)
+  is the one thing extract can be diffed against without hand-labelling.
+- Disambiguation titles are repointed by a hand-made table
+  (`_DISAMBIGUATION_TARGETS`), deliberately not a nearest-year heuristic, and
+  the seed writer refuses any still-flagged title.
+
+### 9.6 Reconcile
+
+- **Bias belongs to the claim, not the document.** One infobox field often
+  carries both modern and ancient figures, so the inflation term is keyed on a
+  claim regime parsed from the report's context. Only ~2.2% of real strength
+  strings carry a readable marker, so the era fallback does ~98% of the work.
+  A multi-regime field is `unlabelled` unless the report's own value picks the
+  nearest marker; `modern_scholarly` is the zero-bias anchor.
+- The inflation prior is fitted to a 45-case gold set
+  (`tests/fixtures/gold/reconcile/`, agent-built, unreviewed) by
+  `scripts/fit_inflation_prior.py`: pooled ~3.2x, against the spec's original
+  1.35x. The era contrast is fitted too (it is negative).
+- **In an all-unlabelled corpus `m0` is not identified**; the inflation
+  adjustment is entirely prior. Assert on `m0 + offset_bar`, never `m0`.
+  `_UNLABELLED_WEIGHT = 0.5` (~2.5x deflation of every unmarked figure) is a
+  judgement call and the most consequential constant in the stage.
+- **Copies add no information**: `merge_cross_regime_duplicates` then
+  `collapse_lineages` keep one row per lineage before the fit. Zeroing singleton
+  lineage effects instead was tried and made singletons overconfident.
+- **Regime-neutral troops fit** (for force ratios): a second exact fit where the
+  unlabelled offset takes the faithful-component prior and `a_era` takes
+  `N(0, 0.25)`; labelled regimes keep their priors. It exists because
+  asymmetric labelling (Gaugamela) tilts published ratios. Columns
+  `est_troops_neutral*`, draws in
+  `data/processed/reconcile/neutral_draws_run{id}.npz`; no fallback to published
+  ratios. Published counts stay adjusted.
+- One `model_runs` row per run, covering all quantities. Estimates are written
+  only when the fit meets the write thresholds; an unconverged run is recorded
+  but leaves the previous estimates.
+- `est_troops_total = exp(median(mu))`, not `mean(exp(mu))`. A one-report side's
+  95% interval spans roughly 0.24x-4.3x and must be allowed to. The width gates
+  currently measure the shared prior offset (threshold 4.5); do not narrow
+  intervals to pass a gate.
+- The absolute level is set by `b_type`'s zero-sum, so adding a source type
+  shifts every absolute figure. It cancels in ratios.
+- One-sided-bound sides are labelled `bound_only`. Pure censoring is too weak
+  for them (the recovery ablation is an xfail); `pm.ExGaussian` is the
+  principled replacement.
+
+### 9.7 Classify
+
+- One commander: `field_commander`, weight 1.0. Infobox commanders all arrive as
+  role `unknown`, so the fallback is the main path: multi-commander sides get
+  `default_split` at 1/n and wait for the LLM. The model credits nobody on a
+  `default_split` side.
+- With roles known: 2+ field commanders are co-commanders; non-field roles get
+  fixed weights (sovereign/nominal 0.05, supreme/theatre 0.10, subordinate 0.08,
+  capped at 0.30 in total). An LLM answer that does not match every commander on
+  the side is rejected whole. A side whose rows are all `llm` is never
+  recomputed by a re-run.
+- `battle_type`: naval from categories, naval troop branches or ship vocabulary
+  (bare "squadron" is not enough); siege from name or category; `field` only
+  when an article was read with no other signal, otherwise `unknown`. Sieges
+  are written `siege_offensive` + `fortified = TRUE` until a per-side siege flag
+  exists.
+- Missing covariates are classified **MAR**, not MCAR: missingness plausibly
+  tracks documentation level.
+
+### 9.8 Impute
+
+`agents/impute.yaml` and `config/imputation_priors.yaml` carry the rationale.
+
+- One joint PyMC model replaces MICE/PMM (one substantively missing variable).
+  Per-battle random effect and noise are marginalised analytically.
+- Observed sides enter as reconcile's posterior with reconcile's side prior
+  divided out, so nothing is shrunk twice; a side too weak after division is
+  treated as missing.
+- **Overimputation**: every side, observed included, is drawn per round, or
+  errors-in-variables attenuates `beta_force` downstream. Outcome is
+  conditioned on; commander identity enters only as a size effect.
+- `scale: neutral` is primary and the only scale that writes
+  `missing_data_log`; `published` is a sensitivity run. Primary is MAR;
+  `mnar_delta` serves evaluate's sensitivity grid. Stale draws files are refused.
+- Imputing troops as latents inside the Bradley-Terry model is the fully
+  congenial alternative; it departs from the spec and is the user's call.
+
+### 9.9 Model
+
+`agents/model.yaml` and `config/model_default.yaml` carry the rationale.
+
+- Two-sided battles only (3+ excluded and counted). Side A is the lower
+  `side_id`, so **orientation must carry no information**: ordinal logit with
+  symmetric cutpoints, and when the two sides' grades disagree the outcome is
+  interval-censored. Battle-level terms (`beta_type`, era, terrain) are dropped
+  because under arbitrary orientation they can only learn "side A wins"; no
+  `mu_era`, because eras never meet.
+- Sides with no creditable commander are latents (`mu_unknown`,
+  `mu_unattributed`), not dropped battles; dropping them removed most
+  Napoleonic and modern battles.
+- **WAR is expected WAR**: expected score at fitted skill minus at replacement
+  (40th percentile per draw), split by attribution weight. Realised WAR is kept
+  in diagnostics only. `win_prob_*` columns hold expected score, not P(win).
+- One fit per imputed round; mixture pooling; stored sd is Rubin's `sqrt(T)`.
+  Every round must converge (one retry) or nothing is written. The pooled
+  `bradley_terry_hierarchical` row is written last.
+- The circularity comparator is a joint latent fit on per-battle `x_diff`, so
+  absolute era levels cannot leak in as fake force ratios.
+- **Disclosures the ranking must carry**: cross-era comparison rests on the
+  shared skill prior (the comparison graph is disconnected); technology is not
+  modelled; naval and aerial share one population and slope; `total_war` is
+  volume-weighted, so a coverage gap by era is a rank gap; attribution weights
+  are fixed data.
 
 ---
 
 ## 10. Honest status
 
-What is proven: the code lints, type-checks strictly, and 290 tests pass
-**against a real PostgreSQL 15.19**. The schema applies, the Alembic migration
-round-trips on real BC rows, and the database layer, crawl log and extract
-writer have all now executed against Postgres rather than a fixture. Five real
-bugs have been found and fixed.
-
-What is not proven: any real LLM call, any real crawl at scale, and the whole
-statistical half of the project, which does not exist yet. The quality gates
-now execute correctly across all 9 specs, but 22 of them have only been run
-against an empty database, so they have proven their SQL is valid, not that
-their thresholds are right.
-
-The lesson has now been paid for twice. §4.2 was invisible to 73 passing unit
-tests. §4.3 and §4.4 were invisible to 255. In both cases the tests agreed
-with the code because both had been written from the same assumption, and only
-contact with the real thing -- live Wikipedia, live Postgres -- disagreed.
-Treat "the tests pass" as a floor, not a finish line, and be specific about
-which real thing you have actually touched.
-
-## 11. Session of 2026-09-19: what changed, and what is still open
-
-### 11.1 Changed files (all uncommitted)
-
-| File | Change |
-|---|---|
-| `pipeline/db.py` | Fixed §4.3 and §4.4. `apply_schema` now uses a raw driver cursor and commits the driver connection. |
-| `config/schema.sql` | Added `battles.year_astronomical` (generated) and `idx_battles_year`. |
-| `alembic/versions/2026_09_19_0002-...py` | **New.** Same column for databases built from the original baseline. |
-| `tests/integration/test_db.py` | Corrected the false `-30` assertion (§4.5); added 3 tests pinning the new column. |
-| `pipeline/extractors/merger.py` | Log absent model covariates (`battle_type`, `terrain`, `fortified`); see §11.3. |
-| `tests/integration/test_extract.py` | Corrected a test comment whose premise was false; assert terrain logged and weather not. |
-| `pipeline/quality.py` | SAVEPOINT per check so one failing gate cannot poison the rest; `begin_nested` added to the `Connection` protocol. |
-| `agents/extract.yaml` | `commander_extraction_rate` rewritten against `battle_commanders`. |
-| `tests/integration/test_quality_gates.py` | **New.** 5 tests pinning gate isolation and that every spec's SQL executes. |
-| `tests/unit/test_quality.py` | `StubConnection` gains `begin_nested`. |
-| `tests/integration/test_orchestrator_gates.py` | `ScriptedConnection` gains `begin_nested`. |
-| `handover.md` | This. |
-
-Nothing is staged and nothing is committed, per `CLAUDE.md`. Suggested message:
-
-```
-fix: make apply_schema work against a real database
-
-Use a raw driver cursor so psycopg does not read '%' in schema comments as a
-placeholder, and commit the driver connection so DDL survives the
-drop_existing path. Neither had ever run against Postgres.
-
-Add battles.year_astronomical so BC dates are readable from Python, in both
-schema.sql and an Alembic migration. Correct the BC extraction test, which
-asserted astronomical -30 where Postgres returns -31.
-
-Log absent battle-level model covariates to missing_data_log, which recorded
-only the required fields and the per-side ones before.
-
-Run each quality check in its own SAVEPOINT. A failing check aborted the
-transaction, so every later check in the stage reported a false failure rather
-than its own verdict. Point commander_extraction_rate at battle_commanders,
-which exists, instead of data.commanders_raw, which does not.
-```
-
-### 11.2 Verification status, stated honestly
-
-Verified against live PostgreSQL 15.19: schema application from both
-`apply_schema()` and Alembic, the migration's upgrade/downgrade/re-upgrade
-path on real BC rows, and 284 passing tests including all 27 that had never
-executed before.
-
-`ruff` clean. `mypy --strict` clean across 37 files.
-
-Not verified, unchanged from before: any real LLM call, any real crawl at
-scale, and the entire statistical half of the project, which still does not
-exist.
-
-### 11.3 RESOLVED: what counts as a missing field?
-
-The failing test is fixed, and the premise it was built on turned out to be
-wrong. Recorded because the reasoning governs every future addition.
-
-**The test's comment was false.** It claimed Wikidata gives no weather "and the
-infobox gives no casualties for one side". Inspecting the merged fixture: both
-sides carry troop reports, casualties, commanders and an outcome. Actium is
-complete apart from `terrain` (empty) and `weather` (None). `missing_fields()`
-already covered per-side casualties, commanders, outcome, troop totals and
-scope, so it was never as narrow as it first appeared.
-
-**The real gap** was that none of the model's *battle-level covariates* were
-checked. `agents/model.yaml` builds its linear predictor from force ratio,
-`battle_type`, `terrain`, defensive advantage (`fortified`) and era. Of those,
-only the force-ratio and era inputs were logged when absent.
-
-**The rule now applied:** log the absence of a field some downstream stage
-actually consumes; do not log purely descriptive fields. So
-`_COVARIATE_BATTLE_FIELDS = (battle_type, terrain, fortified)` are logged, and
-`weather` is deliberately not -- nothing reads it, and a row per ancient battle
-for a field no stage consumes would bury the missingness that matters.
-
-Two details worth keeping:
-
-- `fortified=False` is an answer, not an absence, and an empty `terrain` list
-  is an absence. The check tests `value is None or (isinstance(value, list) and
-  not value)` rather than truthiness, which would swallow the False case.
-- **`battle_type` will now be logged missing on most battles**, and that is
-  correct: §4.2 left nothing setting it until classify infers it. Those rows
-  are the standing record of that gap.
-
-The test now asserts both directions -- terrain logged, weather not -- so the
-distinction cannot quietly erode.
-
-### 11.4 RESOLVED: extract's quality gates were broken, in two ways
-
-Both fixed. The second was the serious one and reached every stage.
-
-**`commander_extraction_rate` queried a table that exists in no schema.**
-It joined `data.commanders_raw`; the extract stage writes `battle_commanders`.
-The gate could only ever return `relation "data.commanders_raw" does not
-exist`. Rewritten against the real table. §4.1's pattern, third instance.
-
-**One failing gate poisoned every gate after it.** Postgres aborts the whole
-transaction on a failed statement, and all checks shared one connection, so
-every check after a broken one returned `current transaction is aborted,
-commands ignored` instead of its own verdict. `no_empty_extractions` is valid
-SQL and was reported as failed purely because it ran third.
-
-`QualityRunner._run_sql_check` now wraps each check in `begin_nested()`, a
-SAVEPOINT, so a failure rolls back only that check. This was a defect in
-`pipeline/quality.py`, not in any spec, so it affected **every stage's gates**.
-
-Confirmed by removing the savepoint again: 3 of the 5 new tests in
-`tests/integration/test_quality_gates.py` fail without it, with exactly the
-aborted-transaction error. They are not vacuous.
-
-**A sweep of all 9 specs now runs 22 SQL gates with no execution errors.**
-`test_every_declared_sql_gate_executes` pins that, so a future spec cannot
-quietly ship SQL the database rejects.
-
-#### Changing the `Connection` protocol means changing two stubs
-
-`pipeline/quality.py` defines a structural `Connection` Protocol, and **two**
-separate test doubles implement it:
-
-- `StubConnection` in `tests/unit/test_quality.py`
-- `ScriptedConnection` in `tests/integration/test_orchestrator_gates.py`
-
-Adding `begin_nested` to the protocol broke the second one, which is easy to
-miss because its failure surfaced as unrelated gate assertions rather than an
-attribute error. Both now provide a `nullcontext()` savepoint. If you add
-anything else to that protocol, update both.
-
-
-## 12. Session of 2026-09-19 (later): the resolve stage
-
-### 12.1 What was built
-
-`pipeline/resolvers/`, eight modules, plus `pipeline/stages/resolve.py`:
-
-| Module | What it does |
-|---|---|
-| `records.py` | `Mention`, `MentionGroup`, `Candidate`, `Decision`, `Identity`, `ResolveCounts` |
-| `names.py` | Surface form to match keys. Strips ranks and fate markers, keeps regnal numerals, recognises non-names |
-| `mentions.py` | Reads `commanders_raw.jsonl` + `battles.jsonl`, groups mentions by exact shared key |
-| `candidates.py` | `LocalCandidateSource` (offline, from `data/raw/wikidata`), `fetch_candidates` (live SPARQL), `NullCandidateSource` |
-| `matcher.py` | Exact match, then fuzzy with a lifespan gate and an ambiguity margin; plus corpus-internal matching |
-| `disambiguate.py` | The LLM tiebreak, prompt and schema loaded from the spec |
-| `battles.py` | Suspected duplicate battles — **detected, never merged** (§12.4) |
-| `store.py` | `generals`, `general_aliases`, `battle_commanders`, `missing_data_log` |
-
-### 12.2 The one design decision everything else follows from
-
-**Resolution errors are not symmetric, so the stage is built to prefer a
-split.**
-
-A *false merge* links two commanders to one entity. Their records pool, the
-model fits one skill parameter to two careers, and nothing downstream can see
-it: the merged record looks like an ordinary prolific commander. A *false
-split* gives one commander two entities. Their record halves, both halves
-shrink harder towards replacement level — a loss of power, and a visible one,
-because two near-identical names appear in the ranking.
-
-So a match must clear the fuzzy threshold **and** be date-compatible **and**
-beat its runner-up by a margin. Anything else goes to the LLM or becomes a new
-entity. The same asymmetry governs the LLM step (`UNCERTAIN` splits rather
-than merges) and the duplicate-battle scan (§12.4).
-
-**The date gate is what does the real work.** Name similarity alone links a
-mention of "Hannibal" in an 1811 battle to Hannibal Barca, and "Scipio" to
-whichever of the five the query service returned first. A candidate who was
-not alive cannot have commanded, and `lifespan_verdict` returns True / False /
-None — abstaining when either the battle or the life is undated, which is not
-the same as passing.
-
-Three more decisions worth knowing before changing anything:
-
-- **"Unknown" never becomes a general.** It appears in thousands of infoboxes;
-  resolving it would create one entity credited with every battle nobody
-  recorded a commander for, and that entity would rank. Placeholder mentions
-  go to `missing_data_log`.
-- **A failed LLM call leaves the group unresolved**, not "new". An API failure
-  is a known unknown; inventing an identity would put the outage into the data
-  where nothing can see it.
-- **Grouping is exact-key only.** "Agrippa" and "Marcus Vipsanius Agrippa" do
-  not group on name; they are reunited later by the Q-id they both resolve to.
-  A wrong merge at the grouping step is invisible, so it does no scoring.
-
-### 12.3 Re-running resolve must not undo classify
-
-`battle_commanders` is the one table two stages write. Resolve creates the
-rows; classify refines `command_role`, `hierarchy_rank`, `reports_to_bc_id`
-and `attribution_weight` on them.
-
-The extract stage's pattern — delete the rows this stage owns, then rewrite —
-would silently discard all of that. So resolve upserts on the
-`UNIQUE (battle_id, side_id, general_id)` constraint and its `DO UPDATE` sets
-only the columns it owns, leaving a `command_role` that has already moved off
-`unknown`. `test_a_rerun_does_not_undo_the_classify_stage` pins it.
-
-### 12.4 Duplicate battles are reported, not merged
-
-`agents/resolve.yaml` asks the stage to "merge duplicate battle records".
-`pipeline/resolvers/battles.py` finds them and deliberately does not merge
-them, writing pairs to `data/processed/duplicate_battles.jsonl` instead.
-
-Merging two battle rows means re-parenting their sides, and through those
-their troop reports, casualty reports and commanders, then deleting one — it
-is irreversible, invisible afterwards, and wrong more often than it looks.
-"First" and "Second Battle of Bull Run" differ by one word; "Battle of
-Panipat" names three engagements over two centuries. Battles also carry the
-outcome data the whole model is fitted to, so a wrong merge costs more here
-than anywhere else.
-
-The scan therefore requires both names dated and within a year, refuses pairs
-whose names carry different ordinals, and compares names only after the
-generic "Battle of" prefix is removed. Five tests pin the false positives it
-must refuse. **If a later session wants real merging, it needs its own
-evidence and its own review step; do not bolt it onto this scan.**
-
-### 12.5 Verification, stated honestly
-
-**Verified against live PostgreSQL 15.19:**
-
-- 18 integration tests: the writes, the re-run convergence, the classify
-  interaction, the unresolved-mention log, all five quality gates executing,
-  and the duplicate scan.
-- **An end-to-end run of `resolve.run()`** driving the real stage over real
-  processed files with a real database, checking nine behaviours: two
-  spellings of Agrippa became one Wikidata-backed general across two battles;
-  a same-name candidate from the wrong millennium was rejected by the date
-  gate; "Unknown" became no general and one `missing_data_log` row; Mark
-  Antony survived as a corpus-local identity with his dagger stripped;
-  `years_active` came back as astronomical years spanning both battles.
-- 59 unit tests, no database or network.
-
-**All three of the gaps this section originally listed have since been
-closed. See §13 for what the live checks found -- one of them was a
-project-wide defect (§4.7).**
-
-What remains unverified: the corpus-scale behaviour of the SPARQL source (it
-has been run on 13 names, not 13,000), and the thresholds against a real gold
-set, which still does not exist (§8).
-
-One more thing the end-to-end run taught, at the cost of a confused half hour:
-**Wikidata signs every year in a time value** (`+1850-01-01T00:00:00Z`). A
-fixture that writes a bare `1850-01-01` is refused by
-`wikidata_time_to_date`, the candidate comes back with no lifespan, the date
-gate abstains, and the match looks ambiguous for no visible reason. The code
-was right and the fixture was wrong — §4.2's pattern with the polarity
-reversed, and worth remembering when writing any Wikidata fixture.
-
-### 12.6 Changed files
-
-| File | Change |
-|---|---|
-| `pipeline/resolvers/*` | **New**, 8 modules plus `__init__.py` |
-| `pipeline/stages/resolve.py` | **New**, the stage runner |
-| `pipeline/extractors/store.py` | `_source_id` → `source_id`, so resolve reuses it rather than copying it |
-| `agents/resolve.yaml` | Added `prompt.output_schema`, the params the stage reads, and rewrote the gates (§4.6) |
-| `agents/extract.yaml` | `commander_extraction_rate` → `sides_per_battle` (§4.6) |
-| `tests/unit/test_resolve.py` | **New**, 59 tests |
-| `tests/integration/test_resolve.py` | **New**, 18 tests |
-| `handover.md`, `TODO.md` | This |
-
-Suggested commit message:
-
-```
-feat: resolve stage — commander mentions to canonical generals
-
-Group mentions by normalised name, look up Wikidata candidates, match
-deterministically against label and lifespan, and ask an LLM only about what
-is left. Writes generals, general_aliases and battle_commanders, which the
-extract stage could not populate because general_id is NOT NULL.
-
-Built to prefer a split over a merge: a match must clear the fuzzy threshold,
-be compatible with the battle's date, and beat its runner-up by a margin. A
-false merge pools two commanders' records and nothing downstream can see it.
-
-Record unresolved mentions in missing_data_log rather than dropping them, and
-rewrite resolution_rate against that denominator. The gate previously counted
-battle_commanders.general_id IS NOT NULL, a NOT NULL column, so it read 1.0
-however many mentions were lost.
-
-Point extract's commander gate at battle_sides. It counted battle_commanders,
-which the extract stage does not write, so it could only ever report 0.
-
-Detect duplicate battles without merging them: re-parenting sides, troop
-reports and commanders is irreversible, and ordinals and dates separate more
-same-named battles than they join.
-```
-
-
-## 13. Live verification of the resolve stage, 2026-09-19
-
-The three gaps §12.5 listed were closed by pointing the stage at the real
-services. The first check found a defect that reached the whole project.
-
-### 13.1 Live Wikidata SPARQL: works now, did not before
-
-See §4.7 for the defect: robots.txt disallows `/sparql`, `run_query` went
-through the robots gate, and **every SPARQL query in the project silently
-returned nothing** -- in crawl as well as resolve. Fixed by routing queries
-through `fetch_raw`.
-
-After the fix the query works: five names in one batch, about four seconds,
-twelve candidates. The results are also the clearest possible argument for the
-date gate.
-
-| Mention | What the live query returns |
-|---|---|
-| "Napoleon" | Q517, **plus an American rapper (b. 1977), an Indian film actor (b. 1963), and a dateless NFT founder** |
-| "Scipio Africanus" | Q2253 the general, **plus an 18th-century enslaved man of that name** |
-| "Yi Sun-sin" | Q50184 the admiral **and Q12611867, a different Joseon officer of the same name, both alive in 1597** |
-
-Name similarity alone would link any of these. The lifespan gate removes the
-first two rows; the third is a genuine ambiguity and is what the LLM step is
-for.
-
-### 13.2 A second matcher fix the live data forced
-
-Against real candidates, five of eight commanders were being deferred to the
-LLM -- against a spec that expects "typically <5%".
-
-The cause: **the date gate abstains on a dateless candidate, so every dateless
-namesake survives it**, and Wikidata has many. Napoleon at Austerlitz was
-going to the model because a dateless NFT founder matched his label exactly.
-
-`match_group` now prefers, among *exact* matches, the candidates whose dates
-positively confirm them. It concedes nothing: a candidate the dates contradict
-was already dropped, and two confirmed candidates still go to the model. It
-only breaks the tie between evidence and no evidence. Deterministic links went
-from 2/8 to 4/8, with no new errors.
-
-### 13.3 A real LLM call, and the cache
-
-One live `gemini-3.8-flash` call on the genuine Yi Sun-sin ambiguity:
-
-- picked **Q50184**, the correct admiral, and its reasoning named the thirteen
-  ships and the Imjin War
-- 363 in / 294 out, $0.0014, `llm_calls` row written with status `ok`
-- **a second identical call was served from the cache**: zero tokens, zero
-  cost. The stage is resumable without paying twice, which §3.1 claimed and
-  nothing had demonstrated.
-
-The credential's prefix is `AQ.A...`, which §3.1 previously said was the wrong
-kind of key. It is not; that claim has been corrected.
-
-### 13.4 The thresholds, measured for the first time
-
-Eight commanders whose answer is not in doubt, run through the full stage path
-including the LLM step. Not a gold set -- a spot check, and the smallest thing
-that can say whether the defaults are roughly right.
-
-| | |
-|---|---|
-| linked correctly | **5** (4 deterministic, 1 via the model) |
-| **linked wrongly** | **0** |
-| fell through to a new entity | 3 |
-| LLM calls | 3, $0.0047 total |
-
-**Zero wrong links is the result that matters**, because a false merge is the
-error nothing downstream can detect. The split-preferring design holds up
-against real data.
-
-The three misses are worth separating, because only one is the matcher's:
-
-1. **Horatio Nelson** -- the query never returned Q102462 at all. His label is
-   "Horatio Nelson, 1st Viscount Nelson"; an exact literal match on the
-   mention "Horatio Nelson" does not find it, and his English aliases did not
-   cover the bare form either.
-2. **Duke of Wellington** -- zero candidates. `name_keys` generates the key
-   `wellington`, but the *query* only ever asks about raw surface forms, so
-   the stripped form is never sent. The matcher is cleverer than the lookup.
-3. **Hannibal** -- the right entity *was* offered and the model chose
-   NEW_ENTITY. A conservative miss, in the direction the design prefers. Note
-   the harness gave it thin context (`side_label="side"`, no role evidence)
-   where a real mention carries the polity and the article's own words, so
-   this is not a clean measurement of the prompt.
-
-**The next piece of work on this stage is (1) and (2), which are one bug:**
-the query asks about surface forms while the matcher reasons over generated
-keys. Sending title-stripped and core-name variants -- case preserved, since
-Wikidata literals are case-sensitive -- would likely recover both. A label
-search, or `wbsearchentities`, would recover more. Until then, expect
-commanders known by a title ("Duke of Wellington") or whose Wikidata label is
-longer than their common name to resolve as corpus-local entities.
-
-### 13.5 What this cost, and what it bought
-
-Three live LLM calls (under a cent) and roughly twenty HTTP requests, against
-a project whose statistical half does not exist yet. It found a defect that
-had silently disabled a whole data source in two stages, corrected a false
-claim about credentials in this file, and turned "the thresholds are reasoned"
-into a number.
-
-That is the same trade §4.2 recorded and it came out the same way. **Point the
-next stage at something real before believing its tests.**
-
-
-## 14. Chasing the misses from §13.4, 2026-09-19
-
-§13.4 blamed Nelson and Wellington on "the query asks about surface forms
-while the matcher reasons over generated keys". **That diagnosis was wrong.**
-Chasing it properly found four defects, one of them mine from an hour earlier,
-and an operational blocker that no code change can fix.
-
-### 14.1 The real bug: every alias match was thrown away
-
-`fetch_candidates` asked the endpoint for names, then decided which requested
-name each returned entity answered to by **re-deriving the match from the
-entity's label**:
-
-```python
-if fold(name) in set(candidate_keys(candidate)):   # label + aliases
-```
-
-But `_merge_rows` never selected the aliases, so `candidate_keys` was the
-label alone. The query matches on `rdfs:label` **OR** `skos:altLabel`, and
-"Duke of Wellington" is an *alias* of "Arthur Wellesley, 1st Duke of
-Wellington". So the query found him, and the very next loop discarded him.
-
-Measured directly: the query returned 15 rows and 1 person for "Duke of
-Wellington"; `fetch_candidates` returned 0 candidates.
-
-Every commander whose common name is not their Wikidata label was being lost
-this way -- which is most of the people known by a title, and a great many
-ancients.
-
-**Fix:** the query already binds `?name` in its VALUES block, so it now
-*selects* it, and the endpoint says which name matched. No re-derivation. The
-matched names also become the candidate's `aliases`, which gives the matcher
-an exact-match key for a commander whose label is longer than the mention.
-`test_an_entity_matched_by_alias_is_kept` pins it. Wellington now resolves.
-
-### 14.2 The query was thirty seconds, not four
-
-While measuring the above, an eight-name batch took 29.7s, and the eval timed
-out twice at eight minutes.
-
-The cause was the three OPTIONAL multi-valued joins: one person yields
-`|countries| x |occupations| x |articles|` rows. Timed on one batch:
-
-| Query | Time | Rows | People |
-|---|---|---|---|
-| as written | 29.7s | 90 | 35 |
-| without `?name` | 31.2s | 90 | 35 |
-| aggregated with GROUP_CONCAT | **1.9s** | 36 | 35 |
-
-Note the second row: **projecting `?name` cost nothing.** The cross-product
-was the whole expense. The query now GROUPs and concatenates, and returns the
-same people fifteen times faster. At corpus scale that is the difference
-between usable and not.
-
-### 14.3 One LLM call could hang a stage forever
-
-The Gemini client built its SDK client with no request timeout, so a stalled
-call blocked indefinitely -- and the retry loop never ran, because a request
-that never returns never raises. Fixed: `GeminiClient` takes `timeout_s`
-(default 90) and passes `http_options`, falling back with a warning on an SDK
-that will not accept it.
-
-### 14.4 The retry ignored the rate limiter telling it when to come back
-
-A 429 said *"Please retry in 29s"*. The backoff slept 2.5s, failed, slept
-4.1s, failed, slept 8.9s, failed, and gave up -- four attempts spent on a
-limit that was never going to lift inside ten seconds.
-
-`TransientLLMError` now carries an optional `retry_after`, `with_backoff`
-prefers it over the computed delay (capped at 120s), and the Gemini client
-reads it from a `Retry-After` header or from Gemini's prose. Seven tests cover
-it. **This is the same defect §5.2 records for Wikipedia**, which is still
-open on the crawl side.
-
-### 14.5 The blocker: the Gemini key is free tier, 20 requests a day
-
-```
-429: Rate limit exceeded for model gemini-3.8-flash
-     (limit: 20 requests per day on Free Tier)
-```
-
-This session's handful of calls exhausted the day's quota. **The resolve stage
-cannot run over a real corpus on this key**, and neither can extract, which is
-one LLM call per article passage. No code change fixes it: it needs a paid
-tier, or a different provider for the bulk stages.
-
-Worth knowing before planning any real run, and worth remembering when the
-next stage's cost is estimated.
-
-### 14.6 A correction to §13.4, and a warning about Q-ids
-
-§13.4 said the query never returned Nelson's Q102462. **Q102462 is not
-Nelson** -- its label is "James Stewart". That id was asserted from memory.
-The real Nelson is **Q83235** ("British admiral (1758-1805)"), and separately
-he genuinely has no English label or alias equal to "Horatio Nelson", so the
-exact-literal lookup still cannot reach him from that mention.
-
-> **Corrected 2026-09-20 -- see §16.1.** The second half of that paragraph is
-> wrong, and wrong in the way this file keeps warning about. Q83235 carries
-> "Horatio Nelson" as its **`mul`** label; it has no `en` label at all. The
-> lookup could not reach him because it asked only for `"..."@en`, not because
-> the name was absent. The recommendation that followed from it -- a label
-> search -- was therefore solving the wrong problem, and is now deferred
-> (§16.6). Two language tags fixed it.
-
-That is the second time in one session that a Q-id recalled rather than looked
-up was wrong; Agrippa is Q48174, not the Q167846 an earlier fixture used.
-**Look Q-ids up. Do not remember them.**
-
-### 14.7 What is still open
-
-- **Exact-literal lookup misses people whose common name is neither label nor
-  alias** (Nelson). A label *search* -- `wbsearchentities`, or a SPARQL
-  `CONTAINS` -- would reach them, at the cost of more candidates to filter.
-  This is the remaining half of §13.4's recommendation, and it is real, unlike
-  the half that turned out to be §14.1.
-- **Hannibal** still resolves to a new entity: the right candidate is offered
-  and the model declines it. Worth re-testing with real mention context (the
-  harness passed `side_label="side"` and no role evidence) once quota allows.
-- The corpus-scale behaviour of the lookup is still unmeasured: 13 names, not
-  13,000.
-
-
-## 15. Session of 2026-09-19 (later still): closing out setup, infrastructure, stages 1 and 2
-
-The brief was to wrap up every outstanding item in project setup,
-infrastructure, Stage 1 and Stage 2. All are now closed except the two that no
-code change can close, recorded in §15.7.
-
-Two decisions were the user's and were taken by them: the free-tier Gemini
-blocker is documented rather than worked around, and the live crawl test was
-built opt-in **and run**.
-
-### 15.1 Wikipedia's 429, which the crawler had been ignoring
-
-`Fetcher.fetch_raw` computed `backoff_base * 2**attempt` and ignored what the
-server said. Against a rate limiter that answers "retry in 29s" that spends
-three attempts inside ten seconds and gives up on a limit that was never going
-to lift -- the same defect §14.4 found and fixed on the LLM side, still open on
-the crawl side until now.
-
-`retry_after_seconds()` reads both forms RFC 9110 allows, because Wikimedia
-sends both depending on which layer refuses: an integer from the API limiter,
-an HTTP-date from the CDN. A server-named delay **raises** the wait and never
-lowers it -- the computed backoff stays a floor -- and is capped at
-`MAX_SERVER_BACKOFF_S` (120s), because a crawl of thousands of pages cannot
-block an hour on one of them. Four unit tests pin those behaviours separately.
-
-`rate_limit_wikipedia` went 1.0 to 2.0. §5.2 had measured 1.5s drawing a 429,
-and the spec was still set below the value that had already failed.
-
-### 15.2 The live crawl test, and what running it found
-
-`tests/integration/test_crawl_live.py`, five tests, gated on
-`GENERAL_WAR_LIVE_CRAWL=1` and never run in CI. It builds its fetcher from the
-**shipped `agents/crawl.yaml`**, not from test defaults, so a rate limit too
-fast for Wikipedia fails the test rather than being dodged by it.
-
-Run live, all five pass in about 30 seconds:
-
-| Check | Result |
-|---|---|
-| Ten articles fetched at the configured spacing | **zero retries, zero 429s** |
-| robots.txt still permits `/wiki/`, still forbids the edit path | yes |
-| All ten infoboxes parse, each yielding two sides | yes |
-| No naval battle labelled a land engagement (§4.2 regression) | yes, against live HTML |
-| DBpedia still serving | yes |
-
-**The first run failed, and the bug was mine.** `Battle_of_Hałycz` was in the
-URL list and returns 404; I had written the title from memory. That is §14.6's
-lesson -- "Look Q-ids up. Do not remember them." -- applying equally to article
-titles. The replacement, `Battle_of_Łódź_(1914)`, was checked against the live
-MediaWiki API before use, and covers the non-ASCII and parenthesised-title
-cases at once. The comment above the list records this so it is not repeated.
-
-### 15.3 The DBpedia mapper, and the one thing it refuses to do
-
-`pipeline/extractors/dbpedia_mapper.py`. The crawler had been fetching DBpedia
-since the crawl stage was written and nothing had ever mapped it, so the
-`dbpedia` source_type, the `dbpedia_rdf` extraction_method and priority 35 in
-`SOURCE_PRIORITY` were all reserved for a source that never arrived.
-
-It contributes what DBpedia is good for: typed dates, numeric coordinates, the
-conflict it was part of, a readable place name, and the result string. Dates
-carry the same BC problem as Wikidata and are emitted as Postgres literals --
-DBpedia writes 31 BC as `-031-09-02`, **three year digits, not four**, so a
-four-digit ISO assumption would have silently rejected every ancient date.
-
-**It returns `sides=[]`, deliberately.** Decided by inspecting the live
-endpoint rather than by reading the ontology, and the evidence is worth
-keeping:
-
-- Actium's `dbo:combatant` is `["Ptolemaic Egypt", "Octavian's forces",
-  "Antony's forces"]` -- three entries for two sides, in no order.
-- Trafalgar's is `["Spain"]`, alone, for a battle where a British fleet fought
-  a Franco-Spanish one. Its `dbo:commander` lists Villeneuve, Collingwood,
-  Gravina and Nelson in one flat list with no marker of which fleet anyone was
-  in.
-
-There are **no numbered predicates**: DBpedia flattens the infobox's
-`combatant1`/`combatant2` and `commander1`/`commander2`, losing the only thing
-that assigned them. Splitting that back into sides would be invention, and a
-commander on the wrong side is precisely the error the model cannot see -- it
-fits one skill parameter to a career including battles the general fought
-*against*. So belligerents, commanders, strengths and casualties go to `notes`
-marked "unassigned to sides", exactly as the Wikidata mapper does with `P710`.
-The infobox parser reads the numbered fields from wikitext directly and keeps
-the assignment; that remains the only source sides come from.
-
-Eleven unit tests, against a fixture captured from the live endpoint and
-trimmed to the one resource the mapper reads.
-
-### 15.4 The orchestrator could not reach the database
-
-`main()` called `run_pipeline` without `db_conn`, so it defaulted to None and
-**every SQL gate in every stage reported "No database connection available to
-run this check"**. The gates were made real in §11.4 and the CLI had never been
-wired to them, so a real pipeline run could not tell a passing stage from a
-failing one. TODO.md filed this under Tooling; it is infrastructure, and it
-blocked any real run.
-
-`main()` now loads `.env`, configures logging, opens a connection and passes it
-down. `--no-db` keeps the old behaviour explicitly and says in its help that
-every SQL gate will then fail. A missing DATABASE_URL exits 2 immediately
-rather than running nine stages and reporting nine identical gate failures.
-
-Verified: `python -m pipeline.orchestrator --stages extract` now returns real
-verdicts -- "Check returned NULL. This usually means the table is empty" --
-which is the correct answer for an empty database, and a different answer from
-the one it gave before.
-
-### 15.5 `.env` was never read, and could not have been
-
-TODO.md recorded "nothing actually loads .env". `pipeline.config.load_env()`
-now does, and an already-exported variable wins by default, so a deliberate
-export or a CI-injected secret is never overridden by a file in the tree.
-
-**Running it immediately found that the `.env` on this machine is UTF-16-LE
-with a BOM** -- the PowerShell redirect footgun. `python-dotenv` assumes UTF-8
-and raised `UnicodeDecodeError` on the very first byte, so even once something
-read the file, it read nothing. The loader now sniffs the BOM.
-
-The first fix was wrong in an instructive way: decoding as `utf-16-le` keeps
-the BOM as a character, producing a variable named `﻿GEMIINI_API_KEY`
-that nothing looks up. Plain `utf-16` auto-detects endianness and strips it.
-Both the crash and the invisible-BOM variant are pinned by tests.
-
-An unreadable `.env` now degrades to a warning rather than killing the run: the
-variables may well be exported already, and a traceback from inside dotenv says
-nothing about which file or why.
-
-**Two findings about the actual `.env`, left for the user:**
-
-1. The key in it is spelled **`GEMIINI_API_KEY`** -- two I's. Nothing reads
-   that name. The working Gemini calls in §13.3 came from a variable exported
-   in the shell, not from this file.
-2. It contains that one variable and nothing else: no `DATABASE_URL`, no
-   `ANTHROPIC_API_KEY`.
-
-It was deliberately not edited. It is a credentials file, and rewriting one
-unasked is not a thing to do quietly.
-
-### 15.6 structlog was never configured, and CI now needs a database
-
-`pipeline/logging_config.py`. Every module calls `structlog.get_logger()` and
-nothing had ever called `structlog.configure()`. That is not an error --
-structlog falls back to a default -- which is the problem: the format, the
-level and the filtering were accidents rather than decisions. Console renderer
-on a terminal, JSON otherwise, `LOG_LEVEL` honoured, and httpx and
-sqlalchemy.engine held at WARNING so a crawl is not one of our lines per twenty
-of theirs. Named `logging_config` so it does not shadow the stdlib.
-
-`.github/workflows/ci.yml` runs three jobs: lint plus `mypy --strict`; the
-suite against a **real `postgres:15` service**; and an Alembic
-upgrade/downgrade/upgrade round-trip. The test job asserts the database is
-reachable *before* pytest, and then **fails the build if anything skipped** --
-because this project's integration tests skip silently without a database, and
-a green run full of skips is the exact blind spot that hid §4.3 and §4.4. The
-`live` marker is excluded, so CI never touches Wikipedia.
-
-`.pre-commit-config.yaml` runs ruff and mypy and refuses to commit a `.env`.
-`ruff-format` is registered but staged `manual`: applying it would reformat the
-whole tree, which belongs in its own commit rather than mixed into behaviour
-changes.
-
-`README.md` was a two-line stub and is now a real front page, written for
-someone arriving at the repository cold. It states plainly that the statistical
-half does not exist, that there is no published ranking, and lists the
-limitations that bear on believing one.
-
-#### A test-pollution bug worth remembering
-
-The logging tests failed three *unrelated* tests in `test_quality.py` and
-`test_resolve.py`, and only when the whole suite ran -- each module passed
-alone. `configure()` is process-global, so a test that set the level to ERROR
-silenced every later test asserting on captured output. An autouse fixture now
-snapshots and restores `structlog.get_config()`. **Any future test that calls
-`configure()` needs the same fixture.**
-
-### 15.7 What is still open, and why no code closes it
-
-**The Gemini key is free tier, 20 requests/day (§14.5).** The user chose to
-document this rather than work around it. `tests/integration/test_llm_live.py`
-is written and wired -- five tests covering a real call, the cache serving an
-identical second call for free, a refusal reported as a refusal, a truncation
-detected, and the `llm_calls` audit row -- gated on `GENERAL_WAR_LIVE_LLM=1`.
-**It has never been run.** The refusal and truncation branches remain
-unverified, and they are the two worth paying for: either one mistaken for a
-success writes wrong data with a successful status beside it.
-
-To close it: a paid tier, or route the bulk stages to Anthropic.
-
-**Gate thresholds are still unmeasured.** The 22 SQL gates execute correctly
-and have mostly run against an empty database. Their SQL is proven valid; their
-thresholds are not. That needs a corpus, which needs a crawl, which needs the
-LLM quota above.
-
-### 15.8 Changed files
-
-| File | Change |
-|---|---|
-| `pipeline/crawlers/fetcher.py` | `retry_after_seconds()`, `MAX_SERVER_BACKOFF_S`, Retry-After honoured in the retry loop |
-| `agents/crawl.yaml` | `rate_limit_wikipedia` 1.0 to 2.0 |
-| `pipeline/extractors/dbpedia_mapper.py` | **New.** The DBpedia RDF mapper |
-| `pipeline/extractors/__init__.py` | Export `map_resource`, `dbpedia_date_to_literal` |
-| `pipeline/stages/extract.py` | Discover `data/raw/dbpedia/`, map it, merge it |
-| `pipeline/logging_config.py` | **New.** structlog configuration |
-| `pipeline/config.py` | `load_env()` with BOM sniffing and graceful failure |
-| `pipeline/orchestrator.py` | `main()` opens a real connection; `--no-db`, `--log-level` |
-| `pyproject.toml` | `python-dotenv`, `pytest-cov`, `pre-commit`, `types-PyYAML`; `live` marker |
-| `README.md` | Written |
-| `.github/workflows/ci.yml` | **New.** Lint, tests against postgres:15, Alembic round-trip |
-| `.pre-commit-config.yaml` | **New.** |
-| `tests/unit/test_crawl.py` | 4 Retry-After tests |
-| `tests/unit/test_extract.py` | 13 DBpedia tests: 11 mapper, 2 pinning the stage wiring |
-| `tests/unit/test_infrastructure.py` | **New.** 14 tests, env loading and logging |
-| `tests/integration/test_crawl_live.py` | **New.** 5 live Wikipedia tests, opt-in |
-| `tests/integration/test_llm_live.py` | **New.** 5 live LLM tests, opt-in, never run |
-| `tests/fixtures/extract/dbpedia_actium.json` | **New.** Captured from the live endpoint |
-| `handover.md`, `TODO.md` | This |
-
-### 15.9 Verification, stated honestly
-
-**Verified against live PostgreSQL 15.19:** `ruff` clean, `mypy --strict` clean
-across 49 files, **410 passed and 10 skipped**. The ten skips are the opt-in
-live tests and are correct; a count above ten means DATABASE_URL is unset.
-
-**Verified against live services:** ten Wikipedia articles fetched and parsed
-at the new rate limit with zero retries; robots.txt read; three DBpedia
-resources mapped, including two BC dates converting correctly
-(`0031-09-02 BC`, `0216-08-02 BC`).
-
-**Verified by running it:** the orchestrator CLI reaching the database and
-reporting real gate verdicts, and `.env` loading from the genuine UTF-16 file
-on this machine.
-
-**Not verified:** every live LLM branch, for the quota reason in §15.7. The CI
-workflow has not run -- there is no remote, and it cannot be proven correct
-from here beyond its YAML parsing and its commands matching the ones that work
-locally. `pre-commit install` has not been run either.
-
-Suggested commit message:
-
-```
-feat: close out setup, infrastructure and stages 1-2
-
-Honour Retry-After in the crawl fetcher and raise the Wikipedia rate limit to
-2.0s. Blind exponential backoff answered "retry in 29s" with two seconds and
-burned every attempt inside a window the limit could not lift in, the same
-defect already fixed on the LLM side.
-
-Add the DBpedia RDF mapper, which the crawler had been feeding since the crawl
-stage was written with nothing to read it. It returns no sides: DBpedia
-flattens the infobox's numbered combatant and commander fields into unordered
-lists, so Trafalgar reports one combatant and four commanders with no marker of
-which fleet anyone was in. Assigning those to sides would be invention.
-
-Wire the orchestrator CLI to a real database connection. Every SQL quality gate
-reported "No database connection available" from the CLI, so a real run could
-not tell a passing stage from a failing one.
-
-Read .env, which nothing had ever done, sniffing the BOM: the file on the
-development machine is UTF-16 and python-dotenv failed on its first byte.
-
-Configure structlog, which nothing had ever called, and add CI that runs the
-suite against a real PostgreSQL and fails if any test skips.
-
-Add opt-in live tests against Wikipedia and against an LLM provider. The crawl
-ones pass; the LLM ones are unrun, blocked on a free-tier quota.
-```
-
----
-
-## 16. CI had never run a single check, 2026-09-20
-
-All three jobs failed on the first push that triggered them (`8c714de`), and
-neither failure was in the code the jobs exist to check.
-
-### 16.1 `pip install -e ".[dev]"` could not build the package
-
-`pyproject.toml` had no `[build-system]` table and no package configuration, so
-pip fell back to setuptools' flat-layout auto-discovery. Discovery found
-`agents/`, `alembic/`, `config/`, `data/`, `models/` and `pipeline/` side by
-side, refused to guess which was the package, and exited:
-
-```
-error: Multiple top-level packages discovered in a flat-layout:
-['data', 'agents', 'config', 'models', 'alembic', 'pipeline'].
-```
-
-Every job dies at its Install step, which is why the lint job failed in eight
-seconds -- too fast to have run ruff. Nothing downstream of the install had
-ever executed in CI. The fix declares the backend and pins discovery to
-`pipeline*`; `scripts/` and `models/` are empty placeholder packages run from a
-checkout, not installed.
-
-This never showed up locally because the editable install predates the
-directories that broke discovery. `pip install -e . --dry-run` reproduces it in
-a second, and is worth running after adding any top-level directory.
-
-### 16.2 The baseline migration hit the `%` bug all over again
-
-With the install fixed, `alembic upgrade head` failed on exactly the defect
-§4.3 records against `apply_schema()`:
-
-```
-psycopg.ProgrammingError: incomplete placeholder: '%';
-```
-
-`upgrade()` applied `config/schema.sql` through `conn.exec_driver_sql()`, under
-a comment asserting that exec_driver_sql "passes it through rather than
-treating it as one parameterised statement". It does not -- it still hands
-psycopg an empty parameter set, and the five `95% CI` comments in schema.sql
-are parsed as placeholders. The same wrong belief was fixed in `pipeline/db.py`
-and left standing in the migration.
-
-The migration now uses a raw driver cursor, as `apply_schema()` does. It does
-**not** commit the driver connection the way `apply_schema()` must: the cursor
-shares Alembic's connection, so the DDL belongs to Alembic's transaction and is
-committed with the version stamp. Committing here would split the two.
-
-### 16.3 Verified
-
-Against the live database on this machine, on two scratch databases created and
-dropped for the purpose:
-
-- `alembic upgrade head` -> `downgrade -1` -> `upgrade head` on an empty
-  database, then confirmed 20 tables exist and `battles.year_astronomical` is
-  present. A version stamp committed over rolled-back DDL is the §4.4 failure
-  mode and would otherwise look identical to success.
-- `python -m pipeline.db --apply-schema` on a second empty database: 19 tables.
-- `ruff check`, `mypy --strict` (49 files), and `pytest -m "not live"` with
-  DATABASE_URL set: 410 passed, 10 deselected, **0 skipped**, so the CI step
-  that fails the run on any skip has nothing to trip over.
-
-### 16.3b And then the lint job failed on an undeclared stub
-
-Run 2 got past the install (47s of it) and died on:
-
-```
-pipeline/llm/parsing.py:100: error: Library stubs not installed for "jsonschema"
-```
-
-`types-jsonschema` was installed on this machine and was never declared. The
-dev extras carried a comment naming "the YAML and jsonschema boundaries" and
-then listed only `types-PyYAML`, so the comment described an intent the file
-did not implement, and every local `mypy --strict` run passed on a stub CI
-would never install. Now declared.
-
-Same shape as §16.1: the development machine has something CI does not, and
-nothing compared the two. An audit of every third-party import in `pipeline/`,
-`tests/` and `alembic/` against the declared dependencies found no other gap,
-so this class should now be closed for imports. Stub packages are the half that
-is easy to miss, because they are invisible at runtime and only mypy wants
-them.
-
-### 16.4 What is still unverified, and the drift behind it
-
-CI runs Python 3.11 and resolves `anthropic>=1.0` to 1.7.0. This machine runs
-Python 3.14 with anthropic 0.111.0 installed, which does not satisfy the
-project's own constraint. Local `mypy --strict` results are therefore results
-for anthropic 0.x.
-
-Run 2 settled the part of that which mattered: mypy checked all 49 files
-against anthropic 1.7.0 and reported nothing in
-`pipeline/llm/anthropic_client.py`. The module types clean under both majors.
-What remains unsettled is *runtime* behaviour under 1.x -- no test exercises
-the Anthropic provider against the installed SDK, and the live LLM tests are
-still unrun (§15). The version drift on this machine is real and worth closing
-the next time the environment is touched.
-
-
-## 16. Session of 2026-09-20: the `mul` label, and two false-merge paths
-
-Work on the three open Stage 3 items in `TODO.md`. The first turned out to
-rest on a wrong diagnosis, for the second time on this stage.
-
-### 16.1 §14.6 and §13.4 were both wrong about Nelson. Corrected.
-
-§14.6 states that Nelson "genuinely has no English label or alias equal to
-'Horatio Nelson'", and concluded the lookup needed a label *search*
-(`wbsearchentities`). Looked up live on 2026-09-20:
-
-```
-Q83235 labels = {"en-gb": "Horatio Nelson, 1st Viscount Nelson",
-                 "mul":   "Horatio Nelson"}
-```
-
-**He has no `en` label at all.** The string is there, under `mul` --
-Wikidata's multilingual language code, introduced in 2024 for names spelled
-the same in every language, onto which person labels have been migrating ever
-since. The project asked only for `"..."@en` literals, so it could not see him.
-
-This is systematic, not one awkward admiral: **every commander whose label has
-migrated is invisible to an en-only lookup, and the class grows as the
-migration proceeds.** It is the same shape of error as §14.1 -- a plausible fix
-inferred from a misdiagnosis -- and the same lesson applies. Look it up.
-
-**The fix is two lines, not a new HTTP surface.** `_NAME_LANGUAGE_TAGS =
-("en", "mul")` now drives both the VALUES literals and the label service.
-Measured live before and after, same batch:
-
-| Query | Candidates for "Horatio Nelson" | Q83235 present? |
-|---|---|---|
-| `@en` only, label service `"en"` | 3 | **no** |
-| `@en`+`@mul`, label service `"en,mul"` | 4 | **yes**, b=1758 d=1805 |
-
-Nelson then links **deterministically**, no LLM call: four candidates match
-exactly, the date gate rejects one and abstains on two, and the §13.2
-date-confirmed rule leaves exactly one.
-
-### 16.2 The Q-id that would have been published as a person's name
-
-With the label service set to `"en"`, Q83235's `?personLabel` came back as the
-literal string **`"Q83235"`** -- the service returns the bare id when it finds
-no label in the language asked for. `_merge_rows` accepted it
-(`row.get("personLabel","") or qid`), so it became a fuzzy matching key and,
-on a link, `Decision.canonical_name`, which `store.py` writes into
-`generals.canonical_name` **and** as the primary `general_aliases` row.
-
-A general published as "Q83235", silently. Fixed in two places, deliberately:
-`_preferred_name` in the lookup (shape-matched on `Q\d+`, falling back to the
-longest matched name, logged as `sparql_candidate_label_was_a_qid`), and
-`_publishable_name` at the store boundary, because this arrived from a
-direction nobody predicted and the boundary before published data is worth
-checking twice.
-
-### 16.3 The worse bug, found by pointing the fixed code at real data
-
-Running the changed lookup over eight real commanders, "Hannibal" at the
-Battle of Lissa (1811) **linked to Q1576150 at 0.95 confidence** -- a
-Carthaginian commander born about 300 BC.
-
-`lifespan_verdict` bounded only the ends it had. Q1576150's death claim is an
-explicit "no value", so `death_year` is None, the upper end was left open, and
-the gate judged him alive in 1811 -- **and judged him positively**, so the
-§13.2 rule *preferred* him over dateless namesakes. A half-dated ancient was
-eligible for every later battle in history, and preferentially so.
-
-That is a false merge, which `matcher.py` opens by saying is the one error
-nothing downstream can detect. **It is pre-existing and not caused by the
-`mul` change** (Q1576150 has an `en` label, so the old query returned it too),
-but widening the lookup makes it more reachable.
-
-Fixed: `MAX_PLAUSIBLE_AGE_YEARS = 100` bounds whichever end is missing. A
-fully dateless candidate still abstains, which is correct -- absence of a
-lifespan is not evidence against one. Both Hannibal cases now defer to the LLM
-rather than linking, which is the designed-safe outcome.
-
-**This is the third time this project has found a real defect within minutes
-of pointing a stage at something real, and the second time in this file that
-the defect was invisible to a fully green fixture suite.** §4.2, §13.5, and
-now this.
-
-### 16.4 What else changed
-
-- The `mul` blind spot closed in the offline path too: `person_candidates`
-  read `labels["en"]` and **skipped** an entity without one, so a `mul`-only
-  person was absent from the local index rather than mislabelled. `_english`
-  is now `_preferred_text`, and aliases are read from both languages.
-- `wikidata_mapper._label` takes a language preference;
-  `config/sources_seed.yaml`'s three label services became `"en,mul"` (nothing
-  reads those labels yet, so it is pre-emptive).
-- `LIMIT 400` -> 1000 with a `sparql_candidate_batch_truncated` warning.
-  `GROUP BY ?name` groups by value *and* language tag, so an entity matching
-  under both tags now takes two rows; truncation was silent and would have
-  made a batch's candidate set depend on which rows came back.
-- **`general_aliases` could carry two primary rows.** `_UPDATE_GENERAL`
-  rewrites `canonical_name` unconditionally, so a re-run renames a general --
-  which is exactly what the `mul` fix does to anyone stored under a Q-id -- and
-  `_write_aliases` only ever inserted. Pre-existing; this change is the most
-  likely thing ever to have fired it.
-- Fixtures used **Q167846 for Agrippa**, the wrong id §14.6 itself records.
-  Now Q48174, verified live.
-
-### 16.5 The timing question §14.2 raised, answered
-
-Doubling the literals does **not** reintroduce the 29.7s problem. Eight names,
-en+mul, batch size 25: **2.2 seconds**. Consistent with §14.2's own finding
-that the OPTIONAL cross-product was the whole expense and projecting `?name`
-cost nothing. `sparql_batch_size` stays at 25.
-
-### 16.6 The label search is deferred, on purpose
-
-`TODO.md` asked for `wbsearchentities`. Not built, and the reasoning is
-recorded so it is not re-litigated from memory:
-
-1. Its premise (§14.6) is refuted, and the `mul` fix closes the named miss.
-2. It fires only for names with **zero** candidates, so its hit is usually the
-   sole candidate -- and `matcher.py` skips the ambiguity-margin test when
-   `len(scored) == 1`. It would auto-link at ~0.62 confidence exactly where
-   the evidence is weakest, inverting the stage's split-preferring design.
-3. Probed live, it is noisy: "Horatio Nelson" returns five paintings and a
-   racehorse; "Duke of Wellington" returns a peerage title and six pubs.
-4. The residual class -- a name in neither `en` nor `mul`, label nor alias --
-   is **unmeasured**. The gold set should measure it before anything is built.
-
-Also worth knowing if it is ever built: `www.wikidata.org/robots.txt` is
-`Disallow: /w/` with only `action=mobileview` allowed, so `/w/api.php` must go
-through `fetch_raw`, not `fetch`. That is the §4.7 trap exactly.
-
-### 16.7 State at the end of this session
-
-Verified: ruff clean, `mypy --strict` clean on 49 files, **423 passed / 10
-skipped** with `DATABASE_URL` exported (10 is correct -- the opt-in live
-tests). `python -m pipeline.orchestrator --stages resolve` runs clean against
-the live database and returns real gate verdicts.
-
-**Not verified, and not claimable:** there is no corpus on disk
-(`data/processed/` is empty), so the end-to-end run exercised the path and not
-the data. Nothing in this session used LLM quota.
-
-**Still open from the approved plan for this work** -- the large half, not
-started:
-
-- `tests/fixtures/gold/resolve/` and the threshold sweep
-  (`scripts/resolve_sweep.py`, `.claude/commands/resolve-eval.md`). Needs no
-  LLM quota; the design is in the plan file.
-- `tests/integration/test_resolve_live.py` -- the live regression tests that
-  would catch Wikidata migrating Nelson's label back.
-- Batch-API submission in `pipeline/llm/` and the cost pilot (§16.8).
-
-### 16.8 The quota blocker, stated properly
-
-§7 and §15.7 call the free-tier quota "operational". That understates it.
-`agents/crawl.yaml` targets **3,000 battles**, extract makes one call per
-*passage*, so the corpus is roughly **6,000-12,000 calls**. At 20/day that is
-**300-600 days.** The project cannot run.
-
-The blocker is a **request cap, not cost**: the one measured call (§13.3) was
-$0.0014, putting the corpus at order **$50-200** on a flash-class model. Any
-paid tier removes the cap.
-
-Two different things get called "batching". Cramming many battles into one
-prompt stays rejected -- `llm_max_tokens: 4096` cannot hold fifty battles of
-structured output, the schema is per-passage, and one failure would lose fifty
-articles because the `request_hash` cache is per-request. The **provider batch
-APIs** are the right fit and were never what was rejected: independent
-requests, one async job, about half price, one call per passage preserved so
-the cache and `llm_calls` logging are untouched. Correlate on `request_hash`
-as the `custom_id` -- batch results return out of order and can partially
-fail, and the cache key doubles as the correlation id.
-
-**Resolved.** `CLAUDE.md` now documents the actual routing: Gemini 3.8 Flash
-for extract and resolve (high volume, low judgement), Anthropic claude-sonnet-4-6
-for classify (low volume, high judgement). Haiku 4.5 is documented as the API
-fallback in both `agents/extract.yaml` and `agents/resolve.yaml`. The offline
-processing path (§17.1) is the primary alternative to paid API for the bulk
-stages.
-
-
-## 17. Session of 2026-09-21: offline processing, gold set, threshold sweep
-
-### 17.1 Offline LLM processing
-
-The Gemini free-tier quota (§16.8) makes the bulk stages unrunnable through the
-API. Rather than a batch API design, the pipeline now has an offline processing
-path that routes requests through the user's Claude Pro subscription:
-
-| File | What it does |
-|---|---|
-| `pipeline/llm/offline.py` | `export_pending` serialises uncached requests to JSONL, `import_responses` writes completed responses back to `llm_calls` |
-| `scripts/llm_offline.py` | CLI: `status --stage`, `export --stage`, `import --file`, `list` |
-| `.claude/commands/process-llm-batch.md` | Slash command for Claude Code sessions: reads request JSONL, follows the system prompt, writes response JSONL. 25 requests per session. |
-| `tests/unit/test_llm_offline.py` | 8 tests: export, import, caching, roundtrip |
-
-The `request_hash` is the sole correlation key: a request exported with hash X
-must come back with hash X, and the next pipeline run will find it in `llm_calls`
-by that hash. The offline provider/model on the audit row defaults to
-`"offline"` / `"claude-pro-subscription"`, distinguishing manual processing from
-API calls.
-
-New directories `data/llm_requests/` and `data/llm_responses/` are gitignored.
-
-### 17.2 Spec conflict resolution
-
-`CLAUDE.md` previously named claude-sonnet-4-6 as the sole LLM provider. Updated to
-document the actual per-stage routing (Gemini for extract/resolve, Anthropic for
-classify). Both `agents/extract.yaml` and `agents/resolve.yaml` now carry
-`llm_fallback_provider: anthropic` and `llm_fallback_model: claude-haiku-4-5-20251001`.
-
-### 17.3 Live resolve regression tests
-
-`tests/integration/test_resolve_live.py`, 5 tests, gated on
-`GENERAL_WAR_LIVE_CRAWL=1`. Tests the Wikidata SPARQL lookup against the live
-endpoint for regressions the fixture suite cannot catch:
-
-1. Four known commanders (Napoleon, Nelson, Wellington, Caesar) still have
-   candidates
-2. Nelson is reachable via the `mul` label (the §16.1 regression)
-3. No candidate label is Q-id shaped (the §16.2 regression)
-4. The date gate separates Hannibal Barca from an 1811 Hannibal
-5. Napoleon and Nelson resolve deterministically with no LLM call
-
-All Q-ids verified live, not recalled. Q47153 (from an earlier task) was
-identified as a 2009 novel, not Hannibal Barca; Q36456 is correct.
-
-### 17.4 Resolve gold set and threshold sweep
-
-`tests/fixtures/gold/resolve/` contains 15 mentions across 12 battles, with
-cached synthetic candidates. Covers exact match, alias match, `mul` label, date
-gate separation, MAX_PLAUSIBLE_AGE, genuine ambiguity (Yi Sun-sin), placeholders,
-two spellings of one person, and BC dates.
-
-`scripts/resolve_sweep.py` sweeps `fuzzy_threshold` x `ambiguity_margin` over a
-grid, scoring each combo against the gold set. Spends zero LLM quota: ambiguous
-groups are counted, never resolved.
-
-`.claude/commands/resolve-eval.md` is the `/resolve-eval` command that runs the
-sweep (or a single check at the current defaults) and reports per-case results,
-a summary table, and a cost projection.
-
-**Result at the current defaults (85.0 / 6.0):** zero wrong links, 11 correct
-links, 1 ambiguous (Yi Sun-sin, correctly deferred), 2 placeholders. Every combo
-in the grid (threshold 70-95, margin 2-12) also achieves zero wrong links,
-which means the gold set's 15 cases are too clear-cut to discriminate between
-thresholds. The MANIFEST states this limitation: the set needs harder boundary
-cases (commanders known only by a title, contested identities, same-era name
-collisions) before it can tune thresholds on measurement rather than judgement.
-
-### 17.5 Changed files
-
-| File | Change |
-|---|---|
-| `pipeline/llm/offline.py` | **New.** Offline export/import for LLM requests. |
-| `pipeline/llm/__init__.py` | Added offline exports to `__all__` |
-| `scripts/llm_offline.py` | **New.** CLI for the offline workflow. |
-| `scripts/resolve_sweep.py` | **New.** Threshold sweep against the gold set. |
-| `.claude/commands/process-llm-batch.md` | **New.** Slash command for Pro subscription processing. |
-| `.claude/commands/resolve-eval.md` | **New.** Slash command for resolve evaluation. |
-| `tests/unit/test_llm_offline.py` | **New.** 8 tests for the offline module. |
-| `tests/integration/test_resolve_live.py` | **New.** 5 live regression tests. |
-| `tests/fixtures/gold/resolve/` | **New.** Gold set: mentions, candidates, battle pairs, manifest. |
-| `agents/extract.yaml` | Added Haiku 4.5 fallback params. |
-| `agents/resolve.yaml` | Added Haiku 4.5 fallback params. |
-| `CLAUDE.md` | Updated tech stack to document per-stage LLM routing. |
-| `TODO.md` | Marked offline processing and spec conflict as done. |
-| `.gitignore` | Added `data/llm_requests/` and `data/llm_responses/`. |
-| `handover.md` | This. |
-
-### 17.6 Verification, stated honestly
-
-`ruff` clean. `mypy --strict` clean on 50 source files. **376 passed, 70
-skipped** without DATABASE_URL set: 70 skips = 55 database integration tests +
-15 opt-in live tests (10 from §15 + 5 new from §17.3). The test count increased
-from 410 (with DB) to at least 384 unit tests (376 passing + 8 new offline
-tests).
-
-The sweep runs end-to-end against the gold set and produces correct results.
-The live resolve tests were not run this session (no `GENERAL_WAR_LIVE_CRAWL`
-env flag); they were written and verified to skip correctly.
-
-**Not verified:** the offline processing path has not been tested end-to-end
-(exporting real requests, processing via Claude.ai, importing back). The gold
-set candidates are synthetic, not captured from the live endpoint.
-
----
-
-## 18. Session of 2026-09-23: the Arsht reference set and a curated corpus
-
-The question that started this session was how early a visualisable output is
-possible. The answer, and the work that followed, both hinge on having a corpus
-small enough to run and honest enough to check. This session built one.
-
-### 18.1 What was built
-
-| File | What it is |
-|---|---|
-| `scripts/arsht_reference.py` | harvester; decodes Arsht's published per-battle WAR, pulls his own infobox parse, writes the seed |
-| `tests/fixtures/gold/arsht/arsht_war.jsonl` | 226 rows, one per (general, battle), with his WAR and running total |
-| `tests/fixtures/gold/arsht/battles.jsonl` | 212 distinct battles, every title resolved against the live MediaWiki API, dated from Wikidata (§18.8) |
-| `tests/fixtures/gold/arsht/career_totals.jsonl` | his career WAR for each of the 22 roster generals |
-| `tests/fixtures/gold/arsht/arsht_infobox.jsonl` | 1,043 battle-commander rows from his own scrape: raw infobox strength text plus the numbers he parsed from it |
-| `config/sources_seed_arsht.yaml` | 211 canonical article URLs: the pilot corpus |
-
-Rebuild the lot with:
-
-```bash
-python -m scripts.arsht_reference --verify-titles --with-infobox --write-seed
-```
-
-The roster is 22 generals: the ten the article names, with the WAR scores it
-prints, plus twelve chosen for the failure modes this file already records --
-Yi Sun-sin and Themistocles for the naval `battle_type` bug (§4.2), Scipio and
-Hannibal for BC dates (§5.1), Augustus and Agrippa for the Actium attribution
-problem, Grant opposite Lee so relative skill is testable on a known pair.
-
-### 18.2 This is a reference set, not a gold set
-
-Say it in those words, because the distinction is the whole value. His numbers
-are one model's output over one corpus, and this project exists because both
-have problems. **Do not assert his values as facts.** The set is for three
-things: a battle roster with real coverage, a correlation target for the model
-stage, and a source of corpus-hygiene findings.
-
-One value in it *is* checkable against an independent published source, and it
-is asserted: Napoleon's career total decodes to 16.678282 against the 16.679
-the article prints. That is the proof the harvest reads the columns it thinks
-it reads. Every other general on his pages differs from the article's quoted
-figure by up to 0.4 -- Rommel is -1.531 here against -1.953 in the text -- so
-the published pages come from a later run than the article. Treat the article's
-numbers and the page numbers as two runs, not one.
-
-### 18.3 Three findings the reference set produced immediately
-
-**His missing-year sentinel is -5000, and it is not rare.** 59 of 226 rows
-carry it, covering *every* battle of seven generals: Caesar, Alexander,
-Augustus, Agrippa, Themistocles, Belisarius, Khalid ibn al-Walid. Read as a
-number it dates Khalid, who died in 642 AD, to five millennia BC. The harvester
-records it as a null year with `year_missing: true` and keeps the raw value.
-All seven are ancient or early medieval, so his era covariate was missing for
-exactly the commanders whose era matters most. There is a unit test pinning
-this.
-
-**38 of 212 titles redirect**, and several of the redirects are unit errors
-rather than spelling. `Battle of Gallipoli` and `Third Battle of Chattanooga`
-resolve to *campaign* articles; `Battle of Perugia` resolves to `Perusine War`;
-`Battle of Vicksburg` resolves to `Siege of Vicksburg`, which is a
-`battle_type` this project models separately. A campaign entered as a battle is
-precisely the scope conflation reconcile's troop numbers cannot survive.
-
-**`First Battle of Philippi` and `Second Battle of Philippi` are the same
-article.** His corpus counted one battle twice, once for Augustus and once for
-Agrippa. The seed writer collapses them to one URL, which is why the corpus is
-211 battles and not 212.
-
-### 18.4 `arsht_infobox.jsonl` is the one thing extract can be diffed against
-
-His `final_vd_fill.csv` covers 211 of the 212 roster battles with 1,043
-battle-commander rows, carrying the **raw `strength` text from each side of the
-infobox** next to the numbers he parsed out of it. Same source article, same
-field, a different parser. Nothing else available gives extract a comparison
-that does not require hand-labelling first.
-
-His `Ships` column deserves particular attention. It is the only
-machine-readable naval signal in the set, and §4.2 is this project having
-labelled every naval battle a land engagement once already.
-
-His CSVs carry mojibake (`GuantÃ¡namo`), repaired on the way in where the
-round trip is exact and left alone where it is not.
-
-### 18.5 Crawl now accepts a named corpus
-
-`Seeds` gained `battle_articles`, fed by a new optional
-`wikipedia_battle_articles:` key. Named articles are seeded into the crawl
-state before any list page is parsed, so a run configured with articles and no
-list pages has work to do, and a limited run spends its budget on the battles
-it was asked for.
-
-The change is additive: `wikipedia_battle_lists: []` on its own still raises,
-as it did. The rule is now "at least one entry point", not "at least one list".
-
-This matters beyond convenience. An evaluation corpus whose membership changes
-because somebody edited a Wikipedia list page is not an evaluation corpus.
-`config/sources_seed_arsht.yaml` therefore names no list pages and no SPARQL
-queries at all.
-
-### 18.6 Verification, stated honestly
-
-`ruff` clean across `pipeline/ tests/ scripts/ alembic/`. `mypy --strict` clean
-on 50 source files, and separately on `scripts/arsht_reference.py`.
-**450 passed, 15 skipped** with `DATABASE_URL` exported -- up from 423, with 5
-new crawl tests and 14 new harvester tests. The 15 skips are the expected
-opt-in live tests.
-
-Verified against something real: the harvest itself ran against the live GitHub
-repository and the live MediaWiki API, and all 212 titles resolved. Napoleon's
-total matches the published article to three decimal places.
-
-**Not verified:** no battle in this corpus has been crawled, extracted or
-resolved yet. The seed file loads and its 211 URLs are canonical and
-title-verified, but the crawl has not been pointed at it. `data/processed/` is
-still empty and the database still has 0 rows in every table.
-
-**Not done, and the next real work:** there is still no hand-labelled gold set
-saying what *we* expect extract, resolve and classify to produce for these
-battles. `arsht_infobox.jsonl` gives a diff target, not a truth. The 12-15
-battle subset worth hand-labelling is the one covering Actium, Trafalgar or
-Noryang, Cannae, Zama, Alesia and Leipzig.
-
-### 18.7 Changed files
-
-- `scripts/arsht_reference.py` (new)
-- `tests/unit/test_arsht_reference.py` (new, 14 tests)
-- `tests/fixtures/gold/arsht/` (new: 4 data files plus `MANIFEST.md`)
-- `config/sources_seed_arsht.yaml` (new)
-- `pipeline/crawlers/seeds.py` (`battle_articles`, `_url_list`)
-- `pipeline/stages/crawl.py` (seeds named articles; `_describe_plan` reports them)
-- `tests/unit/test_crawl.py` (5 new tests)
-
-### 18.8 Dates: the gap the user spotted, and the worse bug behind it
-
-The user noticed Granicus sitting in `config/sources_seed_arsht.yaml` as "year
-unknown" when it is plainly 334 BC. That was Arsht's `-5000` sentinel showing
-through, faithfully. Fixing it turned up something more dangerous.
-
-**The fix.** Each battle's Wikidata item is now reached through the article's
-sitelink, and its date read from P585 (point in time), falling back to P580
-(start time). 207 of 212 battles are dated from Wikidata, 4 keep Arsht's year,
-**one is left undated** (`Siege of Gaza`, Q123406360, whose item carries no
-date). The Q-ids are kept: resolve needs exactly these, and they came from the
-sitelink rather than a name match.
-
-**The bug behind it: two year conventions, silently one apart.**
-
-| Source | Actium, 31 BC | Convention |
-|---|---|---|
-| Wikidata | `-0031` | historical |
-| Arsht | `-31` | historical |
-| `battles.year_astronomical` (§5.1) | **`-30`** | **astronomical** |
-
-Every record now carries `year` (historical, as both sources write it) *and*
-`year_astronomical` (this project's convention), plus `year_label` for humans
-and `year_source` for provenance. **Join on `year_astronomical`.** Had the
-original historical years been loaded against that column, all 60 BC battles in
-the corpus would have sat one year off, silently, and the era covariate would
-have been wrong for the ancient half of the set. This is §5.1 biting from a new
-direction: the column was right, and the data arriving at it was not.
-
-**A second bug, found by disagreement.** Two battles disagreed with Arsht's
-year. One was mine: the 1948 Arab-Israeli War carries P585 = `+1940-00-00`
-**at precision 8, a decade**, and I read the padding digits as a year 1940.
-Wikidata's precision scale runs 11=day, 10=month, 9=year, 8=decade, 7=century;
-anything below 9 is now rejected and the code falls through to P580, which
-dates that item to the day. Same class of error as reading `-5000` as a year:
-a non-year in a year-shaped field.
-
-The one surviving disagreement is Suez Crisis, Arsht 1956 against Wikidata
-1957, and it is recorded in the manifest rather than resolved. The crisis ran
-from October 1956 into March 1957, and it is a campaign in a battle corpus
-anyway, which §18.3 already flags.
-
-Statement ranks are now honoured too: deprecated claims are skipped and
-preferred ones win, rather than taking whichever statement happened to be
-first.
-
-`scripts/arsht_reference.py` also gained the retry-with-backoff the project's
-conventions require. Wikidata answered 429 to a 50-id batch and lost a whole
-run; entity reads now go 25 at a time and honour `Retry-After`.
-
-Verified: ruff clean, `mypy --strict` clean on 51 files, **465 passed / 15
-skipped** with `DATABASE_URL` set, up from 450. Granicus now reads
-`# 334 BC; Alexander the Great` in the seed file, and a test pins it along with
-the astronomical conversion for Granicus, Actium and the 1 BC/AD boundary.
-
-### 18.9 Four disambiguation pages in the corpus, found by a spot-check
-
-The user checked the one battle §18.8 left undated -- `Siege of Gaza` -- and
-said it should be 332 BC. It was not a missing date. **The title resolves to a
-disambiguation page**, and today that page offers Alexander's siege alongside
-three 21st-century ones.
-
-Sweeping all 211 titles for `pageprops.disambiguation` found **four**:
-
-| Arsht's title | Article actually meant | General, year |
-|---|---|---|
-| Siege of Gaza | Siege of Gaza (332 BC) | Alexander, 332 BC |
-| Battle of Arras | Battle of Arras (1940) | Rommel, 1940 |
-| Battle of Bautzen | Battle of Bautzen (1813) | Napoleon, 1813 |
-| Battle of Burkersdorf | Battle of Burkersdorf (1762) | Frederick, 1762 |
-
-**Why every check passed them.** A disambiguation page exists, returns 200, and
-does not redirect. Title verification (§18.5) asked only those three questions,
-so all four sailed through. They have no infobox, no commanders and no date, so
-crawled they would have produced four battles with nothing on either side, and
-the only visible symptom would have been a slightly smaller corpus.
-
-Arras is the one that would have hurt most quietly: the disambiguation page
-lists battles at Arras in 1640, 1654, 1914, 1915, 1917 and 1918, so a
-plausible-looking automatic pick could have credited Rommel with a First World
-War engagement fought before he commanded anything.
-
-**The fix, in three parts.**
-
-1. `resolve_titles` now asks for `pageprops` in the same request it already
-   makes and flags `is_disambiguation`. No extra API call.
-2. `_DISAMBIGUATION_TARGETS` maps the four titles to the article meant, chosen
-   by hand from each disambiguation page using the general and year already on
-   the row, with the reason written beside each entry. **Deliberately a table,
-   not a heuristic**: picking the nearest year would be right these four times
-   and wrong silently somewhere else.
-3. `write_seed_config` refuses any record still flagged, printing what it
-   dropped. If Wikipedia turns another title into a disambiguation page, it
-   leaves the corpus rather than entering it unnoticed.
-
-**Result: every battle in the corpus now carries a year.** 211 from Wikidata,
-1 from Arsht, none undated, where the set started with 59 rows on a `-5000`
-sentinel.
-
-Verified: ruff clean, `mypy --strict` clean on 51 files, **472 passed / 15
-skipped** with `DATABASE_URL` set. Seven new tests, including one per
-repointed title and one asserting no disambiguation page reaches the corpus.
-
-The general lesson, which is the same one §4.2 taught: *exists* is not
-*correct*. The crawl gate counts URLs that returned 200, and all four of these
-would have counted.
-
-
-## 19. Session of 2026-09-24: the reconcile stage, first half
-
-Stage 4 is now roughly half built. Schema, gates, the claim classifier, the
-loader and the design matrix are written and verified against live PostgreSQL.
-The model is written too and **converges** -- but only after the two rounds of
-identifiability work in §19.8 and §19.9, and only on synthetic data.
-
-**No estimate has ever been written.** `summarise.py`, `store.py`, `report.py`
-and `pipeline/stages/reconcile.py` do not exist, and neither does the
-parameter-recovery test. §19.6 is the honest boundary and §19.9 is the one to
-read before trusting any number this stage eventually produces.
-
-The session began by planning against `agents/reconcile.yaml` as written, and
-two reviews changed the design before a line of code existed. Both are worth
-reading before touching the statistics.
-
-### 19.1 The spec's inflation prior was wrong by a factor of 4.6 on the log scale
-
-`ancient_source_bias_prior_mu: 0.3` means 1.35x inflation, with a three-sigma
-ceiling of 6x. A `historiography-reviewer` pass found documented cases at
-4x-20x: Gaugamela 4-20x, Nicaea 10-20x, Caesar's Helvetii 7-18x, Xerxes 9-48x,
-Agincourt 4-12x. The prior could not represent a single one of them.
-
-This is not a tuning nicety. For most ancient battles no independent anchor
-exists -- every surviving figure descends from one classical author -- so the
-likelihood contributes nothing and **the posterior is the prior**. The number
-chosen there *is* the estimate.
-
-So it was measured. `tests/fixtures/gold/reconcile/` holds **45 cases** pairing
-a source's figure against a named modern scholar's estimate for the same force,
-across four traditions, built by four parallel agents and fitted by
-`scripts/fit_inflation_prior.py` into `config/inflation_priors.yaml`:
-
-| component | mu | sd | share | factor |
-|---|---|---|---|---|
-| faithful | +0.128 | 0.222 | 0.36 | 1.14x |
-| rhetorical | +1.709 | 0.689 | 0.64 | 5.53x |
-
-Pooled median log ratio **+1.150 (3.16x)**, against the spec's 0.3.
-
-### 19.2 Bias belongs to the claim, not the document
-
-The second review finding, and the one that changed the model's structure.
-Wikipedia infoboxes carry both traditions in one field. Verbatim, live:
-
-```
-52,930-100,000 (modern estimates) 250,000-1,000,000 (ancient sources)
-15,000-150,000 (modern estimates) 100,000-200,000 (primary Arab sources)
-```
-
-A single `source_type='wikipedia_infobox'` bias averages Herodotus and
-Delbruck into a figure belonging to neither. So the inflation term is keyed on
-a **claim regime** derived from `troop_reports.extracted_context`, not on the
-battle's calendar year.
-
-The gold set then supported that choice empirically, which was not guaranteed:
-
-| regime | n | median log ratio | factor |
-|---|---|---|---|
-| chronicle | 28 | +1.386 | 4.00x |
-| ancient_claim | 5 | +1.843 | 6.32x |
-| administrative_partisan | 8 | +0.366 | 1.44x |
-| staff_return | 4 | +0.068 | 1.07x |
-
-That ordering was not imposed. It is the case for regime over calendar year.
-
-**But measure the coverage before relying on it.** Against the 2,086 real
-strength strings in `tests/fixtures/gold/arsht/arsht_infobox.jsonl`, only
-**45 (2.2%)** carry a readable regime marker once multi-regime fields correctly
-abstain. The era fallback therefore does about 98% of the work and is
-load-bearing, not incidental. That number is pinned by
-`test_the_real_infobox_corpus_classifies_without_error`.
-
-### 19.3 Three defects found by running the code, not by reading it
-
-**The `diagnostics_json` handler was registered but never dispatched.** An
-agent added `METHOD_HANDLERS` and `_check_diagnostics_json` to
-`pipeline/quality.py` and left `_run_method_check` reading only
-`UNIMPLEMENTED_METHODS`. `ruff` passed, `mypy --strict` passed, all 472 tests
-passed, and every call still returned "not implemented". Caught by driving the
-gate against a real `model_runs` row rather than trusting the green suite.
-Same family as §4.1 and §11.4.
-
-**`classify_regime` labelled Herodotus' million `modern_scholarly`.** The first
-implementation returned the first matching regime, so a field naming both
-traditions resolved to whichever pattern was checked first. `modern_scholarly`
-is the model's **anchor, pinned to exactly zero bias**, so a 1,000,000 Persian
-figure would have entered as an unbiased modern estimate with no parameter free
-to absorb it. Now a multi-regime field returns `unlabelled` unless the caller
-passes the report's own value, in which case the nearest marker wins.
-
-**A recalled Q-id was wrong, three times, in prompts written this session.**
-The Red Cliffs id supplied from memory (Q207318) is *French Revolutionary
-Wars*; correct is Q830059. A search hit for Chaeronea resolved to *Carrhae*,
-and one for Issus to a different Issus five centuries later. Every one was
-caught only because the agents were instructed to verify against live
-Wikidata. §14.6's rule holds, and it applies to whoever writes the prompt as
-much as to the agent reading it.
-
-### 19.4 What was built
-
-| File | What it is |
-|---|---|
-| `pipeline/reconcilers/records.py` | `SourceKey`, `Report`, `CLAIM_REGIMES`, `ReconcileCounts`, `SideEstimate`, `SourceBias` |
-| `pipeline/reconcilers/claims.py` | `classify_regime`, `era_flag`, `roundness`, `assign_lineages` |
-| `pipeline/reconcilers/load.py` | DB rows to `Report` records; branch/naval/non-positive exclusions; unfillable sides |
-| `pipeline/reconcilers/design.py` | Index vectors, centred era covariate, censoring partitions |
-| `scripts/fit_inflation_prior.py` | Two-component EM fit of the gold set to `config/inflation_priors.yaml` |
-| `tests/fixtures/gold/reconcile/` | 45 cited cases across four traditions, plus MANIFEST |
-| `alembic/versions/...c3d4e5f6a7b8...` | The reconcile provenance columns |
-
-Schema additions, in **both** `config/schema.sql` and the migration (§5.1):
-ten columns on `sources` (fitted sigma, casualty bias, `bias_run_id`,
-`bias_n_*_reports`, `bias_updated_at`), ten on `battle_sides`
-(`est_*_run_id` / `_n_reports` / `_n_sources` / `_method` / `_updated_at`),
-three FKs to `model_runs`, three indexes. Also **`troop_reports.scope` default
-changed from `'engaged'` to `'unknown'`**, which had disagreed with
-`coerce_scope` in `pipeline/extractors/records.py` since the schema was
-written; the permissive default asserted troops-on-the-field, which is the one
-thing an unreadable scope is not evidence of.
-
-`agents/reconcile.yaml` went from 3 gates to 8. Two were rewritten because they
-could not measure what they claimed:
-
-- **`estimates_populated`** counted every side with any `troop_reports` row,
-  including sides whose only rows are a cavalry count -- structurally
-  un-fillable, so the gate could never reach 0.99 for a reason that is not a
-  defect. Now filtered to `branch='total' AND reported_value > 0`, and paired
-  with `unfillable_sides_are_logged` so the narrowing cannot hide a loss.
-- **`ci_width_reasonable`** measured `(hi-lo)/est`, a count-scale tail
-  statistic, at a threshold no singleton side can meet. The only way to pass
-  was to write dishonestly narrow intervals. It is now the median of
-  `LN(hi/lo)` over multi-source sides, and its inverse
-  `singleton_estimates_are_honestly_uncertain` **fails** when a one-report side
-  is given an interval narrower than a factor of 2.2.
-
-### 19.5 The environment question, settled
-
-`pymc>=5.28,<6` and `arviz>=0.18,<1`. pymc 5.28.5 resolves pytensor 2.38.2,
-which ships cp314 wheels and declares `requires-python >=3.11,<3.15`, so one
-pin installs on the 3.14 development machine **and** on CI's 3.11. pymc 6.x
-needs >=3.12 and would break CI outright.
-
-**There is no C compiler on this machine**, so PyTensor falls back to its
-Python op implementations: 42 seconds to sample a two-parameter toy model,
-which puts the real model out of reach. `nutpie` compiles the logp through
-numba instead, needs no toolchain, and fitted a 300-side hierarchical model in
-**19 seconds**. It is declared in `pyproject.toml` and is the default
-`nuts_sampler` in `agents/reconcile.yaml`. Both numbers were measured here, not
-assumed.
-
-A `model` pytest marker was added and CI gained a fourth job. Both existing
-pytest invocations became `-m "not live and not model"`; deselection is not a
-skip, so the "fail if anything skipped" guard still has nothing to trip over.
-
-### 19.6 Verification, stated honestly
-
-**Verified against live PostgreSQL 15.19:** `ruff` clean across
-`pipeline/ tests/ scripts/ alembic/`; `mypy --strict` clean on 55 source files;
-**532 passed, 15 skipped** (the 15 are the expected opt-in live tests). The
-schema applies from `apply_schema()`; the migration upgrades, downgrades and
-re-upgrades; and it was separately applied to a database built from the **old**
-`config/schema.sql` via `git show HEAD:config/schema.sql`, which is the only
-path that exercises the real ALTER rather than the `IF NOT EXISTS` no-op. All
-eight reconcile gates execute with no SQL error.
-
-**Verified by running it, not by testing it:** the `diagnostics_json` gate
-driven against real `model_runs` rows through eight states (no run, incomplete
-run, NULL diagnostics, converged, diverged, a rollup payload with no `worst`
-key, no `model_type`, no connection). The censoring test was confirmed
-non-vacuous by inverting the mapping in `design.py` and watching exactly three
-tests fail, then restoring it.
-
-**Not verified, and not claimable:**
-
-- **No estimate has ever been written.** `model.py` exists, converges after
-  the §19.9 fixes (max rhat 1.016, 0 divergences), and has been fitted only on
-  synthetic data. `summarise.py`, `store.py`, `report.py` and
-  `pipeline/stages/reconcile.py` do not exist, so nothing has ever written an
-  `est_troops_total`. The parameter-recovery test does not exist either, and
-  §19.9 records what it must assert on.
-- The parameter-recovery test does not exist, so the specification is
-  unvalidated in the only way that catches a mis-specified hierarchical model.
-- The gold set is **agent-built and unreviewed by a human**. Its `MANIFEST.md`
-  lists seven limitations; the sharpest are selection bias toward notorious
-  cases, `ancient_claim` n=5 and `staff_return` n=4, and East Asia contributing
-  no faithful case at all.
-- `data/processed/` is still empty and the database still holds no corpus, so
-  the loader has been exercised against seeded test rows, never against real
-  extracted data.
-
-### 19.7 Next steps for this stage, in order
-
-1. `summarise.py` -- InferenceData to `SideEstimate` / `SourceBias` plus the
-   diagnostics dict. `est_troops_total` is `exp(median(mu))`, **not**
-   `mean(exp(mu))`, which inflates by `exp(sd^2/2)`, about +32% at sd 0.74.
-2. **`tests/model/test_reconcile_recovery.py` before any write path exists.**
-   If the model is mis-specified that must surface before estimates reach
-   Postgres. The design is in the approved plan file, but assert on
-   `m0 + offset_bar` rather than `m0` -- see §19.9 for why.
-3. `store.py`, `report.py`, `pipeline/stages/reconcile.py`, and the
-   stage-level integration tests.
-4. Work through what §19.9 leaves outstanding, starting with
-   `n_identifying_sides` and the prior-to-posterior contraction map in
-   `model_runs.diagnostics`. That is the check that makes the rest visible from
-   a run log rather than from a review.
-5. **Run the `bayesian-model-reviewer` agent again before proposing a commit**
-   (§7, §8). Its first pass found two critical defects this session's author
-   had missed.
-
-A side with exactly one report should come out with a 95% interval spanning
-roughly 0.24x to 4.3x its point estimate. That is the correct answer and must
-be allowed to be that wide; `singleton_estimates_are_honestly_uncertain` fails
-if a later change quietly narrows it.
-
-### 19.8 The model sampled and did not converge, and the reason mattered
-
-*(Resolved in §19.9. Kept because the diagnosis is the reusable part.)*
-
-`pipeline/reconcilers/model.py` is written, builds, and runs. On the corpus
-shape that will actually occur it **does not converge**, and the cause is a
-specification defect rather than a tuning problem.
-
-Measured on synthetic data: 40 sides, 2 sources, 2 reports per side, log-normal
-noise sd 0.3, true `m0` 9.2, two chains, 300 tune, 300 draws, nutpie.
-
-| corpus | max rhat | ess(m0) | posterior m0 |
-|---|---|---|---|
-| every report `claim_regime="unlabelled"` | 1.378 | **5.3** | 8.680 |
-| every report `claim_regime="modern_scholarly"` | 1.067 | 80.1 | 9.207 |
-
-`g_regime` pins the anchor regime (`modern_scholarly`) to exactly zero and
-gives every other regime a free scalar. When no report carries the anchor, the
-`unlabelled` offset is added to *every* observation and is confounded with
-`m0`. Both priors are proper, so the posterior is proper and the run completes
--- it simply cannot be sampled, and `ess(m0) = 5.3` is what that looks like.
-
-**This is the normal case.** §19.2 measured 2.2% of real strength strings
-carrying a readable regime marker, so in production essentially every report is
-`unlabelled` and the anchor is absent from the data entirely. The second row of
-that table is the reassuring one, and it is the row that will almost never
-occur.
-
-Three things worth carrying forward:
-
-1. The anchor **does** work when it is present, so the mechanism is right and
-   the problem is specifically what happens when the anchoring level has no
-   observations. That is the same shape as the era-covariate trap the design
-   already guards against by centring, arriving on a different term.
-2. A fix must not quietly abandon the interpretive goal. Pinning `unlabelled`
-   to zero instead restores identifiability in one line and silently redefines
-   an estimate from "what a modern scholarly reconstruction would say" to "the
-   average of whatever this corpus contains". That may be the right trade, but
-   it has to be a decision someone wrote down, not a side effect.
-3. **It was found by running the model, not by reading it.** `ruff`,
-   `mypy --strict` and the whole suite were green over this file. That is the
-   fifth time in this file's history (§4.2, §4.3, §13.1, §16.3, §19.3) and the
-   second time in this session.
-
-The `bayesian-model-reviewer` agent was dispatched on it, as §7 requires before
-any Phase 4 commit. Do not summarise a posterior with ess 5: it would produce
-confident nonsense, and `singleton_estimates_are_honestly_uncertain` would not
-catch it, because the failure makes an interval too *wide*, not too narrow.
-
-### 19.9 The fix, and two further defects the review found
-
-The `bayesian-model-reviewer` agent confirmed §19.8's diagnosis and reproduced
-the broken posterior mean by prior algebra alone -- predicted 8.7131 against a
-measured 8.680, with `corr(m0, g_unlabelled) = -0.993`. A posterior recoverable
-without any likelihood term is what perfect confounding looks like.
-
-It also found **two critical defects that were not in §19.8**, both of which
-sampled cleanly and would have shipped:
-
-**A second exact ridge, in the source-bias nesting.** `z_source` was zero-sum
-over *keys*, which leaves the type-level mean of the deviations free -- and
-that mean is the same parameter as `b_type`. With one key in a type the two are
-exactly confounded, measured at `corr = -0.985`. The reviewer's table showed
-each fix alone still fails rhat; both are needed. `u_source` is now zero-sum
-**within each source type**, and a type holding a single key gets no free
-deviation at all, which is the correct answer.
-
-**`a_era`'s prior mean had the wrong sign.** It was
-`rhetorical_mu - faithful_mu = +1.581`, the gap between the two *mixture
-components*, used as though it were the ancient-versus-later difference. Those
-are different quantities. Measured from the gold set's own years:
-
-```
-mean log_ratio, year < 500  : 0.855  (n=16)
-mean log_ratio, year >= 500 : 1.301  (n=29)
-era contrast                : -0.446  (se 0.294, widened to 0.587)
-```
-
-The prior asserted +1.581 where the evidence says about -0.45, putting the
-measured value at roughly -4 sigma, and it sampled at **ess 984, rhat 1.00**,
-because with no era contrast it simply drew its prior. Clean diagnostics,
-plausible output, wrong number -- the exact failure mode this file keeps
-recording. `scripts/fit_inflation_prior.py` now fits the contrast and writes
-`era.mu` / `era.sd` to `config/inflation_priors.yaml`, and the term is gated to
-unlabelled rows so an ancient chronicle row is not deflated twice.
-
-### What changed, and the measured result
-
-Four fixes: the **rotation** (sample the corpus-average `level`, derive `m0`),
-zero-sum **within type**, the measured and gated **era prior**, and
-`casualty_type_offset_prior_sd` **wired through** -- it was declared in the spec
-and never read, so casualty component offsets were shrunk at 0.4 instead of
-0.7, inferring totals about 34% too high from a killed-only report. The troops
-scope offsets are now genuinely **cumulative**, which is what the docstring had
-claimed while the code drew independent half-normals that could place
-`theatre_strength` below `available`. `nu`'s prior was `Gamma(2, 0.1)`, mean
-**22**, where StudentT is visually Normal -- the robustness the comment claimed
-was asserted and not delivered; it is now `Gamma(2, 0.5)`, mean 6.
-
-On the corpus shape that actually occurs, at the spec's own sampler budget
-(1000 draws, 4 chains):
-
-| | before | after |
-|---|---|---|
-| max rhat | 1.378 | **1.016** |
-| ess(m0) | 5.3 | 468 |
-| min ess, any parameter | 15 | 343 |
-| divergences | 0 | 0 |
-| identified level `m0 + offset_bar` | 8.680 | **9.214** (true 9.2) |
-
-### The thing to carry forward, which is not a bug
-
-**The rotation makes the sampler honest; it does not make `m0` identified.** In
-an all-unlabelled corpus nothing informs the split of the corpus level into
-`m0` and the unlabelled offset, so the inflation adjustment is *entirely
-prior*. The reviewer measured `g_unlabelled` coming back at its prior to two
-decimals with textbook diagnostics. Three consequences:
-
-1. **A recovery test must assert on `m0 + offset_bar`**, which the data
-   identify, not on `m0`, which they do not. Both are in the trace.
-2. `_UNLABELLED_WEIGHT = 0.5` in `model.py` is the most consequential constant
-   in the stage and it is a judgement call, not a measurement: the gold set
-   labels every case by construction, so it contains no unlabelled rows to fit
-   against. It implies about 2.5x inflation applied to every unmarked figure in
-   the corpus, Gettysburg included. Run the estimates both ways before
-   publishing anything absolute.
-3. **The damage is to published figures, not to the ranking.** A regime or era
-   offset is a battle-level shift shared by both sides, so it cancels in the
-   force-ratio covariate the model stage consumes. Absolute troop counts are
-   wrong by the asserted factor; the WAR ranking is largely insulated. Worth
-   knowing for triage, and worth writing down so nobody later assumes the
-   reverse.
-
-Also predicted, and not yet observed because no estimates have been written:
-once intervals carry the ridge's irreducible common factor, `LN(hi/lo)` will
-exceed 2.7 and **`ci_width_reasonable` (threshold < 2.2) will fail
-structurally**. It is a warning, not an error. Raise the threshold with a
-comment; do not narrow the intervals to meet it.
-
-### Still outstanding from the review
-
-Not done, in the reviewer's order of priority: `n_identifying_sides` per regime
-and prior-to-posterior contraction in `model_runs.diagnostics` (the check that
-would have made all of the above visible from a run log); a prior predictive
-check, of which the repository has none anywhere; `tau_lineage` at 0.3 against
-`sigma_source` near 0.8, so three mirrored Wikipedia/Wikidata/DBpedia copies
-still buy roughly twice the precision of one report rather than counting once;
-per-side variation in the casualty component ratio, currently asserted to be a
-corpus constant, the same at Cannae as at the Somme; and `InverseGamma(2, 1)`
-on the observation variance, which has infinite variance on a parameter that
-sets every interval width.
-
-
-## 20. Sessions of 2026-09-29 to 2026-10-02: reconcile closed out, classify begun
-
-Run as Opus-led with Sonnet subagents (`CLAUDE.md`). Plan:
-`~/.claude/plans/wrap-up-reconcile-as-sleepy-sphinx.md`, which follows the
-reconcile design in `start-work-on-the-enchanted-lemon.md` rather than
-re-planning it. Two scope decisions were the user's: reconcile got the **core
-close-out only** (the four model refinements in §19.9's last paragraph stay
-open), and classify is **deterministic first**, with its LLM step wired
-through the offline cache path and no billed call.
-
-### 20.1 What was built
-
-| File | What it is |
-|---|---|
-| `pipeline/reconcilers/summarise.py` | InferenceData to `SideEstimate` / `SourceBias` + diagnostics: `worst`, `identified_level` (`m0 + offset_bar`), `n_identifying_sides` per regime, prior-to-posterior `contraction` |
-| `pipeline/reconcilers/store.py`, `report.py` | Every reconcile write; `data/processed/reconciliation_report.json` |
-| `pipeline/stages/reconcile.py` | The stage runner. **One `model_runs` row per invocation, covering both quantities** (§20.2 item 4) |
-| `tests/model/` | The parameter-recovery suite, 14 tests, `-m model` |
-| `pipeline/classifiers/` | `records`, `load`, `roles`, `requests`, `battle_type`, `missingness`, `store` |
-| `pipeline/stages/classify.py` | The stage runner; `params.llm_mode: offline` (default, cache only) or `api` |
-| `scripts/llm_offline.py` | `_classify_requests` now calls the stage's own builder, so request hashes match (pinned by a test) |
-
-### 20.2 Seven defects, all found by running something, none by reading it
-
-1. **The model's `level` variable shared its name with the `level`
-   dimension.** ArviZ then returns the dimension's labels (`engaged`,
-   `available`, ...) for `idata.posterior["level"]`, so `summarise_fit` crashed
-   on every real fit: no estimate could ever have been written. Found by the
-   recovery test; invisible to the summarise unit tests, which built their
-   InferenceData by hand. Renamed `corpus_level`.
-   `tests/unit/test_reconcile_model.py` builds the model and fails if any
-   variable is named like a dimension; confirmed non-vacuous by reverting.
-2. **The inflation prior's `fitted_on: 2026-09-24` is a `date` after
-   `yaml.safe_load`**, and summarise copied it into a payload that promises
-   plain JSON. The store hid it with `default=str`; the report writer then
-   crashed. Fixed at the source. The round-trip test now uses a real date;
-   with an empty provenance it could never have caught this.
-3. **That crash hung the integration suite for 40 minutes, twice.** The
-   module-scoped `reconciled` fixture had no `try/finally`, so the stage's
-   exception leaked a connection holding row locks on `battle_sides`, and
-   every later test that ran the stage waited on them forever. Diagnosed from
-   `pg_stat_activity` and `pg_locks`, not from test output, which a hang never
-   prints. The fixture now rolls back on failure.
-4. **Two `model_runs` rows per stage run would have blinded two gates.**
-   `model_convergence` reads only the newest run, so the troops fit's
-   convergence would never have been gated; `estimates_are_not_stale`
-   compares troop estimates to `MAX(run_id)`, which would have been the
-   casualties run, so every troop estimate would have read stale. Found in
-   review before the code ran. One run now covers both quantities, with
-   diagnostics `{worst, troops, casualties}`; this also closed a
-   `sources.bias_run_id` provenance gap.
-5. **A classify re-run overwrote the LLM's judgement with a constant.** A side
-   the LLM classified looks internally consistent on the next run, so the
-   deterministic rule recomputed it from the fixed weight table (Agrippa 0.85
-   became 0.867) and relabelled it `rule_roles`. The subagent recorded this as
-   intended and loosened its idempotency test to match. It was not intended:
-   every re-run would have replaced the Octavian/Agrippa reading of an article
-   with a table. A side whose rows are all `attribution_method = 'llm'` is now
-   left untouched; the test asserts run 1 equals run 2 and fails without the rule.
-6. **`ci_width_reasonable` could never pass.** §19.9 predicted it; the first
-   write measured 4.13 against `< 2.2`. In a near-all-unlabelled corpus the
-   unlabelled offset is prior-driven and shared by every side, and its prior
-   sd (about 0.94 from `moments_for`) alone floors `LN(hi/lo)` at about 3.7
-   (3.3 to 3.7 across regimes). Threshold raised to `< 4.5` with the
-   arithmetic in `agents/reconcile.yaml`. Intervals were not narrowed.
-
-7. **The model could not compile a real corpus.** Every per-observation
-   array (indices, `log_y`, roundness, the censoring row sets) entered the
-   graph as a numpy constant, and PyTensor's numba backend compiles constants
-   into the generated code as literals. nutpie's compile then grew faster
-   than linearly in the corpus. Measured on synthetic corpora, compile only,
-   no sampling:
-
-   | observations | before | after |
-   |---|---|---|
-   | 160 | 55s | 34s |
-   | 320 | 307s | 29s |
-   | 670 | not finished after 5 min, 11.5 GB, machine at 0.2 GB free | 31s |
-
-   A real corpus of ~3,000 battles could never have been fitted. It also
-   explains the recovery run that went 70 minutes without reporting. The
-   arrays now enter as `pm.Data` (`_data` in `model.py`, names prefixed
-   `data_` so they cannot collide with a dimension). The model is unchanged;
-   all 43 reconcile unit and integration tests pass on it, including the
-   same-seed re-run test. **Censoring was not the cause**: 320 observations
-   compiled in 334s without it. The 11 GB figure came from the 302-side
-   recovery corpus on the same code.
-
-Plus one judgement reversed: the classify brief's missingness heuristics
-marked missing `battle_type`, `terrain` and `fortified` as **MCAR**. They are
-now **MAR**. A missing covariate plausibly tracks documentation level, and
-after classify a still-`unknown` battle_type means no article was read, an
-observed fact. MCAR is the special case of MAR, so the weaker assumption is
-the safe one for impute.
-
-### 20.3 Classify, first slice: what it does
-
-- **Roles.** One commander: `field_commander`, weight 1.0. Several with
-  consistent existing roles: kept, weights from a role table normalised per
-  side (`_ROLE_BASE_SCORE` in `pipeline/classifiers/roles.py`). Otherwise the
-  spec's fallback, 0.6/0.4 by listing order or equal for 3+, role `unknown`,
-  flagged for the LLM. **Listing order is `bc_id` order**, a proxy: neither
-  extract's infobox order nor `apparent_role` is persisted anywhere classify
-  can read.
-- **LLM.** `offline` mode looks each pending side's request up in
-  `llm_calls` by hash (`pipeline.llm.call_log.find_completed_call`) and
-  applies a cached answer; a miss stays `default_split`. No billed call has
-  been made; the Actium test seeds a cached answer.
-- **battle_type.** Naval from categories, naval-branch troop reports or ship
-  vocabulary; siege from the name or a category; `field` **only when an
-  article was actually read** and carried no other signal, because defaulting
-  everything else to field would be §4.2 in reverse. No article: stays
-  `unknown`. Inferring a type marks the battle's `missing_data_log` row
-  `observed` with a `classify:` note rather than deleting it.
-- **Missingness.** Heuristics only, on `unclassified` rows of fields impute
-  consumes; never touches resolve's `mnar` on `commander_general_id`.
-  Ambiguous rows stay `unclassified`.
-
-### 20.4 Verification, stated honestly
-
-**Against live PostgreSQL 15.19:** `ruff` clean across `pipeline/ tests/
-scripts/`; `mypy --strict` clean on 69 files; **648 passed, 0 skipped**
-(`-m "not live and not model"`; 29 deselected, being the 15 live and 14 model
-tests). The 12 reconcile stage tests write real estimates and run all 8
-gates; the 11 classify integration tests run the stage, the cache path and
-all 3 gates.
-
-Gate values on the 5-battle seeded reconcile corpus, which is plumbing and not
-evidence about thresholds: `model_convergence` fails at ess 68 (the tests
-sample 200 draws on 2 chains, deliberately); `calibration_set_is_not_empty`
-reads 2 against 20, correct for 5 battles; all error-severity gates pass.
-
-**The recovery suite, first full run** (`pytest tests/model -m model`,
-2026-10-02, after the §20.2 item 7 fix): runs in 5m19s, **9 passed, 5
-failed**. §20.9 fixed two of the model causes; the table is kept because the
-diagnosis is the reusable part. Before the fix it
-never finished. The failures, read rather than loosened:
-
-| test | measured | required | diagnosis |
-|---|---|---|---|
-| convergence of the main fit | rhat 1.033, ess 172 | rhat < 1.01 | **model**: `tau_lineage` ess 172, posterior 0.075 +/- 0.055, collapsed toward zero, and `tau_sigma` rhat 1.03. Almost every lineage has one report, so the lineage scale is unidentified and its 668 non-centred offsets form a funnel. **Fails the production gate too** (ess >= 400). These are §19.9's open `tau_lineage` and variance-prior items, now measured. |
-| bound-as-point vs censored | naive RMSE 0.358, censored 1.958 | naive >= 1.4x censored | **model**: the likelihood direction is right, but a side whose reports are all upper bounds has no information on how far below the figure the truth lies, so at the ablation's 80% bounds the corpus level slides. Treating "up to X" as pure censoring is too weak; a soft bound (point near X with a downward offset and extra variance) is the likely fix. A design decision, not taken. |
-| 5 shared-lineage vs 5 independent | width ratio 1.007 | > 1.3 | **test**: `add_lineage_test_sides` draws independent noise for the "shared" side and only labels it one lineage, so the truth never repeats a claim. Must draw one shared error per lineage. |
-| RMSE of log estimates | 0.367 | < 0.35 | marginal; re-judge after the convergence fix |
-| singleton vs 4-report width | 2.0x | >= 2.5x | marginal; re-judge after the convergence fix |
-
-Passed: source-type biases and rank order, inflation learned from data,
-scope offsets, two-sided coverage, singleton coverage, `ess(m0)` with the
-anchor present, all-unlabelled identified level, all-ancient era centring,
-split-source bias.
-
-**Not verified:** no real corpus has been through reconcile or classify; the
-database holds test fixtures only (§7 step 0 is still the gate). No billed LLM
-call has been made for classify. The gold sets are agent-built and unreviewed
-(§19.6).
-
-### 20.5 Decisions recorded for later stages
-
-- **Siege convention.** The `battle_type` enum has no neutral siege value, so
-  classify writes `siege_offensive`, meaning "a siege, besieger's viewpoint",
-  plus `fortified = TRUE`. **Flag for the model stage:** `agents/model.yaml`'s
-  linear predictor uses `beta_type[battle_type]` and `I(A is defender)`, both
-  side-relative, and nothing in the schema yet records which side defended.
-  That needs a per-side flag before the model stage can use either term.
-- **`ci_width_reasonable` measures the prior, not the sources.** The better
-  gate is interval width net of the shared regime factor; not built.
-
-### 20.6 Still open
-
-- Of the four §19.9 refinements, the lineage one is done (§20.10); the
-  prior predictive check, the per-side casualty ratio and `InverseGamma(2, 1)`
-  remain open, by decision.
-- **The reviewer's remaining findings (§20.10)**, none applied, all for the
-  user to prioritise. HIGH 2 must be settled before the model stage.
-- Classify: LLM missingness classification; the offline batch for pending
-  sides; the defender flag (§20.5).
-
-### 20.7 Review gates
-
-The `bayesian-model-reviewer` pass **ran on 2026-10-02** (§20.10). The
-`historiography-reviewer` pass on classify hit the account's usage limit and
-**has not happened**; run it before relying on classify's role weights.
-
-### 20.8 A gotcha this session paid for
-
-**Never run two integration suites against `DATABASE_URL` at once.** Every
-module fixture drops and rebuilds the `public` schema, so parallel agents
-block each other on locks, and a hang prints nothing. CI runs files serially,
-so only parallel local agents hit this. If a run goes quiet, read
-`pg_stat_activity` with `pg_blocking_pids()` before assuming the sampler is
-slow. Wrap long local pytest runs in `timeout` so a hang fails fast.
-
-### 20.9 The recovery suite forced two more model fixes (2026-10-02)
-
-After the user chose to fix the lineage term rather than defer it:
-
-1. **Lineage effects only for repeated claims.** *Superseded by §20.10: the
-   reviewer showed this made singletons overconfident.* `_lineage_effect` in
-   `model.py` gives a random effect only to lineages with two or more
-   reports, in a new `lineage_shared` dimension; singletons contribute zero.
-   A one-report lineage's offset cannot be told apart from that report's
-   noise. Before: `tau_lineage` ess 172, posterior 0.075. After: 0.23, and
-   no longer among the weakest variables.
-2. **`z_sigma` zero-sum within source type.** The per-source noise
-   deviations were a plain Normal, so their mean within a type was the same
-   parameter as that type's `sigma_sq_type`: the §19.9 `u_source` ridge, on
-   the noise scale instead of the bias. Before: `tau_sigma` ess 201, rhat
-   1.02, `sigma_sq_type` sd 0.16. After: sd 0.03, `tau_sigma` gone from the
-   weakest list.
-
-Two test corrections, each argued rather than loosened:
-
-- The shared-lineage test side drew independent noise per report and only
-  *labelled* them one lineage, so the truth never repeated a claim. It now
-  copies one figure five times. The test passes.
-- The singleton/four-report width ratio required >= 2.5. Four independent
-  reports narrow an interval by sqrt(4) = 2 at most, and shared terms pull it
-  lower; measured 2.0. Now >= 1.8.
-
-At this point the suite stood at 10 passed, 1 xfail, 2 failing; §20.10 is
-where it ended.
-
-Verified after both fixes: ruff clean, `mypy --strict` clean on 69 files,
-**648 passed, 0 skipped** against live Postgres.
-
-### 20.10 The bayesian-model-reviewer pass, and the lineage collapse
-
-The review confirmed the `z_sigma` fix, measured convergence as acceptable at
-the spec's 2000 draws (max rhat 1.006, ess 584), and found the RMSE threshold
-wrong rather than the model (RMSE 0.366 against a stated posterior sd of
-0.377; coverage 0.56 / 0.84 / 0.98 at 50 / 80 / 95%, slightly conservative).
-
-**It also showed §20.9's lineage change was unsound (HIGH 1).** Zeroing
-singleton lineage effects dropped their variance from sigma^2 + tau^2 to
-sigma^2 while `sigma_source` stays shared. In production a lineage is a
-Wikidata or DBpedia copy within 1% of a Wikipedia figure, so near-zero scatter
-drags `sigma_source` down and non-copied reports inherit it: singleton 95%
-coverage fell to 0.65-0.72 on a stress corpus, against 0.90-0.92 before. The
-`tau_lineage` collapse that motivated the change was an artefact of a recovery
-corpus with one shared lineage.
-
-**Fix applied, the reviewer's preferred one:** `collapse_lineages` in
-`claims.py`, called at the top of `build_design`, keeps one row per lineage
-(the originating, non-derived report). Copies add no information, so the model
-no longer has a lineage term, `tau_lineage` or `lineage_prior_sd` at all.
-Copies still count in `n_reports` and `n_sources`. A source whose only
-reports were copies gets no fitted bias and keeps its prior, which is correct.
-The design and summarise test helpers defaulted every report to lineage 0,
-which collapsed whole test corpora to one row; they now default each report to
-its own lineage, as `assign_lineages` does in production.
-
-Also applied: the RMSE test now asserts calibration (RMSE within 0.85-1.15 of
-the stated posterior sd, four-report sides below 0.25) instead of a fixed
-0.35, and the main fit samples the spec's 2000 draws.
-
-**Result: recovery suite 13 passed, 1 xfail (censoring), 0 failed, 5m10s.**
-Main fit max rhat 1.007, ess 466, 0 divergences. Full suite 648 passed,
-0 skipped; ruff and `mypy --strict` clean.
-
-**Findings not applied, for the user to prioritise:**
-
-- **HIGH 2: asymmetric labelling biases force ratios.** The unlabelled
-  offset cancels in a force ratio only when both sides share a regime mix. At
-  Gaugamela the Persian field carries modern and ancient labels and lands near
-  the modern figure, while the Macedonian 47,000 is unlabelled and is deflated
-  about 2.5x, tilting the ratio toward "Alexander outnumbered" and inflating
-  his WAR. Labelled fields cluster on famous ancient battles, so this lands on
-  the top of the ranking. **§19.9 point 3's "the ranking is largely
-  insulated" is wrong in this case.** Settle before the model stage: count
-  battles whose sides differ in dominant regime; apply the unlabelled
-  adjustment only where both sides are unlabelled, or compute force ratios on
-  a regime-neutral scale; at minimum run a `_UNLABELLED_WEIGHT = 0`
-  sensitivity variant.
-- **MEDIUM 1: both width gates now measure the prior.** The shared unlabelled
-  offset floors `LN(hi/lo)` near 3.7, so the error-severity
-  `singleton_estimates_are_honestly_uncertain` (below 0.8) can never fire on a
-  mostly-unlabelled corpus. Fix: compute widths of `mu_side + offset_bar` (the
-  identified scale) in summarise and gate those at 0.8 and 2.2; keep 4.5 on
-  the published intervals. Also, the YAML comment's "measured 4.13 on the
-  first real write" was the 5-battle seeded fixture, not real data.
-- **MEDIUM 2: `n_identifying_sides` counts the wrong thing.** Two reports in
-  one regime identify sigma, not `g_regime`. Count co-occurrence with the
-  anchor's connected component instead. `contraction` still catches the
-  failure meanwhile.
-- **MEDIUM 4: censoring is defensible on the real mix, with guards.** In
-  `arsht_infobox.jsonl` 18% of quantities carry bounds but only 0.6% of sides
-  are one-sided-only; ranges become interval censoring, which is right. Label
-  one-sided-only sides `bound_only` in `_side_estimates` (a single range is
-  currently labelled `source_disagreement`, because its two endpoints are two
-  lineages) and rebuild the xfail ablation on the production mix. Principled
-  replacement later: `pm.ExGaussian` on bound rows.
-- **MEDIUM 5: the absolute level is set by `b_type`'s zero-sum.** `mu_side` is
-  what the average source *type* would report for an anchor claim, not "what a
-  modern scholar would say" as `model.py`'s device 4 claims, so adding a
-  source type shifts every absolute figure. It cancels in ratios. Document it,
-  or pin an observed reference type.
-- **LOW:** `z_side` as `ZeroSumNormal` removes the `corpus_level` ridge
-  (corr -0.948 to -0.007); `model_convergence` should use `max_rhat: 1.01`;
-  centre `data_era` within the unlabelled rows; write estimates only after the
-  convergence gate passes, so an unconverged run cannot overwrite good ones.
-
-### 20.11 Wrap-up decisions, 2026-10-02
-
-Taken by the user at the end of the session:
-
-- **HIGH 2 (asymmetric labelling): force ratios move to a regime-neutral
-  scale.** Not built; it needs schema work, so it is the first task next
-  session. Spec: reconcile writes, beside each published `est_troops_total`,
-  a second per-side estimate that carries no claim-regime adjustment, so the
-  two sides of a battle are on a common footing whatever their labels. New
-  `battle_sides` columns in **both** `config/schema.sql` and an Alembic
-  migration (§5.1). The model stage builds `log(force_ratio)` from those
-  columns; published troop counts stay adjusted. Before building, decide
-  exactly what "no claim-regime adjustment" means for a side whose reports
-  are themselves ancient claims (Persian 1,000,000): the neutral scale must
-  not reintroduce the inflation the regime term exists to remove. Run the
-  `bayesian-model-reviewer` on that definition before coding it.
-- **Done: `bound_only` method label.** A side whose every report bounds it
-  from one direction gets `est_*_method = 'bound_only'`; a range (an upper
-  and a lower bound) does not. Pinned in `tests/unit/test_reconcile_summarise.py`.
-- **Done: write only after convergence.** `_fit_quantity` writes estimates and
-  biases only when the fit's worst diagnostics meet `write_max_rhat` (1.05),
-  `write_min_ess_bulk` (400) and `write_max_divergences` (0), matching the
-  `model_convergence` gate. An unconverged run is still recorded with its
-  diagnostics, so the gate fails, but the previous estimates stand. Pinned by
-  `test_an_unconverged_fit_writes_no_estimates`. The integration tests relax
-  the thresholds in `_load_spec` because they sample 200 draws on purpose.
-- **Deferred to next session:** the `historiography-reviewer` pass on
-  classify, and the remaining §20.10 items (identified-scale width gates,
-  `n_identifying_sides`, the `z_side` ridge, `max_rhat: 1.01`, era centring
-  within unlabelled rows, the `b_type` reference-type documentation).
-
-Final state: ruff clean, `mypy --strict` clean on 69 files, **650 passed,
-0 skipped** against live Postgres; recovery suite 13 passed, 1 xfail.
-Nothing committed.
-
----
-
-## 21. Session of 2026-10-06/07: outstanding items closed, impute built
-
-Run under the team structure now written into `CLAUDE.md`: Opus (lead and
-Opus reviewers) designed, briefed and judged; Sonnet workers implemented;
-Haiku ran every verification command against the database. Opus wrote no
-production code.
-
-### 21.1 The regime-neutral troops fit (§20.10 HIGH 2, §20.11)
-
-**Definition, decided after a `bayesian-model-reviewer` design pass:** the
-neutral estimate is `mu_side` from a **second, exact troops fit** on the same
-design in which the unlabelled regime's offset takes the faithful-component
-prior `N(faithful_mu, faithful_sd)` (that is, `_UNLABELLED_WEIGHT = 0`) and
-the unlabelled era term `a_era` takes `N(0, 0.25)`. Labelled regimes keep
-their fitted priors, so an attributed ancient 1,000,000 is still deflated.
-`build_model(..., neutral=True)`; troops only.
-
-Rejected along the way, and why:
-- A per-draw linear-Gaussian shift of the published fit. The reviewer showed
-  it leaves out the shift in the shrinkage target (`m0 = corpus_level -
-  offset_bar` moves when `g_unl` does), which under-shifts singletons by
-  0.09-0.13 log, a bias that tracks report count and therefore fame. It also
-  could not represent Student-t downweighting, censored-row information, or
-  the re-identification of the labelled regimes and source biases.
-- Pinning `g_unl` at exactly 0. Throws away data that identify an
-  unlabelled-vs-anchor gap.
-- A common constant on every side. Cancels in the ratio and changes nothing.
-
-Also built:
-- `merge_cross_regime_duplicates` (`claims.py`), run before
-  `collapse_lineages` in both fits: an unlabelled row agreeing within 1% with
-  a labelled row on the same side, quantity and branch/casualty type is
-  dropped, so an unattributed infobox copy of Herodotus's figure is not read
-  as faithful.
-- `battle_sides`: `est_troops_neutral`, `_lo`, `_hi`, `_log_mean`, `_log_sd`,
-  `est_troops_neutral_run_id` (own provenance, independent of
-  `est_troops_run_id`, since one fit can pass the write thresholds while the
-  other does not) and `is_defender BOOLEAN` (all NULL until classify fills
-  it). Migration `d4e5f6a7b8c9`; Alembic round trip verified.
-- `data/processed/reconcile/neutral_draws_run{run_id}.npz` (`run_id`,
-  `side_id`, `battle_id`, `draws` [<=1000, n_sides] log scale, `m0_mean`,
-  `s0_mean`), the interface impute reads. Written only when the neutral fit
-  passes the write thresholds. **No fallback to published ratios.**
-- Gates `neutral_fit_converged` (error) and `neutral_estimates_are_not_stale`
-  (warning). The `troops_neutral` diagnostics block is kept out of the
-  combined `worst`, so `model_convergence` still means the published fits.
-
-**Measured, on a fixture where every source type appears on both sides of 8
-battles** (the first fixture had each type on one side only, so `b_type` and
-`s0` absorbed the between-side difference and shrank a raw ratio of 0.80 to
-0.31; the reviewer caught it):
-
-| case | published log ratio | neutral |
-|---|---|---|
-| Gaugamela, Persian labelled, Macedonian unlabelled | 1.115 | 0.843 |
-| same, Macedonian relabelled `modern_scholarly` | 0.737 (+ faithful_mu 0.128 = 0.865) | — |
-| both sides unlabelled | 0.725 | 0.714 |
-
-Neutral matches "relabel as modern scholarly" within 0.022, and the published
-tilt of 0.27 in the mixed case is what HIGH 2 predicted. On the 302-side
-recovery corpus the neutral fit takes ~73s, rhat 1.009, ess 462: only 15%
-headroom over the 400 write threshold.
-
-### 21.2 Classify: the historiography review, and what it fixed
-
-The `historiography-reviewer` pass that §20.7 deferred ran on the rules and
-`arsht_infobox.jsonl`. Its central finding: infobox commanders all arrive as
-role `unknown` (`infobox.py` sets `apparent_role="unclear"`), so the
-deterministic **fallback is the main path**, not the edge case, and
-0.6/0.4-by-listing-order favoured heads of state and nominal commanders, the
-first-listed in infoboxes. Estimated (not measured) 60-70% of multi-commander
-sides got materially wrong weights. Listing order cannot even be measured:
-the reference file is alphabetical and `bc_id` is resolve's insert order.
-
-Fixed: an LLM answer that fails to match every commander on the side
-(full name, then unique surname) is rejected whole, where before the
-unmatched commander took weight 1.0 (about half the side); the default split
-is 1/n; two or more field commanders are co-commanders (Cannae); non-field
-roles get fixed weights (sovereign/nominal 0.05, supreme/theatre 0.10,
-subordinate 0.08, capped at 0.30 in total) so Agrippa keeps 0.79 at Actium
-with subordinates listed; `validate_side` checks weights, rank 0 and
-`reports_to` cycles after every path; bare "squadron" no longer makes a
-battle naval, and a lone naval troop branch does not either; the prompt
-matches the code and has a `not_a_person` escape.
-
-Deferred, in TODO.md: infobox order and unresolved-commander counts,
-non-person commanders in resolve, few-shot cases (Munda, Mutina, Chaeronea,
-Salamis, Mongols, Moltke), per-side siege, casualty-specific missingness.
-**Decision for the model stage: it must not consume `default_split` sides
-without an LLM or manual role.**
-
-### 21.3 Team structure
-
-`CLAUDE.md` "How to work" now states it plainly: Opus is manager and
-architect, Sonnet and Haiku are workers; Opus does not write production code,
-tests, or run the suite; a Haiku agent runs verification and Opus reads the
-raw output; one agent at a time on `DATABASE_URL`.
-
-2026-10-09: routing updated for Haiku 5.5 ($0.10/$0.50 per MTok against
-Sonnet 5.5's $2/$10). Haiku is now the default worker for any task with
-mechanical acceptance criteria; Sonnet is the single escalation step and owns
-anything touching the statistical stages. Rules are in `CLAUDE.md` "How to
-work".
-
-Same day, the pipeline's LLM fallback moved from `claude-haiku-4-5-20251001`
-to `claude-haiku-5-5` in `agents/extract.yaml` and `agents/resolve.yaml`.
-Nothing reads `llm_fallback_*` in code yet; it tells a human what to put in
-`llm_model` when Gemini runs out. Two things had to change for that swap to
-work, both done:
-
-- `pipeline/llm/capabilities.py` has a `claude-haiku-5-5` entry ($0.10/$0.50,
-  no sampling params). The old dated ID never matched the `claude-haiku-4-5`
-  key, so cost would have been recorded as NULL.
-- Haiku 5.5 thinks unless told not to. New trait `thinking_on_by_default`;
-  `AnthropicClient._build_params` sends `thinking: disabled` for such models
-  when thinking was not requested and effort is unset/low/medium/high (at
-  xhigh/max that is a 400, so it sends nothing). Tests in
-  `tests/unit/test_anthropic_params.py`.
-
-Verified: unit suite 681 passed, ruff clean (Haiku worker, raw output read).
-Not verified: no live call to `claude-haiku-5-5` has been made. Temperature 0
-is unavailable on it, so run `/extraction-eval` on it before relying on it
-(TODO.md).
-
-### 21.4 The impute stage
-
-Design reviewed before coding and the code reviewed after (verdict: ready to
-commit, no CRITICAL/HIGH). `agents/impute.yaml` and `config/imputation_priors.yaml`
-carry the full rationale. In short:
-
-- **One joint PyMC model, not MICE/PMM.** With one substantively missing
-  variable, chained equations reduce to one conditional model. `y_s = a_era +
-  beta_out + beta_type + beta_def + polity RE + commander RE + u_b + eps_s`,
-  categoricals as `ZeroSumNormal` so none is collinear with `a_era`. `u_b` and
-  `eps_s` are marginalised analytically: per battle an MvNormal with
-  covariance `tau_b^2 J + sigma^2 I + P_lik^-1`, batched by observed-side
-  count, every array as `pm.Data`.
-- **Observed sides enter as a likelihood**: reconcile's per-battle posterior
-  (from the npz) with reconcile's own side prior `N(m0, s0^2)` divided out, so
-  nothing is shrunk twice. A side too weak after division (precision <= 0.5)
-  is treated as missing.
-- **Overimputation.** Each of 20 rounds takes one posterior draw and draws
-  *every* side's latent from the conditional Gaussian, observed ones included.
-  Drawing observed sides independently of the outcome would attenuate
-  `beta_force` downstream (errors-in-variables survives Rubin's rules). An
-  oracle test with true parameters gives a slope ratio of 1.00 +/- 0.05 over
-  10 seeds; the fitted recovery run gives 0.844 against a naive 0.605, and
-  the reviewer traced the gap to the weakly identified sigma/tau_b split, not
-  to a defect.
-- **Outcome is conditioned on** (the compatibility condition for proper MI);
-  commander identity enters only as a size effect, never skill.
-- **Scales.** `params.scale: neutral` is primary and the only scale that
-  writes `missing_data_log`; `published` is a sensitivity run that writes
-  files only. Outputs `data/imputed/{scale}/round_{n}/sides.csv` + manifest,
-  and a per-scale `gate_report.json`.
-- **MNAR**: primary run is MAR; `mnar_delta` (default 0) shifts imputed MNAR
-  sides, for evaluate's grid {-0.5, -0.25, +0.25, +0.5}.
-- **Stale input is refused**: the stage raises if the newest draws file's
-  run is not the latest reconcile run whose neutral fit was written.
-- Gates: completeness, `imputed_ratio_plausible` (only battles with an
-  imputed side, median across rounds; Rorke's Drift is a real 3.4, and a
-  per-round gate on observed sides fails real battles), the absolute range on
-  the published scale only, KS per era as a warning, convergence.
-
-### 21.5 Things a future session would otherwise rediscover
-
-- **Concurrent suites against one database produce `UndefinedTable` errors,
-  not hangs.** One verification run here reported 14 reconcile ERRORs and a
-  crawl failure, which vanished on a clean exclusive rerun. A Haiku agent had
-  been cut off by a rate limit mid-suite and restarted; the most likely cause
-  is two runs (or a run plus schema edits) overlapping. Check `tasklist` and
-  `pg_stat_activity` before believing an isolation bug.
-- **Integration tests cannot exercise a converged `neutral_fit_converged`.**
-  The gate SQL hard-codes ess 400 and the integration tests sample 200 draws
-  on purpose, so the passing branch is unreachable there; the integration
-  test now asserts only that it executes. The failing branch is covered.
-  Parameterising the gate thresholds from the spec would close this.
-- A worker ran `ruff format pipeline/` across the tree and reverted the
-  untouched files by hand. Tell workers to format only files they own.
-
-### 21.6 Verification, stated honestly
-
-All run by worker agents against live PostgreSQL 15.19, raw output read by
-Opus, on 2026-10-07:
-
-- `ruff check pipeline/ tests/ scripts/ alembic/`: clean.
-- `mypy --strict pipeline/`: clean, **83 source files**.
-- Alembic `upgrade head` / `downgrade -1` / `upgrade head`: clean through
-  `d4e5f6a7b8c9`.
-- `pytest tests/ -m "not live and not model"`: **774 passed, 0 skipped,
-  0 failed**, exit 0. (Wall time 9h33m because the laptop slept overnight;
-  a clean run takes about 7 minutes.)
-- `pytest tests/model -m model`: **24 passed, 1 xfail** (the censoring
-  ablation, as before), exit 0, 15m46s.
-- Two `bayesian-model-reviewer` passes (design, then code) and one
-  `historiography-reviewer` pass, all findings triaged above.
-
-**Not verified:** no real corpus has been through reconcile, classify or
-impute; every number above is from fixtures or synthetic corpora. No billed
-LLM call. The `historiography-reviewer` error rates for classify are
-judgement estimates, not measurements.
-
-### 21.7 Still open
-
-- **Shared reconcile error is not propagated into impute (reviewer M1).**
-  Only within-battle covariance is kept and battles are drawn independently,
-  so the uncertainty in `g_unlabelled` and `a_era` that moves every
-  mixed-regime battle together averages out instead of appearing as
-  between-round variance. `beta_force` uncertainty is understated for exactly
-  the Gaugamela class. Proper fix: export regime draws in the npz and apply
-  one joint draw per round. Meanwhile evaluate must run a +/-1 sd
-  `g_unlabelled` sensitivity.
-- `est_troops_method` still counts lineages over all reports, so an
-  unlabelled copy that the cross-regime merge drops still counts as a second
-  lineage.
-- The neutral fit's ESS headroom is thin (462 vs 400 on the recovery corpus).
-- `missing_data_log.imputed_lo/hi` are the 2.5/97.5 percentiles of 20 rounds,
-  close to the min and max; the note on each row says so.
-- Imputing troops as latents inside the Bradley-Terry model is the fully
-  congenial alternative to MI. It departs from the spec; **the user's call.**
-
-## 22. Session of 2026-10-07: the stage inspector
-
-A read-only Streamlit dashboard for looking at the data each stage produced.
-Uncommitted.
-
-- **Run:** `pip install -e ".[inspect]"` (or `.[dev]`, which includes it), then
-  `streamlit run scripts/inspector_app.py`. The DB URL comes from
-  `INSPECT_DATABASE_URL`, else `DATABASE_URL` (via `.env`); data root from
-  `INSPECT_DATA_ROOT`, else `data`. Both are editable in the sidebar.
-- **Layout:** queries and file readers in `pipeline/inspector/` (typed, mypy
-  strict, all SQL there); UI only in `scripts/inspector_app.py` and
-  `scripts/inspector_pages/`. Pages: Overview (row counts, latest runs, a
-  button that runs every stage's quality gates), Crawl, Extract, Resolve,
-  Reconcile, Classify, Impute, Battle drill-down (one battle across every
-  table), Model (placeholder until that stage exists).
-- **Read-only by construction:** every connection sets
-  `default_transaction_read_only=on`; a test asserts a write raises. It is
-  safe to point at the corpus database.
-- **Demo data:** `python -m tests.integration.inspector_seed <data_root>`
-  **drops and reseeds `DATABASE_URL`**, like the integration suite. Never run
-  it against a corpus database.
-- `streamlit>=1.50` (uses `width="stretch"`). pandas has no stubs here, so
-  `pipeline/inspector/frames.py` ignores the import and aliases `Frame = Any`;
-  installing `pandas-stubs` would turn that into an unused-ignore error.
-
-**Verified:** ruff clean, mypy strict clean (95 files), 30 inspector tests
-(9 unit, 21 integration incl. a Streamlit `AppTest` of every page, the
-unreachable-DB path and the read-only guarantee), full suite 804 passed with
-DB, per the worker's raw output. The lead launched the app on the seeded DB
-and checked Overview, Reconcile and Impute render with charts in a browser.
-**Not verified:** any real corpus (none exists yet); the other pages were
-checked by AppTest only, which catches exceptions, not wrong charts.
-
-## 23. Session of 2026-10-09/10: the model stage
-
-Opus designed and judged; two Sonnet workers built (`pipeline/modelers/` core,
-then the stage around it); Haiku workers ran every verification; the
-`bayesian-model-reviewer` gated the design and then the code. Opus wrote no
-production code. Uncommitted.
-
-### 23.1 What the model is, and where it departs from the spec
-
-The full rationale is in `agents/model.yaml` and the comments of
-`config/model_default.yaml`. In short:
-
-- **Unit: two-sided battles.** 3+ side battles are excluded and counted (camp
-  merging is a TODO). Side A is the lower `side_id`, which follows infobox
-  order, so orientation must carry no information.
-- **Ordinal logit, five levels, symmetric cutpoints** `(-c2, -c1, c1, c2)`.
-  Symmetry makes swapping sides exactly `eta -> -eta, k -> 4-k`, so the
-  likelihood cannot learn listing order (the §21.2 bug class). Pyrrhic is a
-  win. If the two sides' grades disagree within a class, the outcome is
-  interval-censored over both, so the grade used does not depend on which
-  side is A; contradictory classes exclude the battle.
-- **`eta = S_A - S_B + beta_force (x_A - x_B) + beta_def (d_A - d_B)`.** The
-  spec's additive `beta_type`, `alpha_era` and terrain terms are **dropped**:
-  they are battle-level, so under an arbitrary orientation they can only learn
-  "side A wins". No `mu_era` on skill: eras never meet, so it would be
-  identified by the prior alone. The defender term drops out while
-  `is_defender` is all NULL (it is, today).
-- **Skills** non-centred, one population, `sigma_skill ~ HalfNormal(1)`.
-  Reported skills are centred per draw.
-- **Sides with no creditable commander are latents, not dropped battles**
-  (reviewer CRITICAL). An unresolved side is `mu_unknown + sigma_skill z`; a
-  side with 2+ commanders all `default_split` is `mu_unattributed + sigma_skill
-  z` and credits nobody, but still informs its opponent. Dropping those battles
-  had removed most Napoleonic and modern battles and would have mechanically
-  demoted their generals under a `total_war` ranking.
-- **WAR is expected WAR (xWAR)**: per draw, the side's expected score at its
-  fitted skill minus at replacement (40th percentile of skills in that draw),
-  split by attribution weight. Arsht's realised WAR (`y - E_rep`) was
-  rejected as primary: it ignores the general's own skill uncertainty and
-  bypasses shrinkage, so a 3-0 general gets a big WAR with a tight sd. It is
-  kept in the diagnostics npz. `win_prob_model`/`win_prob_baseline` hold
-  **expected score** (`P(win) + 0.5 P(indecisive)`), not P(win).
-- **MI**: one fit per imputed neutral round; mixture of thinned draws for
-  point summaries and ranks; stored sd is Rubin's `sqrt(T)`; intervals are
-  mixture quantiles widened by `sqrt(T / Var_mix)`. FMI per general is a lower
-  bound while the §21.7 shared-error limitation stands.
-- **Write rule**: every round must pass rhat <= 1.02, ess_bulk >= 800 and 0
-  divergences, after one retry at a new seed and target_accept 0.95. Rounds are
-  never dropped. Otherwise no estimates are written and the pooled row says
-  `converged: "false"`. Stale or mixed impute manifests are refused.
-- **Runs**: `bradley_terry_round` per round, `bradley_terry_joint_latent`, and
-  the pooled `bradley_terry_hierarchical` row **last** (report reads
-  `MAX(run_id)`; see 23.6).
-
-### 23.2 The circularity comparator, and the defect the code review found
-
-Impute conditions on outcome, so the main fit's force ratios are partly built
-from the outcomes it explains. The comparator is one **joint latent-x fit**
-with no outcome conditioning, on the same battles. The first version gave each
-missing side its absolute era prior (e.g. ancient N(9.2, 2.0)) independently
-of its measured opponent, so the gap between the era mean and the corpus level
-became a fake force ratio. On the fixture this gave `beta_force` -0.017 (sd
-0.027, implausibly tight) against 0.111 pooled; on realistic scales it still
-shifted by about a posterior sd. **Fix:** the latent is now each battle's
-`x_diff`, with prior `N(m_A - m_B, sqrt(sd_A^2 + sd_B^2))` when both are
-measured and `N(0, sqrt(sd_obs^2 + 2 sigma_w^2))` otherwise (`sigma_w` 1.0 in
-config). Absolute era levels drop out. After the fix: fixture gap 0.161 against
-a limit of 0.159, and a recovery test with a third of sides unmeasured covers
-the true slope (0.317, 95% [0.016, 0.609], sd 1.54x the fixed-x fit; the bound
-is 1.6x, justified in the test).
-
-The lesson repeats §4.2: the integration test passed with the defect in. Only
-a number that looked wrong to a reader (an sd of 0.027 on 90 battles) caught
-it.
-
-### 23.3 Gates (all warnings except the existing errors)
-
-`convergence` (now also fails on `diagnostics.converged != 'true'`),
-`no_divergences`, `top_generals_have_intervals` (filters on the latest
-hierarchical run; returns -1 when it wrote nothing), the posterior predictive
-category check (level 0.99: at 0.95 a correct model fails ~20% of the time
-over five categories), `prior_predictive_sensible` (on expected score, which
-is exactly 0.5 at a zero gap), `fmi_top_generals`, `circularity_check`,
-`exclusion_concentration`, `extreme_ratio_dependence` (WAR from battles won
-outnumbered by more than e^2: the Plassey/Cajamarca class, where an unmodelled
-technology gap reads as skill), `implausible_career_span` (> 60 years, a
-false-merge detector), `top_generals_cross_component`, `exclusions_reported`.
-Dataset gates are read from `run{id}/gate_report.json` by a new `model_gate`
-method in `pipeline/quality.py`, which shares a reader with impute's.
-
-On the integration fixture `circularity_check` and
-`top_generals_cross_component` fire, as they should: the fixture has two eras
-that never meet, and only 90 battles.
-
-### 23.4 Disclosures the ranking carries
-
-Cross-era comparison rests on the shared skill prior (the comparison graph is
-disconnected; `mu_unknown`/`mu_unattributed` are a soft link). Technology is
-not modelled; one log-ratio slope for all eras. Naval and aerial battles share
-the skill population and slope (counts in the pooled diagnostics).
-`total_war` is volume-weighted, so a coverage gap by era is a rank gap.
-Attribution weights are fixed data, renormalised per side, not learned.
-
-### 23.5 Verification, stated honestly
-
-Run by a Haiku worker against live PostgreSQL 15.19 on 2026-10-10, raw output
-read by Opus:
-
-- `ruff check pipeline/ tests/ scripts/ alembic/`: clean.
-- `mypy --strict pipeline/`: clean, **113 source files**.
-- `pytest tests/ -m "not live and not model"`: **925 passed, 0 skipped, 0
-  failed**, 8 minutes.
-- `pytest tests/model/test_model_recovery.py -m model`: 6 passed, 46s. Recovery:
-  max rhat 1.009, min ess 883, 0 divergences; within-era Spearman 0.909 /
-  0.852; `beta_force` 0.440, 95% [0.247, 0.636] (truth 0.5); 95% skill
-  coverage 0.967.
-- `tests/integration/test_model.py`: 12 passed (rows, pooled row last, WAR
-  decomposition reconciles in SQL, write rule on a failing round, stale
-  manifest refused, dry run, every gate executes).
-- Two `bayesian-model-reviewer` passes (design: build after changes; code:
-  commit after fixes). Every finding was applied except LOW 8 (rhat on raw
-  `skill`), which is in TODO.md.
-
-**Not verified:** no real corpus has been through the model; every number is
-synthetic or from a fixture. The rest of `tests/model` (reconcile and impute
-recovery) was not rerun this session; nothing upstream changed. The recovery
-test's Spearman > 0.8 criterion ranged 0.797-0.922 across the seeds the worker
-tried, so it sits near the information limit; the committed seed passes.
-
-### 23.6 Still open
-
-- **BLOCKING for report:** its gates use `MAX(run_id) FROM model_runs`;
-  evaluate's refits will take that over. Filter on `model_type =
-  'bradley_terry_hierarchical' AND diagnostics->>'converged' = 'true'`.
-  `exclusion_concentration` must block publication.
-- New evaluate variants from the review: `exclude_extreme_ratio`,
-  `three_level_outcome` (Wikipedia's "decisive" is editor-dependent and tracks
-  fame), `realised_war`, `equal_attribution`.
-- TODO.md Stage 7: 3+ side camp merging, force slope by battle type, CmdStanPy
-  fallback, rhat on centred skills.
-- Workers hit the API session and weekly limits twice this session, mid-task.
-  Both were resumed or picked up from disk without damage. Check `git status`
-  and grep for the brief's items rather than trusting a cut-off worker's last
-  line.
-
-## 24. Gap review of every built stage, 2026-10-10
-
-Three read-only Sonnet audits compared each `agents/<stage>.yaml` with its
-code (crawl to model, plus cross-cutting); Opus confirmed the highest-impact
-findings by grep. Static reading only: no tests run, no database touched.
-Full table: `~/.claude/plans/review-and-examine-what-spicy-wilkes.md`. Every
-new item is in `docs/todo/<stage>.md` tagged `(gap review)`.
-
-New findings, in rough order of what they cost a real run:
-
-- **A1** `crawl.min_battles_crawled` is an ERROR gate at 3000 URLs. The
-  211-battle arsht pilot (§7 step 0) halts on it.
-- **A13** `--stages all` halts at evaluate: `pipeline/stages/evaluate.py`
-  does not exist, the import fails, and `complete_with_warnings` does not
-  stop the halt (only `continue_with_logging` does).
-- **A4** Extract and resolve find battles by name (`LIMIT 1` / lowest id).
-  Two battles sharing a name collapse into one, with commanders on the
-  wrong battle.
-- **A2** `extract.no_empty_extractions` reads `crawl_log.extraction_method`
-  and `fields_extracted`, which nothing writes. It can never fail: §4.6's
-  pattern again.
-- **A5** `SqlCrawlLog.flush` swallows insert errors without rolling back. On
-  Postgres every later flush then fails silently.
-- **A8** Resolve counts mentions whose battle or side is missing from the DB
-  but does not log them, so `resolution_rate` reads high. An extract re-run
-  also clears resolve's denominator rows from `missing_data_log`.
-- **A10** Classify reads troop presence from raw `troop_reports`. Reconcile's
-  `unfillable` sides therefore look like they have troops, no missingness
-  heuristic can fire, and impute's `mnar_delta` never reaches them.
-- **A11** Reconcile centres `data_era` over all dated rows but applies it
-  only to unlabelled rows, so `a_era` acts partly as a second intercept.
-- Smaller: `battles.war_id`/`campaign_id` never populated (A3); crawl stores
-  no wikitext, so extract's template path never runs (A6); `--limit`
-  rewrites the processed JSONL with a subset (A7); `generals.born/died/era`
-  never written (A9); report/evaluate gates with no run filter at all
-  (A14); stale schema comments (A15); the inspector Model page is still a
-  placeholder querying a wrong table name (A16); unused deps, dead spec
-  params, missing `scripts.add_battle`/`quality_report` (A18).
-
-Also confirmed: every item already listed as open for reconcile, classify,
-impute and model is still open in code. None was quietly fixed.
+Built and verified against a real Postgres: crawl, extract, resolve, and
+reconcile, classify, impute and model on fixtures. The recovery suites pass on
+synthetic data.
+
+Not proven: any real corpus past resolve, any billed LLM call (refusal and
+truncation branches untested), CI (no git remote), and every gate threshold,
+which has only run against empty or fixture databases. The gold sets are
+agent-built and unreviewed by a human. Evaluate and report do not exist, so
+there is no ranking.

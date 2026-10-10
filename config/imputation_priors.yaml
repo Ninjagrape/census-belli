@@ -4,7 +4,7 @@
 # calls, not measurements: the corpus is too sparse to fit them, so each one
 # says why it has the width it has.
 
-# Era bins on battles.year_astronomical (handover.md 5.1: never date_start).
+# Era bins on battles.year_astronomical (docs/handover-log.md 5.1: never date_start).
 # `before` is an exclusive upper bound, so 499 is ancient and 500 is medieval.
 # BC years are negative in astronomical numbering and fall into 'ancient'.
 # 'undated' is a bin of its own, not a fallback to the nearest era: a battle

@@ -47,12 +47,12 @@ class ReconcileReport:
             dict written to that quantity's ``model_runs.diagnostics``), or
             ``None`` for a skipped quantity.
         regime_counts: How many reports of each quantity carried each claim
-            regime. This is the measurement handover.md keeps citing (about
+            regime. This is the measurement docs/handover-log.md keeps citing (about
             2% of real reports carry a readable regime marker) rendered per
             run rather than only in a one-off script.
         unlabelled_weight: The rhetorical weight ``model.py`` applied to every
             unlabelled report this run -- a judgement call, not a fitted
-            quantity (handover.md §19.9), and worth carrying on every report
+            quantity (docs/handover-log.md §19.9), and worth carrying on every report
             so a published figure is traceable to it.
     """
 

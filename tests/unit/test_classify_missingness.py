@@ -4,7 +4,7 @@ Unit tests for missingness classification.
 The rule that must never break is the one about not overwriting a decision
 another stage already made: resolve writes 'mnar' directly onto
 ``commander_general_id`` rows for a commander mention it could not resolve
-(handover.md §12.3's sibling rule, for ``command_role``), and this module
+(docs/handover-log.md §12.3's sibling rule, for ``command_role``), and this module
 must leave that alone even though 'commander_general_id' looks, at a
 glance, like exactly the kind of field a missingness heuristic could have
 an opinion about.

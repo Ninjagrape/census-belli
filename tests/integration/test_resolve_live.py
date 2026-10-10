@@ -3,7 +3,7 @@ The resolve stage's Wikidata lookup against the live SPARQL endpoint.
 
 Every systematic bug this stage has found came from pointing it at a real
 service rather than from reading code: robots.txt silently disabling every
-SPARQL query in the project (handover.md 4.7), alias matches thrown away
+SPARQL query in the project (docs/handover-log.md 4.7), alias matches thrown away
 after the query found them (14.1), and Nelson's label having migrated to
 Wikidata's ``mul`` tag, which an ``en``-only lookup cannot see (14.6, 16.1).
 The last of those is exactly the shape of regression a fixture-only suite
@@ -74,7 +74,7 @@ _DEFAULT_USER_AGENT: Final[str] = (
 )
 _DEFAULT_TIMEOUT_S: Final[float] = 60.0
 
-# A bare item id, e.g. "Q517" -- never a name. handover.md 16.2 records the
+# A bare item id, e.g. "Q517" -- never a name. docs/handover-log.md 16.2 records the
 # label service returning one in place of a label it could not resolve, and
 # candidates.py._QID_SHAPE is the same pattern; duplicated here rather than
 # imported because it is a private module constant and this check should
@@ -82,7 +82,7 @@ _DEFAULT_TIMEOUT_S: Final[float] = 60.0
 _QID_SHAPE: Final[re.Pattern[str]] = re.compile(r"Q\d+")
 
 # Every Q-id below was looked up live against wikidata.org on 2026-09-20, not
-# recalled from memory -- handover.md 14.6 and 16.1 both record what happens
+# recalled from memory -- docs/handover-log.md 14.6 and 16.1 both record what happens
 # when one is remembered instead. Worth restating because it already bit this
 # exact set once: Q47153 is not Hannibal Barca, it is a 2009 novel. The
 # correct id is Q36456.
@@ -208,7 +208,7 @@ def test_known_commanders_have_candidates(live_candidates: dict[str, list[Candid
 
 
 def test_nelson_reachable_via_mul_label(live_candidates: dict[str, list[Candidate]]) -> None:
-    """The regression from handover.md 16.1: Nelson has no ``en`` label at all.
+    """The regression from docs/handover-log.md 16.1: Nelson has no ``en`` label at all.
 
     Q83235's labels are ``en-gb`` ("Horatio Nelson, 1st Viscount Nelson") and
     ``mul`` ("Horatio Nelson") -- Wikidata's multilingual code, onto which
@@ -221,7 +221,7 @@ def test_nelson_reachable_via_mul_label(live_candidates: dict[str, list[Candidat
     qids = {c.qid for c in live_candidates.get("Horatio Nelson", [])}
     assert NELSON_QID in qids, (
         "Nelson (Q83235) was not among the live candidates for 'Horatio "
-        "Nelson'. He carries no 'en' label, only 'mul' -- see handover.md "
+        "Nelson'. He carries no 'en' label, only 'mul' -- see docs/handover-log.md "
         "16.1. Either the mul label has been removed, or the lookup has "
         "stopped asking for it."
     )
@@ -230,7 +230,7 @@ def test_nelson_reachable_via_mul_label(live_candidates: dict[str, list[Candidat
 def test_no_candidate_label_is_qid_shaped(live_candidates: dict[str, list[Candidate]]) -> None:
     """No candidate is ever published under its own Q-id as a label.
 
-    handover.md 16.2: the Wikidata label service returns the bare item id in
+    docs/handover-log.md 16.2: the Wikidata label service returns the bare item id in
     place of a label it could not resolve in the requested languages, and an
     early version of ``_merge_rows`` accepted that string as a name. On a
     link it becomes ``generals.canonical_name`` -- a general silently
@@ -246,7 +246,7 @@ def test_no_candidate_label_is_qid_shaped(live_candidates: dict[str, list[Candid
     ]
     assert not offenders, (
         f"a live candidate's label is Q-id shaped rather than a name: {offenders}. "
-        "See handover.md 16.2."
+        "See docs/handover-log.md 16.2."
     )
 
 
@@ -256,7 +256,7 @@ def test_date_gate_separates_centuries(live_candidates: dict[str, list[Candidate
     This is the assertion behind ``matcher.py``'s whole design: name
     similarity alone cannot tell a Carthaginian general from anyone else
     later named after him, and the lifespan gate is what does. It is also
-    the specific case ``MAX_PLAUSIBLE_AGE_YEARS`` (handover.md 16.3) exists
+    the specific case ``MAX_PLAUSIBLE_AGE_YEARS`` (docs/handover-log.md 16.3) exists
     for: Hannibal Barca's death claim is an explicit "no value" on Wikidata,
     so an unbounded upper end would have judged him alive, and positively so,
     in 1811.
@@ -271,7 +271,7 @@ def test_date_gate_separates_centuries(live_candidates: dict[str, list[Candidate
     assert HANNIBAL_BARCA_QID not in viable_qids, (
         "Hannibal Barca (Q36456, 247-183 BC) survived the date gate for an "
         "1811 battle. The lifespan gate in matcher.py is no longer "
-        "separating centuries -- see handover.md 12.2 and 16.3."
+        "separating centuries -- see docs/handover-log.md 12.2 and 16.3."
     )
 
 
@@ -280,7 +280,7 @@ def test_known_commanders_resolve_deterministically(
 ) -> None:
     """Napoleon at Austerlitz and Nelson at Trafalgar link with no LLM call.
 
-    Both are the worked examples in handover.md 13.2 and 16.1: against real
+    Both are the worked examples in docs/handover-log.md 13.2 and 16.1: against real
     candidates, an unbounded name match would leave each ambiguous against a
     dateless namesake (a rapper, an NFT founder), and the date-confirmed
     exact-match rule is what resolves them without spending LLM quota. This

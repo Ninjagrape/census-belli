@@ -19,7 +19,7 @@ strict gate does so to check the gate itself.
 Seeded data is committed (the module-scoped fixture opens its own connection),
 with ``try/finally`` rollback around every fixture that runs the stage: a
 stage that raises part-way otherwise leaves a transaction holding row locks,
-and every later test waits on them forever (handover.md 20.2 item 3).
+and every later test waits on them forever (docs/handover-log.md 20.2 item 3).
 """
 
 from __future__ import annotations

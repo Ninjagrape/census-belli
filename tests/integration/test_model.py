@@ -13,7 +13,7 @@ owns. The strict-threshold test restores a hard gate to check the write rule.
 
 Seeded data is committed (module-scoped fixture on its own connection), with
 ``try/finally`` rollback around every helper that runs the stage, as in
-``test_impute.py`` (handover.md 20.2 item 3).
+``test_impute.py`` (docs/handover-log.md 20.2 item 3).
 """
 
 from __future__ import annotations

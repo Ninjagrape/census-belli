@@ -17,7 +17,7 @@ imputation; it is the comparator for the circularity check.
 
 pymc is imported inside the functions, as in ``pipeline/imputers/model.py``.
 Every per-observation array is a ``pm.Data`` (numpy constants make nutpie's
-compile time explode, handover 20.2 item 7).
+compile time explode, handover-log 20.2 item 7).
 
 Variable names: ``sigma_skill``, ``z_skill``, ``skill`` (dim ``general``),
 ``mu_unknown``, ``mu_unattributed``, ``z_side`` (dim ``latent_side``),

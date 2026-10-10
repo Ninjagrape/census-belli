@@ -1,7 +1,7 @@
 """Reading the impute stage's inputs from the database.
 
 Years come from ``battles.year_astronomical``, never ``date_start``: a BC date
-cannot be decoded in Python (handover.md 5.1).
+cannot be decoded in Python (docs/handover-log.md 5.1).
 
 Two keyed covariates are derived here, both as plain functions so they can be
 tested without a database:

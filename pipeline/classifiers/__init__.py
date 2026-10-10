@@ -5,7 +5,7 @@ Command-role and missingness classification for the classify stage.
 already-resolved data: turning each side's commanders into a command
 hierarchy (:mod:`pipeline.classifiers.roles`), and labelling why a missing
 field is missing (:mod:`pipeline.classifiers.missingness`). A third module,
-:mod:`pipeline.classifiers.battle_type`, does the inference handover.md §4.2
+:mod:`pipeline.classifiers.battle_type`, does the inference docs/handover-log.md §4.2
 made necessary once the infobox parser stopped guessing 'field' for every
 battle template it did not recognise.
 
