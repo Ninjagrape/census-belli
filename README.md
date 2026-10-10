@@ -8,12 +8,32 @@ math proves it"](https://towardsdatascience.com/napoleon-was-the-best-general-ev
 which borrowed baseball's WAR framework for generals. This project keeps the
 framework and rebuilds the data and the statistics underneath it.
 
-> **Status: partially built.** Three of nine pipeline stages are implemented
-> and verified against a real database. The statistical half of the project —
-> the part that actually produces a ranking — does not exist yet. See
+> **Status: partially built.** Seven of nine pipeline stages are implemented.
+> The first three are verified against a real database; the statistical
+> stages have run only on fixtures and synthetic data, and the two stages that
+> evaluate the model and produce a ranking do not exist yet. See
 > [Project status](#project-status) before assuming any number here is real.
 > There is no published ranking, and there should not be one until the
 > [known limitations](#known-limitations) below are closed.
+
+## What this adds to the original
+
+Arsht's version scraped one Wikipedia infobox per battle, fitted an expected
+outcome from the troop numbers in it, and credited each general with the
+difference between what happened and what was expected, as a single number.
+This project keeps that idea and changes almost everything underneath it:
+
+| | Original approach | This project |
+|---|---|---|
+| **Troop numbers** | One infobox figure, taken as given | Every report from every source kept, then reconciled by a model that estimates each source's bias. Ancient inflation is a prior fitted to 45 cited cases, keyed on whether a figure is an ancient claim or a modern estimate rather than on the source document |
+| **Force ratios** | Ratio of the two infobox figures | Computed on a regime-neutral scale, so a battle where one side's figure is a modern estimate and the other's an ancient claim is not tilted |
+| **Missing data** | Rows dropped or filled with a sentinel | Every missing field logged and classified (MCAR/MAR/MNAR), then multiply imputed by a joint Bayesian model, with results pooled by Rubin's rules |
+| **Who commanded** | Infobox commanders credited as listed | Command roles and hierarchy classified per battle; credit split by attribution weight, so Agrippa, not Octavian, gets Actium |
+| **Who is who** | Names as written | Commanders linked to Wikidata identities, with a matcher built to prefer splitting two people over wrongly merging them |
+| **Skill** | Sum of outcome surpluses | Hierarchical Bayesian Bradley-Terry model on graded outcomes (decisive to indecisive), with skills shrunk towards a population and uncertainty carried through |
+| **WAR** | Realised: outcome minus expectation | Expected WAR against a 40th-percentile replacement commander, so a lucky 3-0 record does not read as certain greatness |
+| **Output** | A point score per general | A posterior per general with credible intervals; overlapping generals are reported as inseparable |
+| **Checking it** | — | Quality gates between every stage, parameter-recovery tests on synthetic data, a check that imputation is not feeding the model its own outcomes, and (planned) held-out prediction and sensitivity analysis |
 
 ## What problem this is trying to solve
 
@@ -62,10 +82,10 @@ corrupting what came after it.
 | 1 | `crawl` | Fetch Wikipedia battle lists and articles, Wikidata, DBpedia, citations | Built, verified |
 | 2 | `extract` | Parse infoboxes, map Wikidata and DBpedia, LLM-extract from article text | Built, verified |
 | 3 | `resolve` | Link commanders and battles to canonical Wikidata entities | Built, verified |
-| 4 | `reconcile` | Source-disagreement model over troop and casualty reports | Not built |
-| 5 | `classify` | Command roles, hierarchy, attribution weights, missingness types | Not built |
-| 6 | `impute` | Multiple imputation for missing troop data | Not built |
-| 7 | `model` | Hierarchical Bayesian Bradley-Terry fit, WAR calculation | Not built |
+| 4 | `reconcile` | Source-disagreement model over troop and casualty reports | Built, fixtures only |
+| 5 | `classify` | Command roles, hierarchy, attribution weights, missingness types | First slice, fixtures only |
+| 6 | `impute` | Multiple imputation for missing troop data | Built, fixtures only |
+| 7 | `model` | Hierarchical Bayesian Bradley-Terry fit, WAR calculation | Built, fixtures only |
 | 8 | `evaluate` | Held-out prediction, posterior predictive checks, sensitivity analysis | Not built |
 | 9 | `report` | Rankings with credible intervals, interactive explorer | Not built |
 
@@ -165,11 +185,13 @@ Alembic migration, the crawl log, the extract writer, and the resolve stage end
 to end. Verified against live services: Wikipedia and DBpedia fetching and
 parsing, Wikidata SPARQL lookup, and one real LLM disambiguation call.
 
-Not yet built: everything statistical — stages 4 and 6 through 8 — and the
-classify stage they depend on.
+Built and tested on fixtures and synthetic data only: reconcile, classify,
+impute and model, each with parameter-recovery tests for the statistical
+parts. Not yet built: evaluate and report.
 
-Not yet proven: any crawl at corpus scale, and the quality gates' thresholds,
-which execute correctly but have mostly run against an empty database.
+Not yet proven: any real corpus past resolve, any crawl at corpus scale, and
+the quality gates' thresholds, which execute correctly but have only run
+against empty or fixture databases.
 
 ## Known limitations
 
@@ -180,14 +202,12 @@ believed:
   which covers European and American military history far better than anywhere
   else. A commander whose battles are not written up cannot rank, and this is
   not a gap the model can correct for.
-- **`battle_type` is currently never set.** Wikipedia's generic infobox
-  template carries no domain evidence, so extract deliberately leaves the field
-  unset rather than guessing; the classify stage is meant to infer it and does
-  not exist yet. Until then the covariate is null everywhere.
-- **Commanders known by a title may not resolve.** The Wikidata lookup matches
-  labels and aliases literally, so someone whose common name is neither —
-  Horatio Nelson is the worked example — becomes a corpus-local entity instead
-  of linking to their real record.
+- **Cross-era comparison rests on a shared prior.** Commanders from different
+  eras never meet, so ranking Caesar against Napoleon depends on the assumption
+  that skill is drawn from one population. Technology is not modelled.
+- **Some commanders do not resolve.** The Wikidata lookup matches labels and
+  aliases literally, so someone whose common name is neither becomes a
+  corpus-local entity instead of linking to their real record.
 - **Duplicate battles are detected, not merged.** Merging is irreversible and
   wrong more often than it looks, so suspected pairs are reported for review.
 - **Attribution is a modelling choice, not a fact.** Who "really" commanded is
@@ -208,8 +228,9 @@ docs/            Design notes
 ```
 
 `CLAUDE.md` is the design document and the conventions. `handover.md` is the
-detailed state of the work, including every bug found so far and what it cost
-to find — the most useful thing to read before changing anything.
+current state of the work, its standing decisions and known traps, and the
+most useful thing to read before changing anything. `docs/handover-log.md` is
+the full history, including every bug found so far and what it cost to find.
 
 ## Licence
 
