@@ -589,3 +589,21 @@ def test_every_diagnostics_json_check_in_every_spec_declares_a_model_type() -> N
         "These diagnostics_json checks name no params.model_type, so the handler "
         f"cannot tell which model run to read: {missing}"
     )
+
+
+def test_diagnostics_json_fails_when_the_converged_flag_is_not_true() -> None:
+    """A pooling stage's own all-fits verdict must be honoured when present."""
+    payload = {**_worst(1.001, 5000.0, 0), "converged": "false"}
+    conn = DiagnosticsConnection([_DiagnosticsRow(9, payload)])
+
+    result = QualityRunner(conn).run_one(_diagnostics_check())
+
+    assert result.passed is False
+    assert "converged" in result.message
+
+
+def test_diagnostics_json_passes_when_the_converged_flag_is_true_or_absent() -> None:
+    for payload in ({**_worst(1.001, 5000.0, 0), "converged": "true"}, _worst(1.001, 5000.0, 0)):
+        conn = DiagnosticsConnection([_DiagnosticsRow(9, payload)])
+
+        assert QualityRunner(conn).run_one(_diagnostics_check()).passed is True

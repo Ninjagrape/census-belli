@@ -255,7 +255,8 @@ First slice built; see handover.md §20.3.
   - [ ] Few-shot prompt cases: Actium, Munda, Mutina, Chaeronea, Salamis, Mongols, Moltke (#10)
   - [ ] Siege per side (siege_defensive), and a campaign/operation type (#12)
   - [ ] Missingness: casualty-specific flags, post-1914 regime suppression rule (#13)
-  - [ ] Model stage must not consume `default_split` sides without an LLM or manual role
+  - [x] Model stage must not consume `default_split` sides without an LLM or manual role
+        (they enter as unattributed latents and credit nobody; handover §23)
   - [ ] Proportional unknown-count gate; extractor confidence into rule confidence (LOW)
 
 ## Stage 6: Impute (pipeline/stages/impute.py)
@@ -271,25 +272,25 @@ Built and verified on fixtures; see handover.md §21.4.
 - [ ] Propagate reconcile's shared measurement error: export the neutral fit's regime draws (g_unlabelled, a_era) in neutral_draws_run*.npz and carry them through the rounds, so battles in the mixed regime share their error instead of being drawn independently (beta_force uncertainty is understated until then)
 
 ## Stage 7: Model (pipeline/stages/model.py)
-- [ ] Bradley-Terry hierarchical model in PyMC
-  - [ ] Latent skill parameters per general
-  - [ ] Skill ~ Normal(mu_era, sigma_era) hierarchical prior
-  - [ ] Covariates: log force ratio, defensive flag, battle type, terrain
-  - [ ] Era random effects
-  - [ ] Ordered outcome (5-level) via cumulative link
-  - [ ] Attribution-weighted skill aggregation per side
-- [ ] Non-centered parameterisation option for difficult posteriors
-- [ ] CmdStanPy fallback if PyMC fails to converge
-- [ ] WAR calculation from posterior
-  - [ ] Define replacement level (40th percentile skill)
-  - [ ] Per-battle WAR = outcome - P(win | replacement, covariates, opponent)
-  - [ ] Aggregate WAR with uncertainty
-- [ ] Fit on each imputed dataset
-- [ ] Combine posteriors via Rubin's rules
-- [ ] Also fit on observed-only data for comparison
-- [ ] Write to model_runs, general_skill_estimates, battle_war_details
-- [ ] Convergence diagnostics (rhat, ESS, divergences)
-- [ ] Unit test with small synthetic tournament data
+Built and verified on fixtures; see handover.md §23. Departures from the original
+spec (no additive battle_type/era/terrain terms, no mu_era, xWAR) are explained there.
+- [x] Ordinal Bradley-Terry in PyMC, symmetric cutpoints (orientation-invariant), non-centred skills
+- [x] Attribution-weighted sides; default_split multi-commander and unknown sides as latents
+- [x] Interval-censored outcomes when the two sides' grades disagree
+- [x] Expected WAR (xWAR) against a per-draw 40th-percentile replacement; realised WAR in diagnostics
+- [x] One fit per imputed round, mixture pooling, Rubin's T as the stored sd, widened intervals
+- [x] Joint latent-x comparator (circularity check), on a per-battle x_diff prior
+- [x] Writes model_runs, general_skill_estimates, battle_war_details; pooled row last
+- [x] Gates: convergence (incl. diagnostics.converged), PPC, prior predictive, FMI, circularity,
+      exclusion concentration, extreme ratios, career span, cross-component, exclusions
+- [x] Recovery suite (tests/model/test_model_recovery.py) incl. the joint comparator
+- [x] bayesian-model-reviewer passes on design and code
+- [ ] Run on a real corpus
+- [ ] CmdStanPy fallback (not needed so far; no convergence trouble on synthetic data)
+- [ ] Merge 3+ side battles into two camps when outcomes split cleanly (excluded in v1)
+- [ ] Force slope by battle type (naval/aerial share one beta_force and one skill population now)
+- [ ] rhat/ESS on z_skill and centred skills rather than raw skill (reviewer LOW 8; optional)
+- [ ] Recovery-test Spearman criterion (0.8) sits near the information limit: 0.797-0.922 across seeds
 
 ## Stage 8: Evaluate (pipeline/stages/evaluate.py)
 - [ ] Held-out prediction (5-fold CV on battles)
@@ -298,6 +299,10 @@ Built and verified on fixtures; see handover.md §21.4.
 - [ ] Sensitivity analysis runner
   - [ ] g_unlabelled +/- 1 sd sensitivity on the neutral estimates (bounds the shared reconcile error impute does not propagate, see agents/impute.yaml)
   - [ ] Refit with each variant from agents/evaluate.yaml
+  - [ ] New variants from the model review: exclude_extreme_ratio (|x_A - x_B| > 2),
+        three_level_outcome (collapse decisive grades), realised_war ranking,
+        equal_attribution consuming default_split sides at 1/n
+- [ ] Sensitivity refits must not take MAX(run_id) away from the published run: filter on model_type
   - [ ] Compute rank correlation and top-20 overlap across variants
 - [ ] Expert ranking comparison (load config/expert_rankings.yaml, compute overlap)
 - [ ] Named sanity checks (Agrippa > Octavian, Belisarius > Justinian)
@@ -307,6 +312,12 @@ Built and verified on fixtures; see handover.md §21.4.
 
 ## Stage 9: Report (pipeline/stages/report.py)
 - [x] agents/report.yaml spec
+- [ ] BLOCKING before report is built: its gates select MAX(run_id) FROM model_runs; change to
+      MAX(run_id) WHERE model_type='bradley_terry_hierarchical' AND diagnostics->>'converged'='true'
+- [ ] BLOCKING: treat the model's exclusion_concentration warning as an error (do not publish
+      while top generals have most battles uncredited, i.e. before classify's LLM pass)
+- [ ] Disclose: cross-era ranking rests on the shared skill prior; technology not modelled;
+      total_war is volume-weighted; win_prob_* columns hold expected score, not P(win)
 - [ ] Rankings table generator (top N with CIs)
 - [ ] Interactive explorer (Plotly or HTML artifact)
   - [ ] Searchable general lookup

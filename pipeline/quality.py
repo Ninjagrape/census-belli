@@ -514,6 +514,11 @@ def _check_diagnostics_json(
 
     actual = f"run {run_id}: {metrics.summarise()}"
     breaches: list[str] = []
+    # A stage that pools several fits writes its own all-fits verdict. When the
+    # key is present it must be 'true'; runs without it are judged on metrics only.
+    converged_flag = diagnostics.get("converged")
+    if converged_flag is not None and str(converged_flag).lower() != "true":
+        breaches.append(f"diagnostics.converged is {converged_flag!r}, not 'true'")
     if metrics.max_rhat is not None and metrics.max_rhat > max_rhat_limit:
         breaches.append(f"{_RHAT_KEY} {metrics.max_rhat} > {max_rhat_limit}")
     if metrics.min_ess_bulk is not None and metrics.min_ess_bulk < min_ess_limit:
@@ -534,6 +539,63 @@ def _check_diagnostics_json(
         severity=severity,
         actual_value=actual,
         threshold=threshold_text,
+    )
+
+
+def _gate_result(
+    name: str,
+    check: dict[str, Any],
+    severity: Severity,
+    path: Path,
+    gate_name: str,
+    *,
+    missing_hint: str,
+    absent_hint: str,
+) -> QualityCheckResult:
+    """Report one gate from a ``gate_report.json`` written by a stage.
+
+    Shared by the impute and model handlers: both stages compute their
+    dataset-level gates before writing and record them in a JSON report, and
+    the verdict must be about exactly what is on disk.
+
+    Args:
+        name: The check's name, as declared in the agent spec.
+        check: The raw check dict (for the threshold text).
+        severity: The severity to report the result at.
+        path: The report file.
+        gate_name: The gate to look up in the report.
+        missing_hint: Appended when the file cannot be read.
+        absent_hint: Appended when the report has no such gate.
+
+    Returns:
+        The check's result. Never raises.
+    """
+    threshold_raw = str(check.get("threshold", ""))
+
+    def failure(message: str) -> QualityCheckResult:
+        return QualityCheckResult(
+            name=name, passed=False, severity=severity, threshold=threshold_raw, message=message
+        )
+
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return failure(f"Cannot read {path}: {type(exc).__name__}. {missing_hint}")
+
+    gates = report.get("gates") if isinstance(report, dict) else None
+    entry = next(
+        (g for g in gates or [] if isinstance(g, dict) and g.get("name") == gate_name), None
+    )
+    if entry is None:
+        return failure(f"Gate {gate_name!r} is absent from {path}; {absent_hint}")
+    passed = bool(entry.get("passed"))
+    return QualityCheckResult(
+        name=name,
+        passed=passed,
+        severity=severity,
+        actual_value=entry.get("actual"),
+        threshold=str(entry.get("threshold", threshold_raw)),
+        message="" if passed else str(entry.get("message", "")),
     )
 
 
@@ -563,39 +625,112 @@ def _check_imputation_gate(
     del conn
     raw_params = check.get("params")
     params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
-    gate_name = str(params.get("gate", name))
-    root = Path(str(params.get("root", "data/imputed")))
-    threshold_raw = str(check.get("threshold", ""))
-
-    def failure(message: str) -> QualityCheckResult:
-        return QualityCheckResult(
-            name=name, passed=False, severity=severity, threshold=threshold_raw, message=message
-        )
-
-    path = root / str(params.get("scale", "neutral")) / "gate_report.json"
+    path = (
+        Path(str(params.get("root", "data/imputed")))
+        / str(params.get("scale", "neutral"))
+        / "gate_report.json"
+    )
+    written: Any = None
     try:
         report = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        return failure(f"Cannot read {path}: {type(exc).__name__}. Run the impute stage first.")
-
-    gates = report.get("gates") if isinstance(report, dict) else None
-    entry = next(
-        (g for g in gates or [] if isinstance(g, dict) and g.get("name") == gate_name), None
-    )
-    if entry is None:
         written = report.get("rounds_written") if isinstance(report, dict) else None
-        return failure(
-            f"Gate {gate_name!r} is absent from {path} (rounds_written={written}); "
-            "the fit did not converge, so no rounds exist to check."
+    except (OSError, ValueError):
+        pass
+    return _gate_result(
+        name,
+        check,
+        severity,
+        path,
+        str(params.get("gate", name)),
+        missing_hint="Run the impute stage first.",
+        absent_hint=(
+            f"(rounds_written={written}) the fit did not converge, so no rounds exist to check."
+        ),
+    )
+
+
+_LATEST_POOLED_RUN = text(
+    "SELECT MAX(run_id) FROM model_runs WHERE model_type = 'bradley_terry_hierarchical'"
+)
+_MODEL_RUN_DIR = re.compile(r"run(\d+)$")
+
+
+def _latest_model_run_dir(root: Path, conn: Connection | None) -> Path | None:
+    """The diagnostics directory of the newest pooled model run.
+
+    Prefers the newest ``bradley_terry_hierarchical`` row in the database, so
+    the gate describes the run the convergence gates read; falls back to the
+    highest ``run{N}`` directory when there is no connection or no such row.
+
+    Args:
+        root: The diagnostics root.
+        conn: A database connection, or None.
+
+    Returns:
+        The directory, or None when none exists.
+    """
+    if conn is not None:
+        try:
+            with conn.begin_nested():
+                run_id = conn.execute(_LATEST_POOLED_RUN).scalar()
+        except Exception as exc:
+            logger.warning("model_gate_run_lookup_failed", error=str(exc))
+            run_id = None
+        if run_id is not None:
+            return root / f"run{int(run_id)}"
+    if not root.is_dir():
+        return None
+    numbered = [
+        (int(m.group(1)), entry)
+        for entry in root.iterdir()
+        if entry.is_dir() and (m := _MODEL_RUN_DIR.fullmatch(entry.name))
+    ]
+    return max(numbered)[1] if numbered else None
+
+
+def _check_model_gate(
+    name: str,
+    check: dict[str, Any],
+    severity: Severity,
+    conn: Connection | None,
+) -> QualityCheckResult:
+    """Report one dataset-level gate recorded by the model stage.
+
+    The model stage records its gates in
+    ``{root}/run{pooled_run_id}/gate_report.json``. When a round failed to
+    converge the stage writes no gates, so every one of them reports absent and
+    the convergence gate carries the real reason.
+
+    Args:
+        name: The check's name, as declared in the agent spec.
+        check: The raw check dict; ``params.gate`` names the gate (default: the
+            check's own name) and ``params.root`` the diagnostics root.
+        severity: The severity to report the result at.
+        conn: A database connection used to find the newest pooled run.
+
+    Returns:
+        The check's result. Never raises.
+    """
+    raw_params = check.get("params")
+    params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
+    root = Path(str(params.get("root", "data/processed/model_diagnostics")))
+    directory = _latest_model_run_dir(root, conn)
+    if directory is None:
+        return QualityCheckResult(
+            name=name,
+            passed=False,
+            severity=severity,
+            threshold=str(check.get("threshold", "")),
+            message=f"No model run directory under {root}. Run the model stage first.",
         )
-    passed = bool(entry.get("passed"))
-    return QualityCheckResult(
-        name=name,
-        passed=passed,
-        severity=severity,
-        actual_value=entry.get("actual"),
-        threshold=str(entry.get("threshold", threshold_raw)),
-        message="" if passed else str(entry.get("message", "")),
+    return _gate_result(
+        name,
+        check,
+        severity,
+        directory / "gate_report.json",
+        str(params.get("gate", name)),
+        missing_hint="Run the model stage first.",
+        absent_hint="a round did not converge, so the stage evaluated no gates.",
     )
 
 
@@ -606,6 +741,7 @@ MethodHandler = Callable[[str, dict[str, Any], Severity, "Connection | None"], Q
 METHOD_HANDLERS: dict[str, MethodHandler] = {
     "diagnostics_json": _check_diagnostics_json,
     "imputation_gate": _check_imputation_gate,
+    "model_gate": _check_model_gate,
 }
 
 # Why each `method:` without a handler cannot run yet. Every method named in
@@ -624,6 +760,9 @@ UNIMPLEMENTED_METHODS: dict[str, str] = {
     ),
     "posterior_check": "Requires the fitted posterior from the model stage",
     "imputation_gate": "Requires data/imputed/{scale}/gate_report.json from the impute stage",
+    "model_gate": (
+        "Requires data/processed/model_diagnostics/run{N}/gate_report.json from the model stage"
+    ),
     "brier_score": "Requires held-out predictions from the evaluate stage",
     "jaccard_overlap": "Requires sensitivity variant rankings from the evaluate stage",
     "held_out_accuracy": "Requires the k-fold held-out predictions from the evaluate stage",

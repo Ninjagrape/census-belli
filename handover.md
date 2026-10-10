@@ -6,7 +6,7 @@ Read `CLAUDE.md` first for what the project *is*. This file covers what state it
 
 `CLAUDE.md` points every session here, and asks you to update this file before you finish. Keep it current: a stale handover is worse than none, because the next agent will trust it. If you change the state of the project, change §1, §6 and §7 to match.
 
-Last updated: 2026-10-07. §20 is committed (`f2cb4b2`, `af69af6`). Working tree dirty with §21: the regime-neutral troops fit in reconcile, classify fixes from the historiography review, and the impute stage. Nothing from §21 is committed.
+Last updated: 2026-10-10. §21 and §22 are committed (`a9abeba`, `401e1c7`, `3c6f6f8`). Working tree dirty with §23, the model stage. Nothing from §23 is committed.
 
 ---
 
@@ -20,7 +20,7 @@ Last updated: 2026-10-07. §20 is committed (`f2cb4b2`, `af69af6`). Working tree
 | reconcile | yes | **yes** (§19-§21), incl. the regime-neutral troops fit | unit + integration + model (§21.6) | **yes**, on fixtures; never run on a real corpus |
 | classify | yes | **first slice** (§20), review fixes (§21.2) | unit + 11 integration | **yes**, on fixtures; LLM path offline/cache only, no billed call |
 | impute | yes | **yes** (§21.4) | unit + 11 integration + 5 model | **yes**, on fixtures; never run on a real corpus |
-| model | yes | **no** | — | — |
+| model | yes | **yes** (§23) | unit (`test_modelers_*`) + 12 integration + 6 model | **yes**, on fixtures; never run on a real corpus |
 | evaluate | yes | **no** | — | — |
 | report | yes | **no** | — | — |
 
@@ -31,8 +31,8 @@ Infrastructure is complete: `pipeline/db.py`, `config.py`, `quality.py`, `loggin
 ```bash
 export DATABASE_URL="postgresql+psycopg://general_war:general_war@127.0.0.1:5432/general_war"
 ruff check pipeline/ tests/ scripts/ alembic/   # expect: All checks passed
-python -m mypy pipeline/                         # expect: Success, 83 source files (strict)
-python -m pytest tests/ -q -m "not live and not model"   # expect: 774 passed, 0 skipped (with DB)
+python -m mypy pipeline/                         # expect: Success, 113 source files (strict)
+python -m pytest tests/ -q -m "not live and not model"   # expect: 925 passed, 0 skipped (with DB)
 python -m pytest tests/model -m model            # the recovery suite; slow, see §20.4
 ```
 
@@ -405,11 +405,10 @@ Writing long Python files via `cat <<'EOF'` failed mid-file more than once. Use 
 
 `LICENSE` now exists (GPL-3.0); the previous handover listed it as missing.
 
-Three config files are referenced by agent specs but **do not exist**. Each blocks its stage:
+Two config files are referenced by agent specs but **do not exist**. Each blocks its stage:
 
 | File | Blocks |
 |---|---|
-| `config/model_default.yaml` | model |
 | `config/expert_rankings.yaml` | evaluate |
 | `config/sensitivity_specs.yaml` | evaluate |
 
@@ -444,15 +443,11 @@ is **done**. What follows is what is left.
    `DATABASE_URL`, so a corpus loaded into `general_war` is wiped by the next
    test run (§20.8).
 
-1. **Model stage (Phase 4b).** Impute is built (§21.4); the model stage is
-   next. Write `config/model_default.yaml` first. It must read force ratios
-   from the imputed rounds of the **neutral** scale (`data/imputed/neutral/`),
-   pool with Rubin's rules, run `fit_observed_only` side by side as the
-   circularity check, and compute FMI per general (raise `n_imputations` to
-   20-40 if the top generals exceed ~0.3). It must not consume
-   `default_split` sides without an LLM or manual role (§21.2). The
-   defender term needs `is_defender`, which exists and is all NULL. Run the
-   `bayesian-model-reviewer` on the design before a worker builds it.
+1. **Model stage: built (§23).** What is left for it is a real corpus run
+   (step 0) and the TODO.md Stage 7 items. Before any ranking is published,
+   classify's second slice (step 2) must run: today every multi-commander side
+   is `default_split`, enters the model as an unattributed latent, and credits
+   nobody, so `exclusion_concentration` will fire on a real corpus.
 2. **Classify, second slice.** Run the pending multi-commander sides through
    the offline LLM path (`python -m scripts.llm_offline export --stage
    classify`, then `/process-llm-batch`, then import); populate
@@ -464,7 +459,9 @@ is **done**. What follows is what is left.
    §21.7's open items (shared measurement error into impute, the
    `est_troops_method` lineage count, the neutral gate's hard-coded ESS).
 4. **Phase 5 — evaluate and report.** `agents/report.yaml` already exists and
-   is fairly prescriptive.
+   is fairly prescriptive. Two BLOCKING report items are in TODO.md (§23.6):
+   its gates read `MAX(run_id)` unfiltered, and `exclusion_concentration` must
+   block publication.
 5. **Phase 6 — full-pipeline integration test, README, CI.**
 
 Both of the "smaller things" this section used to list are done: the
@@ -2913,3 +2910,148 @@ DB, per the worker's raw output. The lead launched the app on the seeded DB
 and checked Overview, Reconcile and Impute render with charts in a browser.
 **Not verified:** any real corpus (none exists yet); the other pages were
 checked by AppTest only, which catches exceptions, not wrong charts.
+
+## 23. Session of 2026-10-09/10: the model stage
+
+Opus designed and judged; two Sonnet workers built (`pipeline/modelers/` core,
+then the stage around it); Haiku workers ran every verification; the
+`bayesian-model-reviewer` gated the design and then the code. Opus wrote no
+production code. Uncommitted.
+
+### 23.1 What the model is, and where it departs from the spec
+
+The full rationale is in `agents/model.yaml` and the comments of
+`config/model_default.yaml`. In short:
+
+- **Unit: two-sided battles.** 3+ side battles are excluded and counted (camp
+  merging is a TODO). Side A is the lower `side_id`, which follows infobox
+  order, so orientation must carry no information.
+- **Ordinal logit, five levels, symmetric cutpoints** `(-c2, -c1, c1, c2)`.
+  Symmetry makes swapping sides exactly `eta -> -eta, k -> 4-k`, so the
+  likelihood cannot learn listing order (the §21.2 bug class). Pyrrhic is a
+  win. If the two sides' grades disagree within a class, the outcome is
+  interval-censored over both, so the grade used does not depend on which
+  side is A; contradictory classes exclude the battle.
+- **`eta = S_A - S_B + beta_force (x_A - x_B) + beta_def (d_A - d_B)`.** The
+  spec's additive `beta_type`, `alpha_era` and terrain terms are **dropped**:
+  they are battle-level, so under an arbitrary orientation they can only learn
+  "side A wins". No `mu_era` on skill: eras never meet, so it would be
+  identified by the prior alone. The defender term drops out while
+  `is_defender` is all NULL (it is, today).
+- **Skills** non-centred, one population, `sigma_skill ~ HalfNormal(1)`.
+  Reported skills are centred per draw.
+- **Sides with no creditable commander are latents, not dropped battles**
+  (reviewer CRITICAL). An unresolved side is `mu_unknown + sigma_skill z`; a
+  side with 2+ commanders all `default_split` is `mu_unattributed + sigma_skill
+  z` and credits nobody, but still informs its opponent. Dropping those battles
+  had removed most Napoleonic and modern battles and would have mechanically
+  demoted their generals under a `total_war` ranking.
+- **WAR is expected WAR (xWAR)**: per draw, the side's expected score at its
+  fitted skill minus at replacement (40th percentile of skills in that draw),
+  split by attribution weight. Arsht's realised WAR (`y - E_rep`) was
+  rejected as primary: it ignores the general's own skill uncertainty and
+  bypasses shrinkage, so a 3-0 general gets a big WAR with a tight sd. It is
+  kept in the diagnostics npz. `win_prob_model`/`win_prob_baseline` hold
+  **expected score** (`P(win) + 0.5 P(indecisive)`), not P(win).
+- **MI**: one fit per imputed neutral round; mixture of thinned draws for
+  point summaries and ranks; stored sd is Rubin's `sqrt(T)`; intervals are
+  mixture quantiles widened by `sqrt(T / Var_mix)`. FMI per general is a lower
+  bound while the §21.7 shared-error limitation stands.
+- **Write rule**: every round must pass rhat <= 1.02, ess_bulk >= 800 and 0
+  divergences, after one retry at a new seed and target_accept 0.95. Rounds are
+  never dropped. Otherwise no estimates are written and the pooled row says
+  `converged: "false"`. Stale or mixed impute manifests are refused.
+- **Runs**: `bradley_terry_round` per round, `bradley_terry_joint_latent`, and
+  the pooled `bradley_terry_hierarchical` row **last** (report reads
+  `MAX(run_id)`; see 23.6).
+
+### 23.2 The circularity comparator, and the defect the code review found
+
+Impute conditions on outcome, so the main fit's force ratios are partly built
+from the outcomes it explains. The comparator is one **joint latent-x fit**
+with no outcome conditioning, on the same battles. The first version gave each
+missing side its absolute era prior (e.g. ancient N(9.2, 2.0)) independently
+of its measured opponent, so the gap between the era mean and the corpus level
+became a fake force ratio. On the fixture this gave `beta_force` -0.017 (sd
+0.027, implausibly tight) against 0.111 pooled; on realistic scales it still
+shifted by about a posterior sd. **Fix:** the latent is now each battle's
+`x_diff`, with prior `N(m_A - m_B, sqrt(sd_A^2 + sd_B^2))` when both are
+measured and `N(0, sqrt(sd_obs^2 + 2 sigma_w^2))` otherwise (`sigma_w` 1.0 in
+config). Absolute era levels drop out. After the fix: fixture gap 0.161 against
+a limit of 0.159, and a recovery test with a third of sides unmeasured covers
+the true slope (0.317, 95% [0.016, 0.609], sd 1.54x the fixed-x fit; the bound
+is 1.6x, justified in the test).
+
+The lesson repeats §4.2: the integration test passed with the defect in. Only
+a number that looked wrong to a reader (an sd of 0.027 on 90 battles) caught
+it.
+
+### 23.3 Gates (all warnings except the existing errors)
+
+`convergence` (now also fails on `diagnostics.converged != 'true'`),
+`no_divergences`, `top_generals_have_intervals` (filters on the latest
+hierarchical run; returns -1 when it wrote nothing), the posterior predictive
+category check (level 0.99: at 0.95 a correct model fails ~20% of the time
+over five categories), `prior_predictive_sensible` (on expected score, which
+is exactly 0.5 at a zero gap), `fmi_top_generals`, `circularity_check`,
+`exclusion_concentration`, `extreme_ratio_dependence` (WAR from battles won
+outnumbered by more than e^2: the Plassey/Cajamarca class, where an unmodelled
+technology gap reads as skill), `implausible_career_span` (> 60 years, a
+false-merge detector), `top_generals_cross_component`, `exclusions_reported`.
+Dataset gates are read from `run{id}/gate_report.json` by a new `model_gate`
+method in `pipeline/quality.py`, which shares a reader with impute's.
+
+On the integration fixture `circularity_check` and
+`top_generals_cross_component` fire, as they should: the fixture has two eras
+that never meet, and only 90 battles.
+
+### 23.4 Disclosures the ranking carries
+
+Cross-era comparison rests on the shared skill prior (the comparison graph is
+disconnected; `mu_unknown`/`mu_unattributed` are a soft link). Technology is
+not modelled; one log-ratio slope for all eras. Naval and aerial battles share
+the skill population and slope (counts in the pooled diagnostics).
+`total_war` is volume-weighted, so a coverage gap by era is a rank gap.
+Attribution weights are fixed data, renormalised per side, not learned.
+
+### 23.5 Verification, stated honestly
+
+Run by a Haiku worker against live PostgreSQL 15.19 on 2026-10-10, raw output
+read by Opus:
+
+- `ruff check pipeline/ tests/ scripts/ alembic/`: clean.
+- `mypy --strict pipeline/`: clean, **113 source files**.
+- `pytest tests/ -m "not live and not model"`: **925 passed, 0 skipped, 0
+  failed**, 8 minutes.
+- `pytest tests/model/test_model_recovery.py -m model`: 6 passed, 46s. Recovery:
+  max rhat 1.009, min ess 883, 0 divergences; within-era Spearman 0.909 /
+  0.852; `beta_force` 0.440, 95% [0.247, 0.636] (truth 0.5); 95% skill
+  coverage 0.967.
+- `tests/integration/test_model.py`: 12 passed (rows, pooled row last, WAR
+  decomposition reconciles in SQL, write rule on a failing round, stale
+  manifest refused, dry run, every gate executes).
+- Two `bayesian-model-reviewer` passes (design: build after changes; code:
+  commit after fixes). Every finding was applied except LOW 8 (rhat on raw
+  `skill`), which is in TODO.md.
+
+**Not verified:** no real corpus has been through the model; every number is
+synthetic or from a fixture. The rest of `tests/model` (reconcile and impute
+recovery) was not rerun this session; nothing upstream changed. The recovery
+test's Spearman > 0.8 criterion ranged 0.797-0.922 across the seeds the worker
+tried, so it sits near the information limit; the committed seed passes.
+
+### 23.6 Still open
+
+- **BLOCKING for report:** its gates use `MAX(run_id) FROM model_runs`;
+  evaluate's refits will take that over. Filter on `model_type =
+  'bradley_terry_hierarchical' AND diagnostics->>'converged' = 'true'`.
+  `exclusion_concentration` must block publication.
+- New evaluate variants from the review: `exclude_extreme_ratio`,
+  `three_level_outcome` (Wikipedia's "decisive" is editor-dependent and tracks
+  fame), `realised_war`, `equal_attribution`.
+- TODO.md Stage 7: 3+ side camp merging, force slope by battle type, CmdStanPy
+  fallback, rhat on centred skills.
+- Workers hit the API session and weekly limits twice this session, mid-task.
+  Both were resumed or picked up from disk without damage. Check `git status`
+  and grep for the brief's items rather than trusting a cut-off worker's last
+  line.

@@ -1,0 +1,145 @@
+# Defaults for the model stage (pipeline/modelers/, pipeline/stages/model.py).
+#
+# Every value is a judgement call, not a measurement, so each says why it is
+# what it is. agents/model.yaml points here (params.model_config); keys placed
+# under that file's params override these, section by section.
+#
+# What the stored numbers mean, because the column names mislead:
+#   - win_prob_model and win_prob_baseline in battle_war_details hold the
+#     EXPECTED SCORE of the side, P(win) + 0.5 * P(indecisive), not P(win).
+#   - total_war is expected WAR (xWAR): fitted expected score minus the expected
+#     score of a replacement-level commander. Realised WAR (outcome minus
+#     replacement) sits in the diagnostics only. total_war is volume-weighted:
+#     a general with many battles accumulates more of it, so it ranks careers,
+#     not per-battle skill (skill_mean is the per-battle measure).
+#
+# What the model does not do (disclosed, not hidden):
+#   - Technology is not modelled. One linear log-force-ratio slope serves every
+#     era, so a general who beat a hugely larger but archaic army is credited by
+#     the slope alone (gate extreme_ratio_dependence watches for it).
+#   - Generals of different eras never meet. Their relative level rests on the
+#     shared prior N(0, sigma_skill): the assumption that the average general of
+#     every era is equally good. Gate top_generals_cross_component counts top-50
+#     generals outside the largest connected component.
+#   - mu_unknown and mu_unattributed are shared across all battles, so they are
+#     a soft link between components that the comparison graph does not count.
+#   - Naval and aerial battles share the field battles' single skill population
+#     and single beta_force. They are included, not excluded; the pooled
+#     diagnostics count them (counts.battles_included_naval / _aerial).
+#   - Attribution weights are fixed data (classify's), renormalised per side;
+#     the model does not learn them.
+
+# Prior hyperparameters (design section 10).
+priors:
+  # HalfNormal scale of the common skill sd. A fixed 1.5 put the top general
+  # at P(win) > 0.98 against an average one; a learned sd with scale 1.0 still
+  # allows strong generals about 3 sd out.
+  skill_prior_sd: 1.0
+  # Anonymous latent sides (no resolved commander): offset prior sd. Identified
+  # because such sides fight named generals; wide enough to absorb the
+  # "unrecorded commanders are weaker" shift.
+  mu_unknown_sd: 1.0
+  # Sides whose co-commanders were all split evenly by default: kept apart from
+  # mu_unknown because the two missingness stories differ.
+  mu_unattributed_sd: 1.0
+  # Positive: more troops help. A doubling of the force ratio is about +0.35 logit.
+  beta_force_mu: 0.5
+  beta_force_sd: 0.5
+  # Slight defender edge. Only used when some battle has a defender flag.
+  beta_def_mu: 0.3
+  beta_def_sd: 0.3
+  # log of the inner cutpoint, median 0.5.
+  log_c1_mu: -0.6931471805599453
+  log_c1_sd: 1.0
+  # log of c2 - c1, median 1.5: a decisive result needs a clearly larger margin.
+  log_gap_mu: 0.4054651081081644
+  log_gap_sd: 1.0
+
+sampler:
+  # 1500 + 1500 per chain: the skill vector is non-centred, so ESS for the
+  # weakest general (one battle, wide posterior) is the binding constraint.
+  draws: 1500
+  tune: 1500
+  chains: 4
+  # More than one core respawns the interpreter under pytest on Windows.
+  cores: 1
+  target_accept: 0.9
+  # Second attempt for a round that fails the write thresholds; same data, new seed.
+  retry_target_accept: 0.95
+  nuts_sampler: nutpie
+  random_seed: 20261009
+
+# Nothing is written unless EVERY round meets these (selecting the rounds the
+# sampler liked would select on the data). Same rhat/ESS/divergence rule as
+# reconcile and impute, looser rhat because the model has thousands of params.
+write:
+  max_rhat: 1.02
+  min_ess_bulk: 800
+  max_divergences: 0
+
+# Replacement level: this percentile of the credited generals' skills, per draw.
+# Arsht's choice; the 40th rather than the 50th so replacement is "available at
+# no cost", slightly below the median journeyman.
+replacement_percentile: 40
+# total_war (Arsht's choice, volume-weighted) or skill_mean (per-battle quality).
+rank_by: total_war
+
+# Inputs and outputs. The model reads only the regime-neutral rounds: the
+# published scale mixes inflation regimes and is a sensitivity run.
+scale: neutral
+imputed_root: data/imputed
+diagnostics_root: data/processed/model_diagnostics
+
+pooling:
+  # Draws kept per round for pooling, WAR and the checks (evenly spaced out of
+  # the chains). 20 rounds x 500 = 10,000 pooled draws; enough for 99% tails
+  # and keeps the pooled arrays near 100 MB at corpus scale.
+  draws_kept_per_round: 500
+  # Smoke runs: use only the first N rounds. null = every round on disk.
+  max_rounds: null
+
+joint_latent:
+  # The circularity comparator (R2): one fit with a latent log-troop difference
+  # per battle and no imputation. Only x_A - x_B enters the likelihood, so the
+  # prior is on the difference: both sides measured gives N(m_A - m_B,
+  # sqrt(sd_A^2 + sd_B^2)); a missing side adds 2 * sigma_w^2 to the variance
+  # around a mean of 0. Absolute era levels drop out entirely, so the era
+  # priors are not used here (an absolute prior on one side against a
+  # measurement on the other invented force ratios from the scale gap).
+  enabled: true
+  # Within-battle sd of a side's log troops about the battle's common level;
+  # the scale of impute's sigma hyperprior (config/imputation_priors.yaml).
+  sigma_w: 1.0
+
+prior_predictive:
+  draws: 1000
+  pairs: 500
+  seed: 20261009
+
+# Gate thresholds. All gates here are warnings; exclusion_concentration is
+# meant to be blocking for report (TODO.md).
+gates:
+  top_n: 50
+  # Rubin's FMI above this means imputation noise matters for a top general.
+  fmi_threshold: 0.3
+  # Share of a top general's battles that must be credited (not unattributed or excluded).
+  min_credited_share: 0.5
+  max_default_split_share: 0.3
+  # Own-minus-opponent log troops below -2 is odds worse than about 1 to 7.4.
+  extreme_log_ratio_cutoff: -2.0
+  extreme_max_share: 0.5
+  # Longer than a career: a merged identity.
+  max_career_span_years: 60
+  # Five categories, indecisive legitimately common, so 40% not 25%.
+  prior_max_category: 0.4
+  prior_max_median_dev: 0.35
+  # Bonferroni over the five categories: at 0.95 a correct model fails about 20% of the time.
+  ppc_level: 0.99
+  ppc_sims: 500
+  # Circularity: joint vs pooled.
+  circ_slope_sd_factor: 0.5
+  circ_min_spearman: 0.9
+  circ_min_battles: 3
+  circ_min_overlap: 40
+  # Warn when more than this share of in-scope battles is excluded.
+  max_excluded_share: 0.5

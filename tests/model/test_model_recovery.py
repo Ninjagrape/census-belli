@@ -1,0 +1,165 @@
+"""Recovery test for the Bradley-Terry model of the model stage.
+
+Fits the real model on a simulated tournament of 60 generals in two eras that
+never meet and about 400 battles, with co-commanded and unknown-commander
+sides, and checks what a wrong model would still sample cleanly through:
+
+1. skills are ranked correctly within each era (Spearman);
+2. the 95% interval for ``beta_force`` covers the truth;
+3. 95% skill intervals cover the truth at a sensible rate (between 85% and 99%).
+
+Skills are compared centred (per draw for the posterior, by the true mean for
+the truth): only differences enter the likelihood, and the offset between the
+eras is pinned by the prior alone.
+
+Real MCMC (``pytest.mark.model``), no database; nutpie and one core.
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+
+import numpy as np
+import pytest
+from scipy.stats import spearmanr
+
+from pipeline.modelers.design import build_design, x_difference
+from pipeline.modelers.model import (
+    PosteriorDraws,
+    build_joint_latent_model,
+    build_model,
+    extract_draws,
+)
+from pipeline.modelers.pool import round_convergence
+from pipeline.modelers.priors import ModelPriors
+from pipeline.modelers.records import ModelDesign
+from pipeline.modelers.war import centre_skills
+from pipeline.reconcilers.model import SamplerSettings, sample
+from tests.model.model_sim import (
+    TRUE_BETA_FORCE,
+    SimTournament,
+    simulate_tournament,
+)
+
+pytestmark = pytest.mark.model
+
+SEED = 20261009
+SETTINGS = SamplerSettings(
+    draws=600,
+    tune=600,
+    chains=4,
+    cores=1,
+    target_accept=0.9,
+    random_seed=SEED,
+    nuts_sampler="nutpie",
+)
+MIN_SPEARMAN = 0.8
+COVERAGE_RANGE = (0.85, 0.99)
+
+
+@dataclass(frozen=True)
+class Fit:
+    """One fitted tournament."""
+
+    tournament: SimTournament
+    design: ModelDesign
+    draws: PosteriorDraws
+    convergence: dict[str, object]
+    seconds: float
+
+
+@pytest.fixture(scope="module")
+def fit() -> Fit:
+    """Fit once; every test reads the same posterior."""
+    tournament = simulate_tournament(SEED)
+    design = build_design(tournament.sides)
+    x_diff = x_difference(design, tournament.log_troops)
+    started = time.time()
+    idata = sample(build_model(design, x_diff, ModelPriors()), SETTINGS)
+    seconds = time.time() - started
+    return Fit(
+        tournament=tournament,
+        design=design,
+        draws=extract_draws(idata, design),
+        convergence=round_convergence(idata),
+        seconds=seconds,
+    )
+
+
+def _truth(fit: Fit) -> np.ndarray:
+    return np.array([fit.tournament.true_skill[int(g)] for g in fit.design.general_ids])
+
+
+def test_design_keeps_the_battles_and_classifies_unknown_sides(fit: Fit) -> None:
+    counts = fit.design.counts
+    assert counts.battles_included >= 380
+    assert counts.sides_unknown >= 1
+    assert counts.sides_unattributed == 0
+
+
+def test_fit_converged(fit: Fit) -> None:
+    print(f"\nmodel recovery: sampling {fit.seconds:.0f}s, convergence={fit.convergence}")
+    assert fit.convergence["max_rhat"] is not None and fit.convergence["max_rhat"] <= 1.02  # type: ignore[operator]
+    assert fit.convergence["min_ess_bulk"] is not None and fit.convergence["min_ess_bulk"] >= 400  # type: ignore[operator]
+    assert fit.convergence["divergences"] == 0
+
+
+def test_skills_are_ranked_within_each_era(fit: Fit) -> None:
+    truth = _truth(fit)
+    mean = centre_skills(fit.draws.skills).mean(axis=0)
+    eras = np.array([fit.tournament.era_of[int(g)] for g in fit.design.general_ids])
+    rhos = [float(spearmanr(mean[eras == e], truth[eras == e]).statistic) for e in (0, 1)]
+    print(f"within-era Spearman: {rhos}")
+    assert min(rhos) > MIN_SPEARMAN
+
+
+def test_beta_force_interval_covers_truth(fit: Fit) -> None:
+    lo, hi = np.percentile(fit.draws.beta_force, [2.5, 97.5])
+    print(f"beta_force mean {fit.draws.beta_force.mean():.3f}, 95% [{lo:.3f}, {hi:.3f}]")
+    assert lo <= TRUE_BETA_FORCE <= hi
+
+
+def test_skill_interval_coverage(fit: Fit) -> None:
+    truth = _truth(fit)
+    centred_truth = truth - truth.mean()
+    lo, hi = np.percentile(centre_skills(fit.draws.skills), [2.5, 97.5], axis=0)
+    covered = float(np.mean((lo <= centred_truth) & (centred_truth <= hi)))
+    print(f"95% skill interval coverage: {covered:.3f}")
+    assert COVERAGE_RANGE[0] <= covered <= COVERAGE_RANGE[1]
+
+
+JOINT_LEVEL = 9.5  # a realistic absolute log-troop level; it must not matter
+JOINT_MEASUREMENT_SD = 0.3
+# Measured 1.51 to 1.54 here: 56% of battles have a side with no measurement, so the
+# comparator is genuinely less informative than a fit with the true x. 1.6 leaves
+# sampling noise room without hiding a bias (the failure this test guards is a shifted mean).
+MAX_SD_RATIO = 1.6
+JOINT_SIGMA_W = 1.0
+
+
+def test_joint_latent_beta_force_covers_truth_with_a_third_of_sides_missing(fit: Fit) -> None:
+    tournament, design = fit.tournament, fit.design
+    rng = np.random.default_rng(SEED + 1)
+    obs_mean = np.full(design.n_sides, np.nan)
+    obs_sd = np.full(design.n_sides, np.nan)
+    for index, side_id in enumerate(design.side_ids):
+        if int(side_id) % 3 != 0:
+            noise = JOINT_MEASUREMENT_SD * rng.standard_normal()
+            obs_mean[index] = JOINT_LEVEL + tournament.log_troops[int(side_id)] + noise
+            obs_sd[index] = JOINT_MEASUREMENT_SD
+    idata = sample(
+        build_joint_latent_model(design, obs_mean, obs_sd, JOINT_SIGMA_W, ModelPriors()), SETTINGS
+    )
+
+    joint = extract_draws(idata, design).beta_force
+    lo, hi = np.percentile(joint, [2.5, 97.5])
+    fixed_sd = float(fit.draws.beta_force.std(ddof=1))
+    ratio = float(joint.std(ddof=1)) / fixed_sd
+    print(
+        f"joint beta_force mean {joint.mean():.3f} sd {joint.std(ddof=1):.3f} "
+        f"95% [{lo:.3f}, {hi:.3f}]; fixed-x sd {fixed_sd:.3f}; ratio {ratio:.2f}; "
+        f"convergence {round_convergence(idata)}"
+    )
+    assert lo <= TRUE_BETA_FORCE <= hi
+    assert ratio <= MAX_SD_RATIO
