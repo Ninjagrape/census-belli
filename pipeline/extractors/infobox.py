@@ -30,6 +30,7 @@ import mwparserfromhell
 import structlog
 from bs4 import BeautifulSoup
 
+from pipeline.extractors.dates import parse_date_text
 from pipeline.extractors.infobox_html import find_infobox_table, html_infobox_fields
 from pipeline.extractors.records import (
     BattleFacts,
@@ -187,6 +188,7 @@ _FORTIFIED_RE: Final = re.compile(
     r"|entrenchments?|siege works?|stockade)\b",
     re.IGNORECASE,
 )
+
 
 def detect_variant(template_name: str) -> InfoboxVariant | None:
     """Identify which infobox family a template belongs to.
@@ -489,9 +491,15 @@ def _build_extraction(
     part_of = fields.get("partof", "")
 
     terrain_source = f"{place} {fields.get('territory', '')}"
+    date_text = fields.get("date") or None
+    parsed_date = parse_date_text(date_text)
+    if date_text and parsed_date is None:
+        logger.warning("infobox_date_unparseable", date=date_text[:80], battle=fallback_name)
     facts = BattleFacts(
         name=name or fallback_name or None,
-        date_start=fields.get("date") or None,
+        date_start=parsed_date.date_start if parsed_date else None,
+        date_end=parsed_date.date_end if parsed_date else None,
+        date_precision=parsed_date.precision if parsed_date else None,
         location_name=place or None,
         battle_type=variant.battle_type,
         terrain=sorted({m.group(0).lower() for m in _TERRAIN_RE.finditer(terrain_source)}),
@@ -546,7 +554,13 @@ def _build_extraction(
         source=provenance.source_ref or provenance.source_title,
     )
 
-    return SourceExtraction(provenance=provenance, facts=facts, sides=sides, notes=notes)
+    return SourceExtraction(
+        provenance=provenance,
+        facts=facts,
+        sides=sides,
+        notes=notes,
+        unparsed_date_text=date_text if date_text and parsed_date is None else None,
+    )
 
 
 # ─── Entry points ────────────────────────────────────────────────────────────

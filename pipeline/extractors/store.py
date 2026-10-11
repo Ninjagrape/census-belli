@@ -19,9 +19,16 @@ from typing import Any, Final
 import structlog
 from sqlalchemy import text
 
-from pipeline.extractors.records import BattleExtraction, Provenance, SideExtraction
+from pipeline.extractors.dates import sanitise_date_fields
+from pipeline.extractors.records import (
+    BattleExtraction,
+    BattleFacts,
+    ExtractionFailure,
+    Provenance,
+    SideExtraction,
+)
 
-__all__ = ["ExtractWriteCounts", "source_id", "write_battle"]
+__all__ = ["ExtractWriteCounts", "source_id", "write_battle", "write_battle_isolated"]
 
 logger = structlog.get_logger()
 
@@ -155,6 +162,7 @@ class ExtractWriteCounts:
         self.troop_reports = 0
         self.casualty_reports = 0
         self.missing_rows = 0
+        self.failed_battles = 0
 
     def as_dict(self) -> dict[str, int]:
         """Render the counts for a structlog call.
@@ -168,6 +176,7 @@ class ExtractWriteCounts:
             "troop_reports": self.troop_reports,
             "casualty_reports": self.casualty_reports,
             "missing_rows": self.missing_rows,
+            "failed_battles": self.failed_battles,
         }
 
 
@@ -211,13 +220,17 @@ def _upsert_battle(conn: Any, battle: BattleExtraction) -> int:
         The battle id.
     """
     facts = battle.facts
+    # Last line of defence: raw text in a DATE cast aborts the transaction.
+    date_start, date_end, date_precision = sanitise_date_fields(
+        facts.date_start, facts.date_end, facts.date_precision
+    )
     params: dict[str, Any] = {
         "name": battle.name,
         "wikidata_id": facts.wikidata_id,
         "wikipedia_url": facts.wikipedia_url,
-        "date_start": facts.date_start,
-        "date_end": facts.date_end,
-        "date_precision": facts.date_precision,
+        "date_start": date_start,
+        "date_end": date_end,
+        "date_precision": date_precision,
         "latitude": facts.latitude,
         "longitude": facts.longitude,
         "location_name": facts.location_name,
@@ -232,9 +245,7 @@ def _upsert_battle(conn: Any, battle: BattleExtraction) -> int:
 
     existing = None
     if facts.wikidata_id:
-        existing = conn.execute(
-            _FIND_BATTLE_BY_QID, {"wikidata_id": facts.wikidata_id}
-        ).fetchone()
+        existing = conn.execute(_FIND_BATTLE_BY_QID, {"wikidata_id": facts.wikidata_id}).fetchone()
     if existing is None:
         existing = conn.execute(_FIND_BATTLE_BY_NAME, {"name": battle.name}).fetchone()
 
@@ -357,3 +368,84 @@ def write_battle(
         tally.missing_rows += 1
 
     return battle_id
+
+
+def write_battle_isolated(
+    conn: Any,
+    battle: BattleExtraction,
+    counts: ExtractWriteCounts,
+    source_cache: dict[tuple[str, str], int],
+) -> int | None:
+    """Write one battle inside a savepoint so a failure cannot poison the rest.
+
+    On PostgreSQL the first failing statement aborts the whole transaction;
+    without a savepoint every later battle raises ``InFailedSqlTransaction``
+    and the final commit rolls back, leaving no battles at all. A failed
+    battle is rolled back alone, counted, and then written again as a bare
+    row flagged ``needs_review`` so it is not silently absent.
+
+    Args:
+        conn: An open database connection.
+        battle: The merged battle.
+        counts: Counters to accumulate into; restored for a failed battle.
+        source_cache: Per-run memo of source ids. Entries added by a failed
+            battle are dropped, since the rows they point at were rolled back.
+
+    Returns:
+        The battle id, or None when the battle (and its review stub) failed.
+    """
+    before_counts = counts.as_dict()
+    before_cache = dict(source_cache)
+    try:
+        with conn.begin_nested():
+            return write_battle(conn, battle, counts, source_cache)
+    except Exception as exc:
+        logger.error(
+            "extract_write_failed",
+            slug=battle.slug,
+            error=str(exc)[:300],
+            error_type=type(exc).__name__,
+        )
+        _restore(counts, before_counts)
+        source_cache.clear()
+        source_cache.update(before_cache)
+        counts.failed_battles += 1
+
+    return _write_review_stub(conn, battle, counts)
+
+
+def _restore(counts: ExtractWriteCounts, snapshot: dict[str, int]) -> None:
+    """Reset every counter except ``failed_battles`` to a snapshot."""
+    for name, value in snapshot.items():
+        if name != "failed_battles":
+            setattr(counts, name, value)
+
+
+def _write_review_stub(
+    conn: Any, battle: BattleExtraction, counts: ExtractWriteCounts
+) -> int | None:
+    """Record that a battle could not be written, as a flagged bare row."""
+    stub = BattleExtraction(
+        slug=battle.slug,
+        name=battle.name,
+        facts=BattleFacts(
+            name=battle.facts.name,
+            wikidata_id=battle.facts.wikidata_id,
+            wikipedia_url=battle.facts.wikipedia_url,
+        ),
+        failures=[
+            ExtractionFailure(
+                battle_name=battle.name,
+                source_ref=battle.facts.wikipedia_url or battle.slug,
+                status="write_failed",
+                error="database rejected the extracted record; details in the run log",
+            )
+        ],
+        n_sources=battle.n_sources,
+    )
+    try:
+        with conn.begin_nested():
+            return _upsert_battle(conn, stub)
+    except Exception as exc:
+        logger.error("extract_review_stub_failed", slug=battle.slug, error=str(exc)[:300])
+        return None

@@ -57,7 +57,7 @@ from pipeline.extractors import (
     merge_battle,
     parse_article_infobox,
     to_jsonable,
-    write_battle,
+    write_battle_isolated,
 )
 from pipeline.extractors.article import DEFAULT_MAX_PASSAGE_CHARS
 from pipeline.llm import LLMService
@@ -85,9 +85,7 @@ _HTML_SUFFIXES: Final[tuple[str, ...]] = (".html", ".htm")
 # back off recovers a readable battle name.
 _URL_DIGEST_RE: Final = re.compile(r"-[0-9a-f]{10}$")
 
-_TITLE_TAG_RE: Final = re.compile(
-    r"<title[^>]*>(?P<title>.*?)</title>", re.IGNORECASE | re.DOTALL
-)
+_TITLE_TAG_RE: Final = re.compile(r"<title[^>]*>(?P<title>.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
 @dataclass
@@ -116,10 +114,7 @@ class RawBattle:
     @property
     def article_is_html(self) -> bool:
         """Whether the stored article is rendered HTML rather than wikitext."""
-        return (
-            self.article_path is not None
-            and self.article_path.suffix.lower() in _HTML_SUFFIXES
-        )
+        return self.article_path is not None and self.article_path.suffix.lower() in _HTML_SUFFIXES
 
 
 def _article_title(raw: str) -> str:
@@ -174,9 +169,7 @@ def _enwiki_urls(payload: dict[str, Any]) -> list[str]:
         Article URLs, one per entity carrying an ``enwiki`` sitelink.
     """
     entities = payload.get("entities")
-    candidates = (
-        list(entities.values()) if isinstance(entities, dict) and entities else [payload]
-    )
+    candidates = list(entities.values()) if isinstance(entities, dict) and entities else [payload]
 
     urls: list[str] = []
     for entity in candidates:
@@ -551,8 +544,12 @@ def _write_outputs(battles: list[BattleExtraction], processed_root: Path) -> Non
                 "name": battle.name,
                 **to_jsonable(battle.facts),
                 "sides": [
-                    {"label": s.label, "aliases": s.aliases, "polity": s.polity,
-                     "outcome": s.outcome}
+                    {
+                        "label": s.label,
+                        "aliases": s.aliases,
+                        "polity": s.polity,
+                        "outcome": s.outcome,
+                    }
                     for s in battle.sides
                 ],
                 "disagreements": [to_jsonable(d) for d in battle.disagreements],
@@ -567,17 +564,16 @@ def _write_outputs(battles: list[BattleExtraction], processed_root: Path) -> Non
         for side in battle.sides:
             for commander in side.commanders:
                 commander_rows.append(
-                    {"battle_slug": battle.slug, "battle_name": battle.name,
-                     **to_jsonable(commander)}
+                    {
+                        "battle_slug": battle.slug,
+                        "battle_name": battle.name,
+                        **to_jsonable(commander),
+                    }
                 )
             for report in side.troop_reports:
-                troop_rows.append(
-                    {"battle_slug": battle.slug, **to_jsonable(report)}
-                )
+                troop_rows.append({"battle_slug": battle.slug, **to_jsonable(report)})
             for casualty in side.casualty_reports:
-                casualty_rows.append(
-                    {"battle_slug": battle.slug, **to_jsonable(casualty)}
-                )
+                casualty_rows.append({"battle_slug": battle.slug, **to_jsonable(casualty)})
 
     _write_jsonl(processed_root / "battles.jsonl", battle_rows)
     _write_jsonl(processed_root / "commanders_raw.jsonl", commander_rows)
@@ -686,12 +682,9 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
         counts = ExtractWriteCounts()
         cache: dict[tuple[str, str], int] = {}
         for record in merged:
-            try:
-                write_battle(ctx.db_conn, record, counts, cache)
-            except Exception as exc:
-                # A row that will not go in is a data problem, not a reason
-                # to lose the rest of the run's writes.
-                logger.error("extract_write_failed", slug=record.slug, error=str(exc))
+            # A row that will not go in is a data problem, not a reason to
+            # lose the rest of the run's writes; each battle has a savepoint.
+            write_battle_isolated(ctx.db_conn, record, counts, cache)
         logger.info("extract_rows_written", **counts.as_dict())
     else:
         logger.info("extract_database_write_skipped", dry_run=ctx.dry_run)
@@ -701,9 +694,7 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
         batch_file = service.flush_pending()
         service.log_summary()
         if service.usage.deferred:
-            outcome = StageOutcome(
-                deferred_requests=service.usage.deferred, batch_file=batch_file
-            )
+            outcome = StageOutcome(deferred_requests=service.usage.deferred, batch_file=batch_file)
 
     flagged = [b for b in merged if b.needs_review]
     logger.info(

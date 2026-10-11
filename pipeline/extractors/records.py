@@ -269,6 +269,10 @@ class SourceExtraction:
     facts: BattleFacts = field(default_factory=BattleFacts)
     sides: list[SideExtraction] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    # Date text the source gave but the date parser could not read. Kept so a
+    # battle left with no date can say why, instead of looking like a source
+    # that never reported one.
+    unparsed_date_text: str | None = None
 
 
 @dataclass(frozen=True)

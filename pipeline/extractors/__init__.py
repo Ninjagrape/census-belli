@@ -59,7 +59,7 @@ from pipeline.extractors.records import (
     to_jsonable,
     to_schema_command_role,
 )
-from pipeline.extractors.store import ExtractWriteCounts, write_battle
+from pipeline.extractors.store import ExtractWriteCounts, write_battle, write_battle_isolated
 from pipeline.extractors.textnorm import (
     Quantity,
     infer_branch,
@@ -116,4 +116,5 @@ __all__ = [
     "to_schema_command_role",
     "wikidata_time_to_date",
     "write_battle",
+    "write_battle_isolated",
 ]

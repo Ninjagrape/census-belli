@@ -581,3 +581,23 @@ def test_the_duplicate_generals_gate_catches_a_split_entity(conn: Connection) ->
         conn.execute(
             text("INSERT INTO generals (canonical_name, wikidata_id) VALUES ('Other', 'Q48174')")
         )
+
+
+def test_one_identity_that_fails_to_write_does_not_lose_the_others(conn: Connection) -> None:
+    from pipeline.stages.base import StageContext
+    from pipeline.stages.resolve import _write_database
+
+    _seed_battle(conn)
+    # A confidence outside [0, 1] violates a CHECK on battle_commanders after
+    # the generals row is already inserted. Without a savepoint the aborted
+    # transaction fails every identity after it too.
+    broken = _identity("Broken", qid="Q1", mentions=[_mention("Broken")], confidence=1.5)
+    fine = _identity("Agrippa", qid="Q48174", mentions=[_mention("Agrippa")])
+    counts = ResolveCounts()
+
+    _write_database(StageContext(db_conn=conn), [], {}, [broken, fine], counts, {})
+
+    names = {row[0] for row in conn.execute(text("SELECT canonical_name FROM generals"))}
+    assert names == {"Agrippa"}
+    assert counts.failed_identities == 1
+    assert counts.generals_written == 1

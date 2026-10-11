@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import inspect
 import sys
 import time
 from typing import Any
@@ -33,7 +34,7 @@ from pipeline.quality import (
     StageResult,
     has_blocking_failure,
 )
-from pipeline.stages.base import StageConformanceError, check_conforms
+from pipeline.stages.base import StageConformanceError, StageContext, check_conforms
 
 logger = structlog.get_logger()
 
@@ -71,9 +72,8 @@ STAGE_ORDER = [
 
 # ─── Agent spec loading ──────────────────────────────────────────────────────
 
-def load_agent_spec(
-    stage: str, overrides: dict[str, Any] | None = None
-) -> dict[str, Any]:
+
+def load_agent_spec(stage: str, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
     """Load the YAML agent spec for a pipeline stage.
 
     Delegates to pipeline.config so that spec validation and override
@@ -94,6 +94,7 @@ def load_agent_spec(
 
 # ─── Quality gate runner ─────────────────────────────────────────────────────
 
+
 def run_quality_checks(spec: dict[str, Any], db_conn: Any) -> list[QualityCheckResult]:
     """
     Run all quality checks defined in an agent spec.
@@ -112,6 +113,72 @@ def run_quality_checks(spec: dict[str, Any], db_conn: Any) -> list[QualityCheckR
 
 
 # ─── Stage runner ────────────────────────────────────────────────────────────
+
+# A stage module sets this True when it manages its own connection on purpose.
+# reconcile, impute and model commit a run row before sampling so that a failed
+# fit leaves an inspectable incomplete run; on the orchestrator's shared
+# connection that row would be rolled back with the failure. Such a stage is
+# handed a context with no connection and opens its own, as it did before.
+OWNS_CONNECTION_ATTR = "OWNS_DB_CONNECTION"
+
+
+def _end_transaction(db_conn: Any, *, commit: bool, stage: str) -> None:
+    """Commit or roll back the shared connection after a stage attempt.
+
+    Rule: a stage's writes are committed as soon as its ``run`` returns, whether
+    or not it deferred LLM requests, and before the quality gates. That makes
+    them visible to the next stage, to a stage's own connection and to the CLI
+    user. If ``run`` raised, the attempt is rolled back so a retry or the next
+    stage never inherits a half-written, possibly aborted transaction.
+
+    Args:
+        db_conn: The shared connection, or None.
+        commit: True to commit, False to roll back.
+        stage: The stage name, for the log.
+    """
+    if db_conn is None:
+        return
+    try:
+        if commit:
+            db_conn.commit()
+        else:
+            db_conn.rollback()
+    except Exception as exc:
+        logger.error(
+            "stage_transaction_end_failed",
+            stage=stage,
+            action="commit" if commit else "rollback",
+            error=str(exc),
+        )
+        if commit:
+            raise
+
+
+def _call_stage(runner_module: Any, spec: dict[str, Any], db_conn: Any, stage: str) -> Any:
+    """Call a stage's ``run``, handing it the shared connection when it can use one.
+
+    Args:
+        runner_module: The imported stage module.
+        spec: The loaded agent spec.
+        db_conn: The shared connection, or None.
+        stage: The stage name, for the log.
+
+    Returns:
+        Whatever ``run`` returns: None or a StageOutcome.
+    """
+    run = runner_module.run
+    owns = bool(getattr(runner_module, OWNS_CONNECTION_ATTR, False))
+    context = StageContext(db_conn=None if owns else db_conn)
+    # check_conforms lets a stage declare run(spec) alone, so only pass a
+    # context to a stage that has somewhere to put it.
+    params = list(inspect.signature(run).parameters.values())
+    accepts_context = any(p.kind is p.VAR_POSITIONAL for p in params) or (
+        len([p for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]) >= 2
+    )
+    outcome = run(spec, context) if accepts_context else run(spec)
+    _end_transaction(db_conn, commit=True, stage=stage)
+    return outcome
+
 
 def run_stage(
     stage: str,
@@ -166,7 +233,11 @@ def run_stage(
                     retries_used=attempt,
                     on_failure=on_failure,
                 )
-            outcome = runner_module.run(spec)
+            try:
+                outcome = _call_stage(runner_module, spec, db_conn, stage)
+            except Exception:
+                _end_transaction(db_conn, commit=False, stage=stage)
+                raise
 
             duration = time.time() - start
 
@@ -339,6 +410,7 @@ def run_pipeline(
 
 
 # ─── CLI ─────────────────────────────────────────────────────────────────────
+
 
 def main() -> None:
     """Run the pipeline from the command line.

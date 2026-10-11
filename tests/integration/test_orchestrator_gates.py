@@ -44,6 +44,8 @@ class ScriptedConnection:
     def __init__(self, values: list[Any]) -> None:
         self._values = list(values)
         self.calls = 0
+        self.commits = 0
+        self.rollbacks = 0
 
     def begin_nested(self) -> AbstractContextManager[None]:
         """Stand in for SQLAlchemy's SAVEPOINT context manager.
@@ -54,6 +56,12 @@ class ScriptedConnection:
         tests/integration/test_quality_gates.py.
         """
         return nullcontext()
+
+    def commit(self) -> None:
+        self.commits += 1
+
+    def rollback(self) -> None:
+        self.rollbacks += 1
 
     def execute(self, statement: Any) -> _StubResult:
         value = self._values[self.calls] if self.calls < len(self._values) else 0

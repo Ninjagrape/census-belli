@@ -227,3 +227,127 @@ def test_extraction_coverage_gate_sql_is_valid(conn: Any) -> None:
 
     assert "SQL execution failed" not in result.message, result.message
     assert result.actual_value is not None
+
+
+# ─── One bad battle must not take the others down with it ───────────────────
+
+
+def _record(slug: str, *, battle_type: str | None = None, date_start: str | None = None) -> Any:
+    """Build a minimal merged battle with two sides."""
+    from pipeline.extractors import BattleExtraction, BattleFacts, SideExtraction
+
+    return BattleExtraction(
+        slug=slug,
+        name=f"Battle of {slug}",
+        facts=BattleFacts(
+            name=f"Battle of {slug}",
+            date_start=date_start,
+            battle_type=battle_type,
+        ),
+        sides=[SideExtraction(label="A"), SideExtraction(label="B")],
+        n_sources=1,
+    )
+
+
+def test_a_failing_battle_is_rolled_back_alone_and_the_rest_commit(engine: Engine) -> None:
+    from pipeline.extractors import write_battle_isolated
+
+    records = [
+        _record("Alpha", date_start="0216-08-02 BC"),
+        # An invalid enum value fails inside Postgres, which aborts the
+        # transaction unless the battle has a savepoint of its own.
+        _record("Broken", battle_type="not_a_battle_type"),
+        _record("Gamma", date_start="Spring 208 BC"),
+        _record("Delta", date_start="1809-05-21"),
+    ]
+    counts = ExtractWriteCounts()
+    cache: dict[tuple[str, str], int] = {}
+    writer = engine.connect()
+    try:
+        for record in records:
+            write_battle_isolated(writer, record, counts, cache)
+        writer.commit()
+
+        reader = engine.connect()
+        try:
+            rows = reader.execute(
+                text(
+                    "SELECT name, date_start::text, date_precision, needs_review, review_notes, "
+                    "year_astronomical FROM battles ORDER BY name"
+                )
+            ).fetchall()
+        finally:
+            reader.close()
+    finally:
+        writer.rollback()
+        writer.execute(text("TRUNCATE battles CASCADE"))
+        writer.commit()
+        writer.close()
+
+    by_name = {row[0]: row for row in rows}
+    assert set(by_name) == {
+        "Battle of Alpha",
+        "Battle of Broken",
+        "Battle of Gamma",
+        "Battle of Delta",
+    }
+    assert counts.failed_battles == 1
+    assert counts.battles == 3
+
+    assert by_name["Battle of Alpha"][1] == "0216-08-02 BC"
+    assert by_name["Battle of Alpha"][5] == -215
+    # Raw infobox text that reaches the writer is parsed, not cast blindly.
+    assert tuple(by_name["Battle of Gamma"][1:3]) == ("0208-01-01 BC", "year")
+    assert by_name["Battle of Delta"][1] == "1809-05-21"
+
+    broken = by_name["Battle of Broken"]
+    assert broken[3] is True
+    assert "write_failed" in broken[4]
+
+
+def test_raw_unparseable_date_text_is_written_as_null_not_a_database_error(conn: Any) -> None:
+    from pipeline.extractors import write_battle_isolated
+
+    counts = ExtractWriteCounts()
+    battle_id = write_battle_isolated(
+        conn, _record("Vague", date_start="in the reign of Nero"), counts, {}
+    )
+
+    row = conn.execute(
+        text("SELECT date_start, date_precision FROM battles WHERE battle_id = :id"),
+        {"id": battle_id},
+    ).fetchone()
+    assert counts.failed_battles == 0
+    assert row is not None
+    assert row[0] is None
+
+
+def test_an_unparsed_infobox_date_flags_the_battle_and_logs_it_missing(conn: Any) -> None:
+    source = parse_infobox(
+        "{{Infobox military conflict\n| conflict = Battle of Fog\n| date = sometime\n"
+        "| place = Somewhere\n| result = Roman victory\n"
+        "| combatant1 = Rome\n| combatant2 = Carthage\n}}\n",
+        source_ref="x",
+        source_title="Battle of Fog",
+    )
+    assert source is not None
+    battle = merge_battle("fog", [source], fallback_name="Battle of Fog")
+
+    battle_id = write_battle(conn, battle)
+
+    row = conn.execute(
+        text("SELECT date_start, needs_review, review_notes FROM battles WHERE battle_id = :id"),
+        {"id": battle_id},
+    ).fetchone()
+    note = conn.execute(
+        text(
+            "SELECT notes FROM missing_data_log WHERE battle_id = :id AND field_name = 'date_start'"
+        ),
+        {"id": battle_id},
+    ).scalar_one()
+
+    assert row is not None
+    assert row[0] is None
+    assert row[1] is True
+    assert "unparsed_date" in row[2]
+    assert "sometime" in note

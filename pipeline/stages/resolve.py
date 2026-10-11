@@ -574,11 +574,21 @@ def _write_database(
 
     source_cache: dict[tuple[str, str], int] = {}
     for identity in identities:
+        before_counts = counts.as_dict()
+        before_cache = dict(source_cache)
         try:
-            write_identity(conn, identity, battles, sides, counts, source_cache)
+            # A savepoint per identity: on PostgreSQL one failed statement
+            # aborts the whole transaction, and every later write would fail.
+            with conn.begin_nested():
+                write_identity(conn, identity, battles, sides, counts, source_cache)
         except Exception as exc:
             # One person who will not go in is a data problem, not a reason
             # to lose the rest of the run's writes.
+            for name, value in before_counts.items():
+                setattr(counts, name, value)
+            source_cache.clear()
+            source_cache.update(before_cache)
+            counts.failed_identities += 1
             logger.error(
                 "resolve_write_failed",
                 identity=identity.canonical_name,

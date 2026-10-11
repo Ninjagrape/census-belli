@@ -495,6 +495,40 @@ def missing_fields(battle: BattleExtraction) -> list[MissingField]:
     return missing
 
 
+def _flag_unparsed_date(battle: BattleExtraction, sources: Sequence[SourceExtraction]) -> None:
+    """Flag a battle whose only date text could not be read.
+
+    Args:
+        battle: The merged battle; its failures and missing notes are updated.
+        sources: The sources it was merged from.
+    """
+    if battle.facts.date_start is not None:
+        return
+    unreadable = next((s for s in sources if s.unparsed_date_text), None)
+    if unreadable is None or unreadable.unparsed_date_text is None:
+        return
+
+    text_seen = unreadable.unparsed_date_text
+    battle.failures.append(
+        ExtractionFailure(
+            battle_name=battle.name,
+            source_ref=unreadable.provenance.source_ref,
+            status="unparsed_date",
+            error=f"could not read date text {text_seen[:80]!r}",
+        )
+    )
+    battle.missing = [
+        MissingField(
+            field_name=m.field_name,
+            side_label=m.side_label,
+            notes=f"unparsed date text: {text_seen[:80]!r}",
+        )
+        if m.field_name == "date_start" and m.side_label is None
+        else m
+        for m in battle.missing
+    ]
+
+
 def merge_battle(
     slug: str,
     sources: Sequence[SourceExtraction],
@@ -540,6 +574,8 @@ def merge_battle(
     # write rows that the post-import re-run then has to retract, and the
     # classify stage could label them before the truth is known.
     battle.missing = [] if battle.deferred_failures else missing_fields(battle)
+
+    _flag_unparsed_date(battle, sources)
 
     logger.debug(
         "battle_merged",

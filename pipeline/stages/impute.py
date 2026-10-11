@@ -74,6 +74,10 @@ __all__ = ["run"]
 
 logger = structlog.get_logger()
 
+# Read by the orchestrator: this stage commits its own run row before sampling
+# so a failed fit stays inspectable, which needs a connection it controls.
+OWNS_DB_CONNECTION = True
+
 
 def _build_likelihoods(
     conn: Any, ip: ImputeParams, sides: list[SideRow], counts: ImputeCounts

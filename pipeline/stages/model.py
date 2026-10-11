@@ -88,6 +88,10 @@ __all__ = ["run"]
 
 logger = structlog.get_logger()
 
+# Read by the orchestrator: this stage commits its own run row before sampling
+# so a failed fit stays inspectable, which needs a connection it controls.
+OWNS_DB_CONNECTION = True
+
 # Offset of the joint fit's seed from the base seed; rounds use base + index.
 JOINT_SEED_OFFSET = 50_000
 ROUND_MODEL_TYPE = "bradley_terry_round"
