@@ -30,6 +30,9 @@ Built and verified against live Wikidata and Postgres. Decisions to keep:
       mentions, agent-labelled, unreviewed) both show 0 wrong links at defaults
       (85.0/6.0), but the gold set is too clear-cut to discriminate thresholds.
       Sweep: `scripts/resolve_sweep.py`, `/resolve-eval`.
+- [ ] (pilot) organisations become generals (Luftwaffe, Stavka, Army Group B);
+      "no candidate returned" for Schwarzenberg, Grouchy, Platov, Amr ibn al-As;
+      Blücher rejected by the date gate. Check write loop for the P2 pattern
 - [ ] (gap review A8) mentions whose battle/side is missing from the DB are counted but
       not logged to missing_data_log, so resolution_rate reads high; an extract re-run
       also clears resolve's denominator rows

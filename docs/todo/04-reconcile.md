@@ -2,6 +2,10 @@
 Built, reviewed, and writing estimates against live Postgres on fixtures;
 see handover-log §19-§21. Estimates are written only after convergence.
 
+- [ ] (pilot P4) on the real corpus every side's estimate is ~35k (log-sd 0.0117)
+      whatever its reports (Kursk 2.5M -> 36,947). Diagnose before anything else;
+      defaults also missed ESS 400 (359.6). unfillable_sides_are_logged 16 vs 3;
+      ci_width_reasonable returns NULL
 - [ ] est_troops_method counts lineages the cross-regime merge dropped (handover-log §21.7)
 - [ ] Parameterise gate thresholds from the spec so integration can pass neutral_fit_converged (handover-log §21.5)
 - [ ] Width gates on the identified scale; n_identifying_sides (handover-log §20.10)

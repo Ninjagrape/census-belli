@@ -16,6 +16,8 @@ First slice built (handover-log §20.3, §21). Rules to keep:
 - [ ] Siege per side (siege_defensive), and a campaign/operation type (#12)
 - [ ] Missingness: casualty-specific flags, post-1914 regime suppression rule (#13)
 - [ ] Proportional unknown-count gate; extractor confidence into rule confidence (LOW)
+- [ ] (pilot) naval misfires: Marathon, Malvern Hill, Yom Kippur War, Operation
+      Torch; `field` never produced; missing_data_all_logged 30
 - [ ] (gap review A10) troop presence is read from raw troop_reports, so reconcile's
       `unfillable` sides look like they have troops, no missingness heuristic fires,
       and impute's mnar_delta never reaches them

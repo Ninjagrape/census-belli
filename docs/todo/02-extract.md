@@ -7,6 +7,13 @@ Built; every SQL write verified against Postgres. Decisions to keep:
   invention. They go to notes as "unassigned to sides" (handover-log §15.3).
   DBpedia writes BC years with three digits (31 BC is -031-09-02).
 
+- [ ] (pilot P2) `write_battle` loop shares one transaction with no savepoint; one
+      bad row aborts all later writes and the commit rolls back
+- [ ] (pilot P3) unparsed date strings reach date_start (56/211 fail: "212 BC",
+      "Spring 208 BC", "21–22 May 1809", O.S. brackets, AH dates)
+- [ ] (pilot) sub-components stored as branch='total' (Cannae "25,000 Romans")
+- [ ] (pilot) 22,591 requests for 211 battles; 11,337 citation_line_malformed
+      warnings; each re-run rewrites an identical 204 MB batch file
 - [ ] LLM extraction never run against a live key; fixture-tested only.
       Blocked on the free-tier quota (handover-log §15.7, 03-resolve.md).
 - [ ] (gap review A2) `no_empty_extractions` reads crawl_log.extraction_method /

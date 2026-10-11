@@ -13,24 +13,29 @@ here.
 Do not read it by default; open the cited section when a comment points there.
 
 Last updated: 2026-10-11. Everything through the model stage is committed.
-Uncommitted: Gemini removed, offline-first LLM routing (§9.4). The gap review
-findings (`docs/todo/*.md`, tagged `(gap review)`) are unfixed.
+The gap review findings (`docs/todo/*.md`, tagged `(gap review)`) are unfixed.
+**A real-corpus pilot (§11) found that the CLI pipeline cannot produce a
+ranking today**; its findings are tagged `(pilot)` in `docs/todo/` and come
+before everything else in §7.
 
 ---
 
 ## 1. Current state
 
-| Stage | Implemented | Verified against a database |
-|---|---|---|
-| crawl | yes | **yes**, plus live against Wikipedia |
-| extract | yes | **yes** (deterministic path; LLM path fixture-only) |
-| resolve | yes | **yes**, incl. an end-to-end run and live Wikidata |
-| reconcile | yes, incl. the regime-neutral fit | on fixtures; never on a real corpus |
-| classify | first slice | on fixtures; LLM path offline/cache only, no billed call |
-| impute | yes | on fixtures; never on a real corpus |
-| model | yes | on fixtures; never on a real corpus |
-| evaluate | **no** | — |
-| report | **no** | — |
+| Stage | Implemented | Verified against a database | Real corpus (pilot, §11) |
+|---|---|---|---|
+| crawl | yes | **yes**, plus live against Wikipedia | runs; 211/211 articles, gates mis-measure |
+| extract | yes | **yes** (deterministic path; LLM path fixture-only) | **broken via CLI**: writes 0 rows (P1, P2, P3) |
+| resolve | yes | **yes**, incl. an end-to-end run and live Wikidata | **broken via CLI** (P1); with a context it runs, Hannibal/Caesar/Alexander unresolved |
+| reconcile | yes, incl. the regime-neutral fit | on fixtures | runs, but **estimates collapse to the prior** (P4) |
+| classify | first slice | on fixtures; LLM path offline/cache only | deterministic path runs; naval typing misfires |
+| impute | yes | on fixtures | **fails** on the neutral scale (consequence of P4) |
+| model | yes | on fixtures | never reached; 13 of 154 battles would enter |
+| evaluate | **no** | — | — |
+| report | **no** | — | — |
+
+The baseline below was re-run on 2026-10-11 and matched exactly (959 passed,
+0 skipped; model suite 30 passed, 1 xfailed).
 
 **Verify before trusting this file:**
 
@@ -157,7 +162,12 @@ floor. Recurring classes, with the log section that records each:
   a fixture writing `1850-01-01` is rejected).
 - **Clean diagnostics, prior-only posterior.** A parameter the data cannot
   identify samples at rhat 1.00 and returns its prior (log §19.8-19.9). Check
-  prior-to-posterior contraction, not just rhat.
+  prior-to-posterior contraction, not just rhat. The pilot's reconcile did this
+  for every side at once (§11, P4).
+- **Tests that hand the stage what the CLI does not.** Integration tests pass a
+  `StageContext` with a connection; the orchestrator passes none, so extract and
+  resolve wrote nothing from the CLI while every test was green (§11, P1).
+  Verify a stage through `python -m pipeline.orchestrator`, not only pytest.
 
 ---
 
@@ -208,12 +218,13 @@ floor. Recurring classes, with the log section that records each:
 
 ## 7. Next steps, in order
 
-0. **Fix the pre-pilot gap review items** (A1, A2, A4, A5, A8, A10, A13). Without
-   A1 the pilot crawl halts on its own gate; without A4 same-name battles merge.
-1. **Run the curated corpus** (`config/sources_seed_arsht.yaml`, 211
-   title-verified battles) through crawl, extract and resolve, into a separate
-   database (§5). Extract's deterministic path needs no LLM quota. This turns
-   every gate threshold from unmeasured into measured.
+0. **Fix the pilot findings P1-P4 (§11)**, in that order, each with a test that
+   fails first. P1 to P3 are mechanical; P4 is a statistical diagnosis (Sonnet,
+   then `bayesian-model-reviewer`). Then the gap review items (A1, A2, A4, A5,
+   A8, A10, A13) and the rest of §11.
+1. **Re-run the curated corpus** (`config/sources_seed_arsht.yaml`) into
+   `general_war_corpus` through the CLI, not a driver. `data/raw/` from the
+   pilot can be reused (crawl takes ~2h); drop the extract batch files first.
 2. **Classify, second slice.** Run classify (offline: it writes the batch file
    and halts), `/process-llm-batch <file>`, re-run classify; populate `is_defender`; LLM missingness for
    `unclassified` rows. Until this runs, every multi-commander side is
@@ -224,10 +235,12 @@ floor. Recurring classes, with the log section that records each:
    (`docs/todo/09-report.md`).
 5. Full-pipeline integration test.
 
-**LLM throughput for a full corpus**: 6,000-12,000 extract calls, answered by
-subagents on the subscription's weekly limits (§9.4). The offline path has never
-run on a real request file; pilot it on ~50 battles first and measure requests
-per session.
+**LLM throughput**: the pilot measured 22,591 unique extract requests for 211
+battles (~107 per battle), so the earlier full-corpus estimate of 6,000-12,000
+is far too low. Before answering any, check why passages are so many (1,652
+were flagged for review) and whether passage size or filtering should change.
+The offline path has never run on a real request file; pilot it on ~10
+battles' requests and measure requests per session.
 
 Say explicitly what was and was not verified against a database.
 
@@ -465,11 +478,100 @@ is in the log section cited.
 
 Built and verified against a real Postgres: crawl, extract, resolve, and
 reconcile, classify, impute and model on fixtures. The recovery suites pass on
-synthetic data.
+synthetic data. The real-corpus pilot (§11) showed that "verified against a
+database" meant "verified when a test passes the connection in": through the
+CLI, extract and resolve write nothing, and reconcile's real-data estimates
+ignore the reports.
 
-Not proven: any real corpus past resolve, the offline batch path on a real
+Not proven: any real corpus producing a ranking, the offline batch path on a real
 request file (`/process-llm-batch` has never run), any billed API call
 (refusal and truncation branches untested), CI (no git remote), and every gate threshold,
-which has only run against empty or fixture databases. The gold sets are
-agent-built and unreviewed by a human. Evaluate and report do not exist, so
-there is no ranking.
+which has only run against empty or fixture databases, apart from the pilot's
+(§11). The gold sets are agent-built and unreviewed by a human. Evaluate and
+report do not exist, so there is no ranking.
+
+---
+
+## 11. Real-corpus pilot, 2026-10-11
+
+The 211-battle Arsht seed run stage by stage via the CLI into database
+`general_war_corpus` (left in place, with `data/raw`, `data/processed`,
+`data/imputed` and three 204 MB extract batch files in `data/llm_requests`).
+No LLM request was answered. Where the CLI wrote nothing, a scratch driver
+passing `StageContext(db_conn=conn)` and wrapping each extract write in a
+savepoint was used to reach later stages; nothing from it is in the repo.
+P1-P4 were re-checked against the code and the database by the lead; the rest
+are the worker's observations, with evidence, not yet re-checked.
+
+**Blocking**
+
+- **P1. The orchestrator never passes a `StageContext`.** `run_stage` calls
+  `runner_module.run(spec)` (`orchestrator.py:169`). Extract logs
+  `extract_database_write_skipped` and writes 0 rows; resolve spends ~6 min on
+  SPARQL and writes 0 generals. Crawl, reconcile, classify, impute and model
+  open their own connection and are unaffected. Extract's LLM service also has
+  no connection, so no `llm_calls` audit trail.
+- **P2. One bad row aborts all of extract's writes.** `write_battle` shares one
+  transaction with no savepoint (`extract.py:686-693`): the first
+  `InvalidDatetimeFormat` turns the remaining 207 battles into
+  `InFailedSqlTransaction` and the commit rolls back. The comment there claims
+  the opposite. Check resolve and classify write loops for the same pattern.
+- **P3. Unparsed date text reaches `date_start`.** 56 of 211 battles (27%) fail
+  to insert, mostly ancient or multi-day: `"212 BC"`, `"Spring 208 BC"`,
+  `"21–22 May 1809"`, `"5–6 June 1967 ( 1967-06-05 – 1967-06-06 )"`,
+  `"15 November [ O.S. 3 November ] 1812 – ..."`, `"January 635 AD (13 AH)"`.
+  58 records have `date_precision` None. Losing them biases the corpus further
+  toward the modern era (already 121 of 155 written battles are 17th-20th c.).
+- **P4. Reconcile's real-data estimates ignore the reports.** Converged fit
+  (5000 draws; the default 1000 missed ESS 400 at 359.6), yet all 275 sides lie
+  in 33,798-37,171 (log-sd 0.0117): Kursk Soviet max report 2,500,000 gives
+  36,947; Actium Octavian (report 3,000) 35,069; Gaugamela Achaemenid
+  (1,000,000) 35,440. Corr(ln est, ln max report) 0.31. Every source is
+  `wikipedia_infobox` and 1728 of 1755 lineages are `regime_unlabelled`. The
+  per-side posterior sd (~0.26) is wide while the medians are near-identical,
+  which suggests side effects are shrunk to the corpus level or the likelihood
+  is mis-indexed; undiagnosed. Impute then finds 275 weak sides and 0 battles
+  to condition on (`impute_no_observed_sides`), so the model never runs.
+
+**Wrong output**
+
+- Extract stores sub-components as `branch='total'`: Cannae Rome has `Total:
+  86,400` plus "25,000 Romans", "30,000 allies" as separate totals; Carthage
+  likewise. Ranges become a lower and an upper bound row.
+- Resolve: Hannibal (25 mentions), Julius Caesar (9) and Alexander (4) are
+  `llm_deferred`, so Cannae and Gaugamela credit Hasdrubal or Parmenion. 13
+  well-known people got "no candidate returned" (Schwarzenberg, MacDonald,
+  Grouchy, Platov, Amr ibn al-As); Blücher failed the date gate. Luftwaffe,
+  Stavka and Army Group B became generals. Austerlitz's "Russian Empire" side
+  holds the Austrian commanders. Side polity strings like `"Octavian 's
+  forces"` (stray space).
+- Classify typed Marathon, Malvern Hill, Yom Kippur War and Operation Torch as
+  naval; `field` is never produced (133 of 155 `unknown`).
+- The seed includes wars, not battles ("1948 Arab–Israeli War", "Yom Kippur
+  War"). Trafalgar is not in it.
+- Model design on this data: 154 battles in scope, 108 with no outcome, 33
+  with no creditable side, **13 included, 13 generals**. 216 of 308 side
+  outcomes are blank, so outcome extraction is the next coverage limit after
+  attribution.
+
+**Gates and orchestration**
+
+- Crawl `min_battles_crawled` counts every 200 URL including citations (1986
+  here), so it measures citations, not battles. `wikidata_coverage` 0: a named
+  corpus fetches no Wikidata entities, `data/raw/wikidata` is empty.
+  Citation error rate 0.21 (doi.org 403 x114, 328 read timeouts).
+- The orchestrator's stage retry reruns a fixed-seed sampler, so a
+  non-converged reconcile fails identically twice and doubles the runtime.
+- Reconcile `unfillable_sides_are_logged` 16 while the stage logged 3
+  unfillable (naval-excluded reports likely); `ci_width_reasonable` returns
+  NULL. Classify `missing_data_all_logged` 30 (error). Impute's gates read
+  `data/imputed/neutral/gate_report.json` even under `scale=published`; model
+  rejects `scale=published`.
+- Extract: 11,337 `citation_line_malformed` warnings (cause not found); every
+  re-run writes a new full batch file with identical hashes; 35,277 deferred
+  calls dedupe to 22,591 requests, which is the real extract LLM bill for 211
+  battles (~107 per battle, far above §7's estimate).
+
+**Runtimes**: crawl 7,034 s; extract 128 s; resolve 353 s cold, 140 s with the
+SPARQL cache; reconcile 206 s per attempt at defaults, ~310 s at 5000 draws;
+impute (published) 82 s per attempt.
