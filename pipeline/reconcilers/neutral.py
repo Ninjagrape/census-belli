@@ -140,6 +140,8 @@ def summarise_neutral(
         "quantity": design.quantity,
         "n_obs": design.n_obs,
         "n_sides": design.n_sides,
+        "n_source_keys_own_effect": design.n_source_keys_own_effect,
+        "n_source_keys_pooled": design.n_source_keys_pooled,
         "worst": worst,
         "worst_variable": worst_variable,
         "m0": m0,

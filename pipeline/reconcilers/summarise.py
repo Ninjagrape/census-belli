@@ -73,7 +73,7 @@ from pipeline.reconcilers.records import Quantity, Report, SideEstimate, SourceB
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     import arviz as az
 
-__all__ = ["SummaryResult", "summarise_fit"]
+__all__ = ["SummaryResult", "reports_honoured", "spread_ratio", "summarise_fit"]
 
 logger = structlog.get_logger()
 
@@ -159,6 +159,19 @@ def summarise_fit(
         "n_obs": design.n_obs,
         "n_sides": design.n_sides,
         "n_sources": design.n_sources,
+        "n_source_keys_own_effect": design.n_source_keys_own_effect,
+        "n_source_keys_pooled": design.n_source_keys_pooled,
+        "reports_honoured": reports_honoured(idata, design, ci_mass=ci_mass),
+        "s0": _scalar_stats(idata, "s0"),
+        # Type-level observation scale: sqrt(sigma_sq_type) per source type, the
+        # sigma a pooled key uses.
+        "sigma_type": _sigma_type_stats(idata),
+        # Do the estimates spread as widely as the reports? ~0.005 on the pilot
+        # corpus where every side came back at the same level; see spread_ratio.
+        "spread_ratio": spread_ratio(
+            design,
+            {e.side_id: math.log(e.value) for e in side_estimates if e.value},
+        ),
         # The rhetorical weight applied to every unlabelled row in *this* run,
         # not a fitted quantity -- see model.py's module docstring for why the
         # gold set cannot supply one. Carried here so a published estimate is
@@ -194,6 +207,140 @@ def summarise_fit(
     return SummaryResult(
         side_estimates=side_estimates, source_biases=source_biases, diagnostics=diagnostics
     )
+
+
+def spread_ratio(design: Design, log_estimates: dict[int, float]) -> float | None:
+    """How much of the reports' between-side spread the estimates keep.
+
+    The sd across sides of the log estimate over the sd across sides of the
+    mean observed log value. A collapsed fit (every side pulled to one level,
+    as on the pilot corpus where this was about 0.005) reports clean
+    convergence, so only a statistic that compares output with input can see
+    it. Over 1 is possible, since estimates are shrunk toward bias-adjusted
+    values rather than the raw reports; far under 1 is the failure.
+
+    Only sides with at least one point observation enter either sd, so a side
+    known only through bounds cannot move the denominator.
+
+    Args:
+        design: The design the fit used.
+        log_estimates: ``side_id`` to the log of the published estimate.
+
+    Returns:
+        The ratio, or None when fewer than two sides qualify or the observed
+        values do not vary.
+    """
+    point_rows = design.point_rows
+    if point_rows.size == 0:
+        return None
+    sums: dict[int, float] = defaultdict(float)
+    n_rows: dict[int, int] = defaultdict(int)
+    for row in point_rows:
+        side_id = design.side_ids[int(design.side_index[row])]
+        sums[side_id] += float(design.log_y[row])
+        n_rows[side_id] += 1
+    sides = [s for s in sums if s in log_estimates]
+    if len(sides) < 2:
+        return None
+    observed = np.array([sums[s] / n_rows[s] for s in sides])
+    estimated = np.array([log_estimates[s] for s in sides])
+    observed_sd = float(np.std(observed))
+    if observed_sd <= 0.0:
+        return None
+    return _finite(float(np.std(estimated)) / observed_sd)
+
+
+def _sigma_type_stats(idata: az.InferenceData) -> dict[str, float | None]:
+    """Posterior mean of ``sqrt(sigma_sq_type)`` for each source type.
+
+    Args:
+        idata: The fit's posterior.
+
+    Returns:
+        Source type to mean observation sd on the log scale.
+    """
+    values = np.sqrt(_pooled(idata, "sigma_sq_type"))
+    labels = _coord_labels(idata, "source_type")
+    return {label: _finite(float(values[:, i].mean())) for i, label in enumerate(labels)}
+
+
+def reports_honoured(
+    idata: az.InferenceData, design: Design, *, ci_mass: float = 0.95
+) -> dict[str, Any]:
+    """Check each side's estimate against the reports that agree with each other.
+
+    For every side with at least two point reports within a factor of two of
+    each other, the credible interval of a row's modelled location (``mu_side``
+    plus the source, regime, level and era terms the model adds to that row)
+    must contain that row's reported value for at least one of the side's rows.
+    The location is the row's own, so a labelled ancient claim is not penalised
+    for legitimate deflation. A side whose consistent reports all sit outside
+    its interval has been pulled away from evidence that agreed with itself,
+    which is what a prior too tight for a large side does.
+
+    Args:
+        idata: The fit's posterior.
+        design: The design the fit used.
+        ci_mass: Total mass of the credible interval.
+
+    Returns:
+        ``n_checked``, ``n_violations``, ``violating_side_ids`` and
+        ``within_side_mad`` (median absolute deviation of the log point reports
+        from their side's median, over sides with two or more point reports).
+    """
+    mu = _pooled(idata, "mu_side")
+    side_labels = _coord_labels(idata, "side")
+    beta = _pooled(idata, "beta_source")
+    g_regime = _pooled(idata, "g_regime")
+    delta = _pooled(idata, "delta_level")
+    a_era = _pooled(idata, "a_era")
+    era = design.era.copy()
+    if "unlabelled" in design.regimes:
+        era = era * (design.regime_index == design.regimes.index("unlabelled"))
+    else:
+        era = era * 0.0
+
+    point = set(design.point_rows.tolist())
+    rows_of_side: dict[int, list[int]] = defaultdict(list)
+    for row in sorted(point):
+        rows_of_side[int(design.side_index[row])].append(row)
+
+    lower_q = (1.0 - ci_mass) / 2.0
+    checked = 0
+    violations: list[int] = []
+    deviations: list[float] = []
+    for side_pos, rows in rows_of_side.items():
+        if len(rows) < 2:
+            continue
+        logs = np.sort(design.log_y[rows])
+        deviations.extend(np.abs(logs - np.median(logs)).tolist())
+        if not bool(np.any(np.diff(logs) <= math.log(2.0))):
+            continue
+        checked += 1
+        side_id = design.side_ids[side_pos]
+        column = side_labels.index(str(side_id))
+        contained = False
+        for row in rows:
+            eta = (
+                mu[:, column]
+                + beta[:, int(design.source_index[row])]
+                + g_regime[:, int(design.regime_index[row])]
+                + delta[:, int(design.level_index[row])]
+                + a_era * era[row]
+            )
+            lo, hi = np.quantile(eta, [lower_q, 1.0 - lower_q])
+            if lo <= design.log_y[row] <= hi:
+                contained = True
+                break
+        if not contained:
+            violations.append(int(side_id))
+
+    return {
+        "n_checked": checked,
+        "n_violations": len(violations),
+        "violating_side_ids": sorted(violations),
+        "within_side_mad": _finite(float(np.median(deviations))) if deviations else None,
+    }
 
 
 # ─── Posterior access ─────────────────────────────────────────────────────────
@@ -357,6 +504,11 @@ def _source_biases(
     sigma = _pooled(idata, "sigma_source")
     key_labels = _coord_labels(idata, "source_key")
     quantity = cast(Quantity, design.quantity)
+    # With one source type b_type is a one-level ZeroSumNormal, identically zero,
+    # so a pooled key's "bias" is a constant and not a measurement; it is stored
+    # as NULL. With several types a pooled key carries its type's real posterior.
+    # Its sigma is the type-level scale shared by every pooled key of that type.
+    single_type = len(design.source_types) == 1
 
     reports_by_key: dict[SourceKey, list[Report]] = defaultdict(list)
     for report in rows:
@@ -367,8 +519,11 @@ def _source_biases(
         position = key_labels.index(f"{key.source_type}|{key.url}")
         bias_samples = beta[:, position]
         sigma_samples = sigma[:, position]
-        bias_mu = float(np.mean(bias_samples))
-        bias_sd = float(np.std(bias_samples))
+        no_bias = single_type and not bool(
+            design.source_has_own_effect[design.source_keys.index(key)]
+        )
+        bias_mu = None if no_bias else float(np.mean(bias_samples))
+        bias_sd = None if no_bias else float(np.std(bias_samples))
         sigma_mu = float(np.mean(sigma_samples))
         sigma_sd = float(np.std(sigma_samples))
 

@@ -169,8 +169,7 @@ _INSERT_BATTLE = text(
     "VALUES (:name, CAST(:date AS DATE), 'day') RETURNING battle_id"
 )
 _INSERT_SIDE = text(
-    "INSERT INTO battle_sides (battle_id, side_label) VALUES (:battle_id, :label) "
-    "RETURNING side_id"
+    "INSERT INTO battle_sides (battle_id, side_label) VALUES (:battle_id, :label) RETURNING side_id"
 )
 _INSERT_SOURCE = text(
     "INSERT INTO sources (source_type, url) "
@@ -219,9 +218,7 @@ def _side(conn: Connection, battle_id: int, label: str = "Side A") -> int:
 
 def _source(conn: Connection, url: str, source_type: str = "wikipedia_infobox") -> int:
     """Insert a source and return its id."""
-    return int(
-        conn.execute(_INSERT_SOURCE, {"source_type": source_type, "url": url}).scalar_one()
-    )
+    return int(conn.execute(_INSERT_SOURCE, {"source_type": source_type, "url": url}).scalar_one())
 
 
 def _troop(
@@ -387,8 +384,7 @@ def test_a_side_with_one_report_gets_an_interval_spanning_more_than_a_factor_of_
     del reconciled
     lo, hi = conn.execute(
         text(
-            "SELECT est_troops_total_lo, est_troops_total_hi FROM battle_sides "
-            "WHERE side_id = :s"
+            "SELECT est_troops_total_lo, est_troops_total_hi FROM battle_sides WHERE side_id = :s"
         ),
         {"s": seed_ids["side_singleton"]},
     ).one()
@@ -408,9 +404,9 @@ def test_a_side_whose_only_report_is_a_cavalry_count_gets_a_missing_data_log_row
         text("SELECT field_name, notes FROM missing_data_log WHERE side_id = :s"),
         {"s": seed_ids["side_cavalry"]},
     ).fetchall()
-    assert any(
-        row[0] == "troop_total" and str(row[1]).startswith("reconcile: ") for row in rows
-    ), rows
+    assert any(row[0] == "troop_total" and str(row[1]).startswith("reconcile: ") for row in rows), (
+        rows
+    )
 
 
 def test_reconcile_does_not_delete_the_missing_data_rows_extract_wrote(
@@ -419,8 +415,7 @@ def test_reconcile_does_not_delete_the_missing_data_rows_extract_wrote(
     del reconciled
     rows = conn.execute(
         text(
-            "SELECT notes FROM missing_data_log "
-            "WHERE side_id = :s AND field_name = 'troop_total'"
+            "SELECT notes FROM missing_data_log WHERE side_id = :s AND field_name = 'troop_total'"
         ),
         {"s": seed_ids["side_no_reports"]},
     ).fetchall()
@@ -477,7 +472,7 @@ def test_every_quality_check_in_the_reconcile_spec_executes(
     del reconciled
     raw = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))
     checks = raw["quality_checks"]
-    assert len(checks) == 10
+    assert len(checks) == 12
 
     runner = QualityRunner(conn)
     results = runner.run_all(checks)
@@ -533,8 +528,7 @@ def test_one_run_covers_both_quantities_and_the_estimates_are_not_stale_gate_rea
     # provenance columns pointing at the same run.
     troop_run_id, casualties_run_id = conn.execute(
         text(
-            "SELECT est_troops_run_id, est_casualties_run_id FROM battle_sides "
-            "WHERE side_id = :s"
+            "SELECT est_troops_run_id, est_casualties_run_id FROM battle_sides WHERE side_id = :s"
         ),
         {"s": seed_ids["side_multi"]},
     ).one()
@@ -804,3 +798,82 @@ def test_an_unconverged_fit_writes_no_estimates(engine: Engine, tmp_path: Path) 
     assert neutral_estimate is None
     assert draws_files == []
     assert not neutral_gate.passed
+
+
+def _fabricate_run(conn: Connection, diagnostics_json: str) -> None:
+    conn.execute(
+        text(
+            "INSERT INTO model_runs "
+            "(run_name, model_type, config, started_at, completed_at, diagnostics) "
+            "VALUES ('fabricated_for_spread_gate', 'source_disagreement', "
+            "CAST('{}' AS JSONB), now(), now() + interval '1 hour', CAST(:d AS JSONB))"
+        ),
+        {"d": diagnostics_json},
+    )
+
+
+def test_the_collapse_gate_fails_a_run_whose_estimates_barely_spread(conn: Connection) -> None:
+    # The pilot corpus gave every side ~35k on a clean convergence, at a spread
+    # ratio near 0.005. Nothing else in the spec could see it.
+    _fabricate_run(conn, '{"troops": {"spread_ratio": 0.005}}')
+
+    result = QualityRunner(conn).run_one(_quality_check("estimates_not_collapsed"))
+
+    assert not result.passed, result
+    assert "SQL execution failed" not in result.message
+
+
+def test_the_collapse_gate_passes_a_run_whose_estimates_track_the_reports(
+    conn: Connection,
+) -> None:
+    _fabricate_run(conn, '{"troops": {"spread_ratio": 0.84}}')
+
+    result = QualityRunner(conn).run_one(_quality_check("estimates_not_collapsed"))
+
+    assert result.passed, result
+
+
+def test_the_collapse_gate_does_not_fail_a_run_with_no_measurable_spread(
+    conn: Connection,
+) -> None:
+    # One side, or no point observations: the ratio is undefined, not collapsed.
+    _fabricate_run(conn, '{"troops": {"spread_ratio": null}}')
+
+    assert QualityRunner(conn).run_one(_quality_check("estimates_not_collapsed")).passed
+
+
+def test_a_run_records_its_spread_ratio_and_source_effect_counts(
+    conn: Connection, reconciled: Path
+) -> None:
+    del reconciled
+    diagnostics = conn.execute(
+        text(
+            "SELECT diagnostics FROM model_runs WHERE model_type = 'source_disagreement' "
+            "AND completed_at IS NOT NULL AND diagnostics -> 'troops' ? 'n_sources' "
+            "ORDER BY run_id DESC LIMIT 1"
+        )
+    ).scalar_one()
+    troops = diagnostics["troops"]
+
+    assert "spread_ratio" in troops
+    honoured = troops["reports_honoured"]
+    assert set(honoured) == {"n_checked", "n_violations", "violating_side_ids", "within_side_mad"}
+    assert "s0" in troops and "sigma_type" in troops
+    assert (
+        troops["n_source_keys_own_effect"] + troops["n_source_keys_pooled"] == troops["n_sources"]
+    )
+
+
+def test_the_reports_honoured_gate_fails_on_a_violation_and_passes_without(
+    conn: Connection,
+) -> None:
+    _fabricate_run(
+        conn,
+        '{"troops": {"reports_honoured": {"n_violations": 2, "violating_side_ids": [1, 2]}}}',
+    )
+    failing = QualityRunner(conn).run_one(_quality_check("reports_honoured"))
+    assert not failing.passed, failing
+    assert "SQL execution failed" not in failing.message
+
+    _fabricate_run(conn, '{"troops": {"reports_honoured": {"n_violations": 0}}}')
+    assert QualityRunner(conn).run_one(_quality_check("reports_honoured")).passed

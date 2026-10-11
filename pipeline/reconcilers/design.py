@@ -51,6 +51,7 @@ from pipeline.reconcilers.records import CLAIM_REGIMES, ReconcileCounts, Report,
 
 __all__ = [
     "CASUALTY_TYPE_ORDER",
+    "DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT",
     "SCOPE_ORDER",
     "Design",
     "build_design",
@@ -81,6 +82,15 @@ CASUALTY_TYPE_ORDER: Final[tuple[str, ...]] = (
 
 _TROOPS: Final[str] = "troops"
 
+# A source key earns its own bias (u_source) and noise scale (sigma_source) only
+# when it reports on at least this many distinct battles. A key confined to one
+# battle is confounded with that battle's level: the real corpus has 148 keys,
+# every one a single battle's infobox, and a free per-key bias absorbed the
+# whole between-side spread (tau_u 0.87, s0 collapsing to 0.10), flattening
+# every estimate to the same ~35k. Two battles is no better, since the effect
+# then trades off against only two side levels.
+DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT: Final[int] = 3
+
 
 @dataclass(frozen=True)
 class Design:
@@ -94,6 +104,9 @@ class Design:
         log_y: Natural log of each reported value.
         side_index: Row's side, as an index into ``side_ids``.
         source_index: Row's source *key*, as an index into ``source_keys``.
+        source_has_own_effect: Per source key, whether it reports on enough
+            distinct battles to carry its own bias and noise terms. See
+            :data:`DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT`.
         source_type_index: Row's source type, into ``source_types``.
         regime_index: Row's claim regime, into ``regimes``.
         level_index: Row's scope (troops) or casualty type (casualties), into
@@ -132,6 +145,7 @@ class Design:
     log_y: np.ndarray
     side_index: np.ndarray
     source_index: np.ndarray
+    source_has_own_effect: np.ndarray
     source_type_index: np.ndarray
     regime_index: np.ndarray
     level_index: np.ndarray
@@ -165,6 +179,16 @@ class Design:
     def n_sources(self) -> int:
         """Number of distinct source keys."""
         return len(self.source_keys)
+
+    @property
+    def n_source_keys_own_effect(self) -> int:
+        """Number of source keys given their own bias and noise terms."""
+        return int(self.source_has_own_effect.sum())
+
+    @property
+    def n_source_keys_pooled(self) -> int:
+        """Number of source keys that carry the source-type effect only."""
+        return self.n_sources - self.n_source_keys_own_effect
 
     def coords(self) -> dict[str, list[str]]:
         """Render the coordinate labels for a PyMC model.
@@ -211,6 +235,7 @@ def build_design(
     quantity: str,
     ancient_cutoff_year: int,
     counts: ReconcileCounts | None = None,
+    min_battles_per_source_effect: int = DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT,
 ) -> Design:
     """Assemble the aligned arrays for one quantity's model.
 
@@ -222,6 +247,9 @@ def build_design(
         ancient_cutoff_year: Astronomical year below which a battle counts as
             ancient, for the era fallback.
         counts: Optional counters to accumulate censoring tallies into.
+        min_battles_per_source_effect: A source key reporting on fewer distinct
+            battles than this is pooled; see
+            :data:`DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT`.
 
     Returns:
         The design.
@@ -256,6 +284,19 @@ def build_design(
     regime_ix = _index_map([r.claim_regime for r in rows], order=CLAIM_REGIMES)
     level_ix = _index_map([level_of(r) for r in rows], order=level_order)
     lineage_ix = _index_map([r.lineage_id for r in rows])
+
+    battles_of_key: dict[str, set[int]] = {}
+    for r in rows:
+        battles_of_key.setdefault(f"{r.source_key.source_type}|{r.source_key.url}", set()).add(
+            r.battle_id
+        )
+    source_has_own_effect = np.array(
+        [
+            len(battles_of_key[label]) >= min_battles_per_source_effect
+            for label in sorted(key_ix, key=lambda k: key_ix[k])
+        ],
+        dtype=bool,
+    )
 
     # A casualty report of exactly zero is meaningful and is kept. It cannot be
     # logged, so it is held out as a censoring at log(1): "one casualty or
@@ -299,6 +340,7 @@ def build_design(
         source_index=np.array(
             [key_ix[f"{r.source_key.source_type}|{r.source_key.url}"] for r in rows], dtype=int
         ),
+        source_has_own_effect=source_has_own_effect,
         source_type_index=np.array([type_ix[r.source_type] for r in rows], dtype=int),
         regime_index=np.array([regime_ix[r.claim_regime] for r in rows], dtype=int),
         level_index=np.array([level_ix[level_of(r)] for r in rows], dtype=int),
@@ -328,6 +370,7 @@ def build_design(
         n_obs=design.n_obs,
         n_sides=design.n_sides,
         n_sources=design.n_sources,
+        n_source_keys_own_effect=design.n_source_keys_own_effect,
         n_lineages=len(design.lineage_ids),
         era_mean=round(era_mean, 4),
         censor_lower_at=int(censor_lower.sum()),

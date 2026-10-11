@@ -91,8 +91,7 @@ _INSERT_BATTLE = text(
     "VALUES (:name, CAST(:date AS DATE), 'day') RETURNING battle_id"
 )
 _INSERT_SIDE = text(
-    "INSERT INTO battle_sides (battle_id, side_label) VALUES (:battle_id, :label) "
-    "RETURNING side_id"
+    "INSERT INTO battle_sides (battle_id, side_label) VALUES (:battle_id, :label) RETURNING side_id"
 )
 _INSERT_SOURCE = text(
     "INSERT INTO sources (source_type, url) "
@@ -141,9 +140,7 @@ def _side(conn: Connection, battle_id: int, label: str = "Side A") -> int:
 
 def _source(conn: Connection, source_type: str = "wikipedia_infobox", url: str = "u1") -> int:
     """Insert a source and return its id."""
-    return int(
-        conn.execute(_INSERT_SOURCE, {"source_type": source_type, "url": url}).scalar_one()
-    )
+    return int(conn.execute(_INSERT_SOURCE, {"source_type": source_type, "url": url}).scalar_one())
 
 
 def _troop(
@@ -448,5 +445,62 @@ def test_the_counts_account_for_every_troop_row_read(conn: Connection) -> None:
         + counts.excluded_non_total_branch
         + counts.excluded_naval
         + counts.excluded_non_positive
+        + counts.excluded_implausible_small
+        + counts.excluded_non_personnel
+        + counts.excluded_date_context
+        + counts.excluded_component_of_stated_total
     )
     assert accounted == 4
+
+
+# ─── Plausibility filter ─────────────────────────────────────────────────────
+
+
+def test_junk_rows_are_excluded_and_counted_by_reason(conn: Connection) -> None:
+    battle = _battle(conn, "Junk Field")
+    side = _side(conn, battle)
+    source = _source(conn)
+    _troop(conn, side, source, 30_000.0, context="30,000")
+    _troop(conn, side, source, 42.0, context="a plain figure")
+    _troop(conn, side, source, 140.0, context="140 helicopters")
+    _troop(conn, side, source, 13.0, context="13 March:")
+
+    reports, counts = _load(conn)
+    troops = [r for r in reports if r.quantity == "troops"]
+
+    assert [r.reported_value for r in troops] == [30_000.0]
+    assert counts.excluded_implausible_small == 1
+    assert counts.excluded_non_personnel == 1
+    assert counts.excluded_date_context == 1
+
+
+def test_components_of_a_stated_total_are_excluded_and_counted(conn: Connection) -> None:
+    battle = _battle(conn, "Cannae Fixture")
+    rome = _side(conn, battle, "Rome")
+    other = _side(conn, battle, "Carthage")
+    source = _source(conn)
+    _troop(conn, rome, source, 86_400.0, context="Total: 86,400")
+    _troop(conn, rome, source, 25_000.0, context="25,000 Romans")
+    _troop(conn, rome, source, 30_000.0, context="30,000 allies")
+    _troop(conn, other, source, 21_000.0, context="21,000 Gauls")
+
+    reports, counts = _load(conn)
+    kept = sorted(r.reported_value for r in reports if r.quantity == "troops")
+
+    assert kept == [21_000.0, 86_400.0]
+    assert counts.excluded_component_of_stated_total == 2
+
+
+def test_a_side_whose_only_rows_are_junk_is_logged_unfillable(conn: Connection) -> None:
+    battle = _battle(conn, "Only Ships")
+    side = _side(conn, battle)
+    source = _source(conn)
+    _troop(conn, side, source, 500.0, context="500 transports")
+
+    reports, _ = _load(conn)
+    modellable, unfillable = classify_sides(reports, conn)
+
+    assert side not in modellable
+    assert [(u.side_id, u.reason) for u in unfillable] == [
+        (side, "only implausible or non-personnel figures")
+    ]

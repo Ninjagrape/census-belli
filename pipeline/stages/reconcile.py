@@ -90,14 +90,23 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, cast
 
 import structlog
 
 from pipeline.db import get_connection
 from pipeline.reconcilers import store
-from pipeline.reconcilers.design import Design, build_design
-from pipeline.reconcilers.load import classify_sides, load_reports, write_unfillable
+from pipeline.reconcilers.design import (
+    DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT,
+    Design,
+    build_design,
+)
+from pipeline.reconcilers.load import (
+    DEFAULT_MIN_PLAUSIBLE_TROOPS,
+    classify_sides,
+    load_reports,
+    write_unfillable,
+)
 from pipeline.reconcilers.model import (
     _UNLABELLED_WEIGHT,
     DEFAULT_PRIORS_PATH,
@@ -109,7 +118,7 @@ from pipeline.reconcilers.model import (
     sample,
 )
 from pipeline.reconcilers.neutral import summarise_neutral, write_neutral_draws
-from pipeline.reconcilers.records import ReconcileCounts, Report
+from pipeline.reconcilers.records import Quantity, ReconcileCounts, Report
 from pipeline.reconcilers.report import build_report, write_report
 from pipeline.reconcilers.summarise import summarise_fit
 from pipeline.stages.base import StageContext
@@ -117,6 +126,10 @@ from pipeline.stages.base import StageContext
 __all__ = ["run"]
 
 logger = structlog.get_logger()
+
+# Read by the orchestrator: this stage commits its own run row before sampling
+# so a failed fit stays inspectable, which needs a connection it controls.
+OWNS_DB_CONNECTION = True
 
 PROCESSED_ROOT: Final[Path] = Path("data/processed")
 
@@ -234,6 +247,7 @@ def _fit_neutral_troops(
         return summary.diagnostics
 
     store.write_neutral_estimates(conn, summary.estimates)
+    store.clear_unmodelled_neutral(conn, side_ids=set(design.side_ids))
     write_neutral_draws(summary, processed_root=processed_root, run_id=run_id)
     return summary.diagnostics
 
@@ -288,7 +302,13 @@ def _fit_quantity(
     """
     priors = ModelPriors.from_params(params, quantity=quantity)
     design = build_design(
-        reports, quantity=quantity, ancient_cutoff_year=ancient_cutoff_year, counts=counts
+        reports,
+        quantity=quantity,
+        ancient_cutoff_year=ancient_cutoff_year,
+        counts=counts,
+        min_battles_per_source_effect=int(
+            params.get("min_battles_per_source_effect", DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT)
+        ),
     )
     model = build_model(design, priors=priors, inflation=inflation)
 
@@ -322,6 +342,12 @@ def _fit_quantity(
     if _passes_write_thresholds(worst, params):
         counts.sides_estimated += store.write_side_estimates(conn, summary.side_estimates)
         counts.sources_updated += store.write_source_biases(conn, summary.source_biases)
+        store.clear_unmodelled(
+            conn,
+            cast(Quantity, quantity),
+            side_ids=set(design.side_ids),
+            source_ids={r.source_id for r in reports if r.quantity == quantity},
+        )
     else:
         logger.error(
             "reconcile_fit_not_written",
@@ -378,12 +404,20 @@ def _run_body(
     computed_at = datetime.now(UTC)
     counts = ReconcileCounts()
 
-    reports = load_reports(conn, ancient_cutoff_year=ancient_cutoff_year, counts=counts)
+    min_plausible_troops = float(params.get("min_plausible_troops", DEFAULT_MIN_PLAUSIBLE_TROOPS))
+    reports = load_reports(
+        conn,
+        ancient_cutoff_year=ancient_cutoff_year,
+        counts=counts,
+        min_plausible_troops=min_plausible_troops,
+    )
 
     # Unfillable sides are a fact about the loaded reports, not about
     # whether a model ever gets fit from them, so this runs regardless of
     # what happens to either quantity's fit below.
-    _modellable, unfillable = classify_sides(reports, conn)
+    _modellable, unfillable = classify_sides(
+        reports, conn, min_plausible_troops=min_plausible_troops
+    )
     write_unfillable(conn, unfillable, counts)
     if owns_connection:
         conn.commit()

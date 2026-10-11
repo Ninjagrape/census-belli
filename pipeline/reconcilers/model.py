@@ -64,6 +64,22 @@ not. The inflation adjustment on such a corpus is **entirely prior**, and
 ``g_bar`` is written to the diagnostics so the adjustment is recoverable and
 reversible downstream.
 
+## Source effects are nested in battles on the real corpus
+
+``u_source`` and ``sigma_source`` are one pair per source key, which identifies
+them only when keys are crossed with sides. On the real corpus every key is one
+battle's Wikipedia infobox (0 of 148 span two battles), so a per-key bias is the
+battle level under another name. It absorbed the between-side spread (tau_u 0.87,
+``s0`` collapsing to 0.10) and, because the published estimate leaves the source
+term out, every side came back at about 35,000 on a clean convergence. A key
+therefore carries its own ``u_source`` and its own noise deviation only if
+``Design.source_has_own_effect`` says it spans enough battles
+(``min_battles_per_source_effect``). Every other key is pooled: its bias is its
+source type's ``b_type`` and its noise is its type's ``sqrt(sigma_sq_type)``.
+When no source type has two such keys there is no ``u_source``, ``tau_u``,
+``z_sigma`` or ``tau_sigma`` at all. The recovery tests that pass with cross-
+classified sources therefore keep passing, and the nested case has its own.
+
 ## The inflation prior
 
 The non-anchor regimes' ``g_r`` take priors fitted to
@@ -222,6 +238,7 @@ class ModelPriors:
     side_prior_mu: float = 9.2
     side_prior_mu_sd: float = 1.0
     side_prior_sd_scale: float = 1.5
+    side_prior_nu: float = 4.0
     bias_prior_sd: float = 1.0
     source_deviation_prior_sd: float = 0.5
     sigma_deviation_prior_sd: float = 0.3
@@ -253,6 +270,7 @@ class ModelPriors:
             side_prior_mu=float(params.get(f"{prefix}side_prior_mu", default_mu)),
             side_prior_mu_sd=float(params.get(f"{prefix}side_prior_mu_sd", 1.0)),
             side_prior_sd_scale=float(params.get(f"{prefix}side_prior_sd_scale", 1.5)),
+            side_prior_nu=float(params.get("side_prior_nu", 4.0)),
             bias_prior_sd=float(params.get("bias_prior_sd", 1.0)),
             source_deviation_prior_sd=float(params.get("source_deviation_prior_sd", 0.5)),
             sigma_deviation_prior_sd=float(params.get("sigma_deviation_prior_sd", 0.3)),
@@ -427,17 +445,27 @@ def build_model(
         m0 = pm.Deterministic("m0", level - offset_bar)
 
         s0 = pm.HalfNormal("s0", sigma=priors.side_prior_sd_scale)
-        z_side = pm.Normal("z_side", 0.0, 1.0, dims="side")
+        # Heavy-tailed, with nu fixed from the spec. A Normal side prior against
+        # a Student-t likelihood makes the model explain a genuinely large side
+        # as outlying reports around a typical one (Kursk's 2.5M read as noise).
+        # Non-centred: mu_side = m0 + s0 * z_side is unchanged.
+        z_side = pm.StudentT("z_side", nu=priors.side_prior_nu, mu=0.0, sigma=1.0, dims="side")
         mu_side = pm.Deterministic("mu_side", m0 + s0 * z_side, dims="side")
 
         # ── source bias: type mean plus within-type deviation ────────────────
+        # Only keys spanning enough battles get a deviation (see the nesting
+        # section of the module docstring). With none, there is no u_source and
+        # no tau_u: a zero-size or all-zero deviation would leave tau_u
+        # sampling its prior and report clean convergence on nothing.
         b_type = pm.ZeroSumNormal("b_type", sigma=priors.bias_prior_sd, dims="source_type")
-        tau_u = pm.HalfNormal("tau_u", sigma=priors.source_deviation_prior_sd)
-        z_source = _within_type_deviations(pm, pt, design, source_type_of_key)
-        u_source = pm.Deterministic("u_source", tau_u * z_source, dims="source_key")
-        beta_source = pm.Deterministic(
-            "beta_source", b_type[source_type_of_key] + u_source, dims="source_key"
-        )
+        beta = b_type[source_type_of_key]
+        deviation_groups = _deviation_groups(design, source_type_of_key)
+        if deviation_groups:
+            tau_u = pm.HalfNormal("tau_u", sigma=priors.source_deviation_prior_sd)
+            z_source = _within_type_deviations(pm, pt, design, deviation_groups)
+            u_source = pm.Deterministic("u_source", tau_u * z_source, dims="source_key")
+            beta = beta + u_source
+        beta_source = pm.Deterministic("beta_source", beta, dims="source_key")
 
         # A repeated claim counts once because build_design collapses each
         # lineage to one row; there is no lineage term. See collapse_lineages.
@@ -462,21 +490,22 @@ def build_model(
             beta=priors.precision_prior_beta,
             dims="source_type",
         )
-        tau_sigma = pm.HalfNormal("tau_sigma", sigma=priors.sigma_deviation_prior_sd)
-        # Zero-sum within type, for the same reason as u_source: a free mean
-        # of z_sigma within a type is the same parameter as that type's
-        # sigma_sq_type. Measured on the recovery corpus as tau_sigma at
-        # ess 201 and rhat 1.02, the last thing failing the convergence gate.
-        z_sigma = pm.Deterministic(
-            "z_sigma",
-            _within_type_deviations(pm, pt, design, source_type_of_key, prefix="z_sigma"),
-            dims="source_key",
-        )
-        sigma_source = pm.Deterministic(
-            "sigma_source",
-            pm.math.sqrt(sigma_sq_type[source_type_of_key]) * pm.math.exp(tau_sigma * z_sigma),
-            dims="source_key",
-        )
+        sigma_type_scale = pm.math.sqrt(sigma_sq_type[source_type_of_key])
+        if deviation_groups:
+            tau_sigma = pm.HalfNormal("tau_sigma", sigma=priors.sigma_deviation_prior_sd)
+            # Zero-sum within type, for the same reason as u_source: a free mean
+            # of z_sigma within a type is the same parameter as that type's
+            # sigma_sq_type. Measured on the recovery corpus as tau_sigma at
+            # ess 201 and rhat 1.02, the last thing failing the convergence gate.
+            z_sigma = pm.Deterministic(
+                "z_sigma",
+                _within_type_deviations(pm, pt, design, deviation_groups, prefix="z_sigma"),
+                dims="source_key",
+            )
+            sigma_type_scale = sigma_type_scale * pm.math.exp(tau_sigma * z_sigma)
+        # A pooled key's noise is its type's scale: one sigma per source type,
+        # drawn from the same inverse-gamma the per-key scales are centred on.
+        sigma_source = pm.Deterministic("sigma_source", sigma_type_scale, dims="source_key")
 
         sigma_estimate = pm.HalfNormal("sigma_estimate", sigma=priors.estimate_dispersion_sd)
         sigma_round = pm.HalfNormal("sigma_round", sigma=priors.roundness_dispersion_sd)
@@ -521,6 +550,8 @@ def build_model(
         n_obs=design.n_obs,
         n_sides=design.n_sides,
         n_sources=design.n_sources,
+        n_source_keys_own_effect=design.n_source_keys_own_effect,
+        n_source_keys_pooled=design.n_source_keys_pooled,
         likelihood=priors.likelihood_family,
         anchor_regime=inflation.anchor_regime,
         free_regimes=free_regimes,
@@ -558,11 +589,37 @@ def _source_type_of_key(design: Design) -> np.ndarray:
     return np.array([lookup[key.source_type] for key in design.source_keys], dtype=int)
 
 
+def _deviation_groups(
+    design: Design, source_type_of_key: np.ndarray
+) -> list[tuple[str, np.ndarray]]:
+    """The source-type groups that can carry a within-type deviation.
+
+    A group is the keys of one source type that have their own effect, and it
+    needs two of them: one key's deviation is its type's mean, which ``b_type``
+    already carries.
+
+    Args:
+        design: The design, whose ``source_has_own_effect`` selects the keys.
+        source_type_of_key: Each key's source-type index.
+
+    Returns:
+        ``(type name, key indices)`` for each type with at least two own-effect
+        keys. Empty when no type has, in which case the model builds no
+        deviation terms at all.
+    """
+    groups: list[tuple[str, np.ndarray]] = []
+    for type_index, type_name in enumerate(design.source_types):
+        keys = np.flatnonzero((source_type_of_key == type_index) & design.source_has_own_effect)
+        if keys.size >= 2:
+            groups.append((type_name, keys))
+    return groups
+
+
 def _within_type_deviations(
     pm_module: Any,
     pt_module: Any,
     design: Design,
-    source_type_of_key: np.ndarray,
+    groups: list[tuple[str, np.ndarray]],
     *,
     prefix: str = "z_source",
 ) -> Any:
@@ -579,18 +636,16 @@ def _within_type_deviations(
         pm_module: The imported pymc module.
         pt_module: The imported pytensor.tensor module.
         design: The design.
-        source_type_of_key: Each key's source-type index.
+        groups: From :func:`_deviation_groups`.
         prefix: Name stem for the per-type ZeroSumNormal variables, so the
             bias deviations and the noise-scale deviations stay distinct.
 
     Returns:
-        A pytensor vector over the ``source_key`` dimension.
+        A pytensor vector over the ``source_key`` dimension, exactly zero for
+        every key outside ``groups``.
     """
     z = pt_module.zeros(len(design.source_keys))
-    for type_index, type_name in enumerate(design.source_types):
-        keys = np.flatnonzero(source_type_of_key == type_index)
-        if keys.size < 2:
-            continue
+    for type_name, keys in groups:
         z = pt_module.set_subtensor(
             z[keys],
             pm_module.ZeroSumNormal(f"{prefix}_{type_name}", sigma=1.0, shape=keys.size),

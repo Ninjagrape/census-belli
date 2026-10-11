@@ -45,9 +45,11 @@ import structlog
 from sqlalchemy import text
 
 from pipeline.reconcilers.claims import assign_lineages, classify_regime, roundness
+from pipeline.reconcilers.plausibility import exclusion_reason, filter_troop_reports
 from pipeline.reconcilers.records import Quantity, ReconcileCounts, Report, SourceKey
 
 __all__ = [
+    "DEFAULT_MIN_PLAUSIBLE_TROOPS",
     "UnfillableSide",
     "classify_sides",
     "load_reports",
@@ -68,6 +70,11 @@ _TOTAL_BRANCH: Final[str] = "total"
 # own, not folded into the general non-total-branch count. It is also
 # non-total, so it must never increment both counters (see load_reports).
 _NAVAL_BRANCH: Final[str] = "naval"
+
+# The default for params.min_plausible_troops. No battle side fields fewer than
+# a hundred combatants in this corpus's sources; below that the figure is a day
+# number, a count of something else or a fragment of a date.
+DEFAULT_MIN_PLAUSIBLE_TROOPS: Final[float] = 100.0
 
 _FIELD_NAME_BY_QUANTITY: Final[dict[Quantity, str]] = {
     "troops": "troop_total",
@@ -113,9 +120,17 @@ _LOAD_CASUALTY_REPORTS = text(
 # to see what a side's un-usable rows actually were, to say why.
 _LOAD_TROOP_SIDE_ROWS = text(
     """
-    SELECT tr.side_id, bs.battle_id, tr.branch, tr.reported_value
+    SELECT tr.side_id, bs.battle_id, tr.branch, tr.reported_value, tr.extracted_context
     FROM troop_reports tr
     JOIN battle_sides bs ON bs.side_id = tr.side_id
+    """
+)
+
+_LOAD_CASUALTY_SIDE_ROWS = text(
+    """
+    SELECT DISTINCT cr.side_id, bs.battle_id
+    FROM casualty_reports cr
+    JOIN battle_sides bs ON bs.side_id = cr.side_id
     """
 )
 
@@ -150,7 +165,8 @@ class UnfillableSide:
             reports have no exclusion rule, so a side with any casualty row at
             all is always modellable for casualties (see :func:`classify_sides`).
         reason: A short, human-readable explanation, one of
-            ``"only non-total branch reports"``, ``"only naval counts"``, or
+            ``"only non-total branch reports"``, ``"only naval counts"``,
+            ``"only implausible or non-personnel figures"`` or
             ``"no positive value"``.
     """
 
@@ -160,9 +176,7 @@ class UnfillableSide:
     reason: str
 
 
-def _classify_troop_report(
-    branch: str, reported_value: float, counts: ReconcileCounts
-) -> bool:
+def _classify_troop_report(branch: str, reported_value: float, counts: ReconcileCounts) -> bool:
     """Apply the troop-report exclusion rules and count the outcome.
 
     Args:
@@ -187,12 +201,16 @@ def _classify_troop_report(
     return True
 
 
-def _build_troop_reports(conn: Any, counts: ReconcileCounts) -> list[Report]:
+def _build_troop_reports(
+    conn: Any, counts: ReconcileCounts, *, min_plausible_troops: float
+) -> list[Report]:
     """Load, filter and classify every troop report.
 
     Args:
         conn: An open database connection.
         counts: Counters to accumulate into.
+        min_plausible_troops: Floor below which a value is not an army's
+            strength; see :mod:`pipeline.reconcilers.plausibility`.
 
     Returns:
         Usable troop :class:`Report` instances, with ``claim_regime`` and
@@ -221,8 +239,6 @@ def _build_troop_reports(conn: Any, counts: ReconcileCounts) -> list[Report]:
             continue
 
         regime = classify_regime(extracted_context, value=value)
-        if regime == "unlabelled":
-            counts.regime_unlabelled += 1
 
         reports.append(
             Report(
@@ -245,7 +261,12 @@ def _build_troop_reports(conn: Any, counts: ReconcileCounts) -> list[Report]:
                 roundness=roundness(value),
             )
         )
-        counts.troop_reports_used += 1
+
+    # After the per-row rules and the component rule, so every counter below
+    # describes the reports the model will actually see.
+    reports = filter_troop_reports(reports, counts, min_plausible_troops=min_plausible_troops)
+    counts.troop_reports_used += len(reports)
+    counts.regime_unlabelled += sum(1 for r in reports if r.claim_regime == "unlabelled")
     return reports
 
 
@@ -327,7 +348,13 @@ def _with_lineages(reports: list[Report]) -> list[Report]:
     return [replace(report, lineage_id=lineage_of_report[report.report_id]) for report in reports]
 
 
-def load_reports(conn: Any, *, ancient_cutoff_year: int, counts: ReconcileCounts) -> list[Report]:
+def load_reports(
+    conn: Any,
+    *,
+    ancient_cutoff_year: int,
+    counts: ReconcileCounts,
+    min_plausible_troops: float = DEFAULT_MIN_PLAUSIBLE_TROOPS,
+) -> list[Report]:
     """Load every usable troop and casualty report as :class:`Report` records.
 
     ``ancient_cutoff_year`` is accepted for symmetry with the rest of the
@@ -345,7 +372,12 @@ def load_reports(conn: Any, *, ancient_cutoff_year: int, counts: ReconcileCounts
         counts: Counters to accumulate into. Populates ``reports_read``,
             ``troop_reports_used``, ``casualty_reports_used``,
             ``excluded_non_total_branch``, ``excluded_naval``,
-            ``excluded_non_positive``, ``regime_unlabelled`` and ``lineages``.
+            ``excluded_non_positive``, the four plausibility counters
+            (``excluded_implausible_small``, ``excluded_non_personnel``,
+            ``excluded_date_context``, ``excluded_component_of_stated_total``),
+            ``regime_unlabelled`` and ``lineages``.
+        min_plausible_troops: Troop values below this are excluded as not an
+            army's strength (``params.min_plausible_troops``).
 
     Returns:
         Every usable report, troops and casualties together, each with
@@ -353,7 +385,9 @@ def load_reports(conn: Any, *, ancient_cutoff_year: int, counts: ReconcileCounts
     """
     del ancient_cutoff_year  # see docstring
 
-    troop_reports = _with_lineages(_build_troop_reports(conn, counts))
+    troop_reports = _with_lineages(
+        _build_troop_reports(conn, counts, min_plausible_troops=min_plausible_troops)
+    )
     casualty_reports = _with_lineages(_build_casualty_reports(conn, counts))
 
     counts.lineages = len({r.lineage_id for r in troop_reports}) + len(
@@ -367,12 +401,18 @@ def load_reports(conn: Any, *, ancient_cutoff_year: int, counts: ReconcileCounts
         excluded_non_total_branch=counts.excluded_non_total_branch,
         excluded_naval=counts.excluded_naval,
         excluded_non_positive=counts.excluded_non_positive,
+        excluded_implausible_small=counts.excluded_implausible_small,
+        excluded_non_personnel=counts.excluded_non_personnel,
+        excluded_date_context=counts.excluded_date_context,
+        excluded_component_of_stated_total=counts.excluded_component_of_stated_total,
     )
 
     return [*troop_reports, *casualty_reports]
 
 
-def _unfillable_reason(rows: Sequence[tuple[str, float]]) -> str:
+def _unfillable_reason(
+    rows: Sequence[tuple[str, float, str]], *, min_plausible_troops: float
+) -> str:
     """Explain why a side's troop reports produced no usable report.
 
     Checked in this order because "only naval counts" is the more specific,
@@ -380,52 +420,73 @@ def _unfillable_reason(rows: Sequence[tuple[str, float]]) -> str:
     fact than every row merely being non-total.
 
     Args:
-        rows: Every ``(branch, reported_value)`` pair for one side.
+        rows: Every ``(branch, reported_value, extracted_context)`` triple for
+            one side.
+        min_plausible_troops: The plausibility floor the loader applied.
 
     Returns:
         One of ``"only naval counts"``, ``"only non-total branch reports"``,
-        or ``"no positive value"``.
+        ``"only implausible or non-personnel figures"`` (positive totals that
+        every plausibility rule rejected), or ``"no positive value"``.
     """
-    if all(branch == _NAVAL_BRANCH for branch, _ in rows):
+    if all(branch == _NAVAL_BRANCH for branch, _, _ in rows):
         return "only naval counts"
-    if all(branch != _TOTAL_BRANCH for branch, _ in rows):
+    if all(branch != _TOTAL_BRANCH for branch, _, _ in rows):
         return "only non-total branch reports"
+    if any(
+        branch == _TOTAL_BRANCH
+        and value > 0
+        and exclusion_reason(value, context, min_plausible_troops=min_plausible_troops) is not None
+        for branch, value, context in rows
+    ):
+        return "only implausible or non-personnel figures"
     return "no positive value"
 
 
-def classify_sides(reports: Sequence[Report], conn: Any) -> tuple[set[int], list[UnfillableSide]]:
+def classify_sides(
+    reports: Sequence[Report],
+    conn: Any,
+    *,
+    min_plausible_troops: float = DEFAULT_MIN_PLAUSIBLE_TROOPS,
+) -> tuple[set[int], list[UnfillableSide]]:
     """Decide which sides can be modelled, and explain the ones that cannot.
 
-    A side is modellable if it has at least one usable report of any
-    quantity, which ``reports`` -- already filtered by :func:`load_reports`
-    -- directly gives us. The harder half is the sides that are *not* in
-    there: a side with troop_reports rows all of which were excluded reads
-    identically, from ``reports`` alone, to a side with no rows at all. Only
-    a second look at the raw rows, via ``conn``, can tell those apart and say
-    why.
+    Each quantity is judged on its own rows. A side whose troop rows were all
+    filtered is unfillable for troops even when it has casualty reports: judging
+    "modellable" across quantities left such sides unlogged and, on a re-run,
+    holding the troop estimate an earlier fit had given them. ``reports`` --
+    already filtered by :func:`load_reports` -- says which sides are modellable;
+    a side with raw rows that is *not* in there reads identically to a side with
+    no rows at all unless the raw rows are re-read via ``conn``, which also
+    gives the reason.
 
     Casualty reports have no exclusion rule (see
-    :func:`_build_casualty_reports`), so a side can never be unfillable for
-    casualties under today's rules; only troop sides are produced here.
+    :func:`_build_casualty_reports`), so a casualty side is unfillable only if
+    its rows vanished between the two reads; the check is kept so the log
+    stays honest if a rule is added.
 
     Args:
         reports: Every usable report, as returned by :func:`load_reports`.
         conn: An open database connection, used to re-read the raw
             ``troop_reports`` rows for sides that produced no usable report.
+        min_plausible_troops: The floor the loader applied, so the reason given
+            for a side agrees with why its rows were dropped.
 
     Returns:
-        A tuple of (modellable side ids, unfillable sides with reasons).
+        A tuple of (side ids modellable for troops, unfillable sides of both
+        quantities with reasons).
     """
-    modellable = {report.side_id for report in reports}
+    modellable = {report.side_id for report in reports if report.quantity == "troops"}
+    casualty_modellable = {report.side_id for report in reports if report.quantity == "casualties"}
 
-    rows_by_side: dict[int, list[tuple[str, float]]] = defaultdict(list)
+    rows_by_side: dict[int, list[tuple[str, float, str]]] = defaultdict(list)
     battle_by_side: dict[int, int] = {}
-    for side_id, battle_id, branch, reported_value in conn.execute(
+    for side_id, battle_id, branch, reported_value, context in conn.execute(
         _LOAD_TROOP_SIDE_ROWS
     ).fetchall():
         side_id = int(side_id)
         battle_by_side[side_id] = int(battle_id)
-        rows_by_side[side_id].append((str(branch), float(reported_value)))
+        rows_by_side[side_id].append((str(branch), float(reported_value), context or ""))
 
     unfillable: list[UnfillableSide] = []
     for side_id, rows in rows_by_side.items():
@@ -436,9 +497,20 @@ def classify_sides(reports: Sequence[Report], conn: Any) -> tuple[set[int], list
                 side_id=side_id,
                 battle_id=battle_by_side[side_id],
                 quantity="troops",
-                reason=_unfillable_reason(rows),
+                reason=_unfillable_reason(rows, min_plausible_troops=min_plausible_troops),
             )
         )
+
+    for side_id, battle_id in conn.execute(_LOAD_CASUALTY_SIDE_ROWS).fetchall():
+        if int(side_id) not in casualty_modellable:
+            unfillable.append(
+                UnfillableSide(
+                    side_id=int(side_id),
+                    battle_id=int(battle_id),
+                    quantity="casualties",
+                    reason="no usable casualty report",
+                )
+            )
 
     return modellable, unfillable
 

@@ -77,8 +77,11 @@ SEED = 20260923
 # The spec's own budget (agents/reconcile.yaml mcmc_samples). At 1000 draws
 # corpus_level reached only ess 312; at 2000 it passes both this suite and the
 # production gate (reviewer measurement, docs/handover-log.md 20.10).
+# The Student-t side prior (side_prior_nu) lets s0 trade off against the tails of
+# z_side, which mixes more slowly: at 2000 draws / 1000 tune this corpus gave
+# rhat 1.013 and ess 350 on s0, at 4000 / 1500 rhat 1.006 and ess 1144.
 MAIN_SAMPLER = SamplerSettings(
-    draws=2000, tune=1000, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+    draws=4000, tune=1500, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
 )
 
 TRUE_M0 = 9.4
@@ -343,13 +346,19 @@ def censoring_ablation() -> tuple[Fit, Fit, np.ndarray]:
     )
 
     correct_fit = run_fit(
-        corpus.reports, priors=priors, inflation=inflation, sampler=sampler,
+        corpus.reports,
+        priors=priors,
+        inflation=inflation,
+        sampler=sampler,
         ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
     )
 
     naive_reports = [replace(r, is_upper_bound=False, is_lower_bound=False) for r in corpus.reports]
     naive_fit = run_fit(
-        naive_reports, priors=priors, inflation=inflation, sampler=sampler,
+        naive_reports,
+        priors=priors,
+        inflation=inflation,
+        sampler=sampler,
         ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
     )
 
@@ -421,7 +430,10 @@ def all_unlabelled_fit() -> tuple[Fit, float]:
         draws=1500, tune=1500, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
     )
     fit = run_fit(
-        corpus.reports, priors=priors, inflation=inflation, sampler=sampler,
+        corpus.reports,
+        priors=priors,
+        inflation=inflation,
+        sampler=sampler,
         ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
     )
     true_identified_level = 9.3 + true_offset
@@ -489,11 +501,17 @@ def era_centring_fits() -> tuple[Fit, Fit, dict[int, float]]:
     )
 
     ancient_fit = run_fit(
-        ancient_corpus.reports, priors=priors, inflation=inflation, sampler=sampler,
+        ancient_corpus.reports,
+        priors=priors,
+        inflation=inflation,
+        sampler=sampler,
         ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
     )
     mixed_fit = run_fit(
-        mixed_corpus.reports, priors=priors, inflation=inflation, sampler=sampler,
+        mixed_corpus.reports,
+        priors=priors,
+        inflation=inflation,
+        sampler=sampler,
         ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
     )
     return ancient_fit, mixed_fit, ancient_corpus.true_log_side
@@ -549,7 +567,10 @@ def source_split_fits() -> tuple[Fit, Fit]:
 
     target_key = SOURCES[0]
     unsplit_fit = run_fit(
-        corpus.reports, priors=priors, inflation=inflation, sampler=sampler,
+        corpus.reports,
+        priors=priors,
+        inflation=inflation,
+        sampler=sampler,
         ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
     )
 
@@ -563,7 +584,10 @@ def source_split_fits() -> tuple[Fit, Fit]:
         else:
             split_reports.append(r)
     split_fit = run_fit(
-        split_reports, priors=priors, inflation=inflation, sampler=sampler,
+        split_reports,
+        priors=priors,
+        inflation=inflation,
+        sampler=sampler,
         ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
     )
     return unsplit_fit, split_fit
@@ -588,3 +612,235 @@ def test_splitting_one_source_into_two_rows_does_not_halve_its_recovered_bias(
         split_bias_a.bias_mu,
         unsplit_bias.bias_mu,
     )
+
+
+# ─── Nested sources: every key reports exactly one battle ────────────────────
+#
+# The real corpus is shaped like this: each source key is one battle's infobox,
+# so a per-key bias is the battle level under another name. Every test above
+# uses cross-classified sources (8 keys across 300 sides), which is why they
+# all passed while the production fit gave every side the same estimate.
+
+# The two sides of a battle are alike in scale (Kursk's are both in the millions,
+# a skirmish's both in the hundreds), so most of the side spread is battle-level.
+# That is what lets a per-key bias stand in for it.
+NESTED_BATTLE_SD = 1.9
+NESTED_SIDE_SD = 0.6
+NESTED_TRUE_SD = 2.0
+NESTED_N_BATTLES = 150
+
+
+def _simulate_nested(
+    seed: int,
+    *,
+    junk_fraction: float = 0.0,
+    noise_sd: float = 0.4,
+    key_bias_sd: float = 0.3,
+    p_second_row: float = 0.4,
+    heavy_tail_fraction: float = 0.0,
+    battle_sd: float = NESTED_BATTLE_SD,
+    contamination_fraction: float = 0.0,
+) -> tuple[list, dict[int, float]]:  # type: ignore[type-arg]
+    """One source key per battle, covering both sides, plus optional junk rows.
+
+    ``heavy_tail_fraction`` of battles sit 2-3 log units out in either direction
+    (the Kurks and the skirmishes), and ``contamination_fraction`` of sides get
+    one extra row for a component of the side (a fifth to a half of it) that no
+    rule can identify: one-sided contamination below the side total.
+    """
+    from pipeline.reconcilers.records import Report, SourceKey
+
+    rng = np.random.default_rng(seed)
+    reports: list[Report] = []
+    truth: dict[int, float] = {}
+    report_id = 0
+    for battle in range(1, NESTED_N_BATTLES + 1):
+        key = SourceKey("wikipedia_infobox", f"https://example.org/battle-{battle}")
+        key_bias = rng.normal(0.0, key_bias_sd)
+        battle_level = battle_sd * rng.normal()
+        if heavy_tail_fraction > 0.0 and rng.random() < heavy_tail_fraction:
+            battle_level += float(rng.choice([-1.0, 1.0]) * rng.uniform(2.0, 3.0))
+        for side_in_battle in (0, 1):
+            side_id = 2 * battle + side_in_battle
+            truth[side_id] = 9.2 + battle_level + NESTED_SIDE_SD * rng.normal()
+            n_rows = 2 if rng.random() < p_second_row else 1
+            component_rows = 0
+            if contamination_fraction > 0.0 and rng.random() < contamination_fraction:
+                component_rows = 1
+            for row_number in range(n_rows + component_rows):
+                is_component = row_number >= n_rows
+                report_id += 1
+                eta = truth[side_id] + key_bias + float(rng.standard_t(6) * noise_sd)
+                if is_component:
+                    eta += math.log(float(rng.uniform(0.15, 0.5)))
+                reports.append(
+                    Report(
+                        report_id=report_id,
+                        side_id=side_id,
+                        battle_id=battle,
+                        source_id=battle,
+                        source_key=key,
+                        source_type="wikipedia_infobox",
+                        quantity="troops",
+                        reported_value=math.exp(eta),
+                        extracted_context=f"{math.exp(eta):,.0f}",
+                        year_astronomical=-200 if battle % 2 else 1800,
+                        claim_regime="unlabelled",
+                        lineage_id=report_id,
+                    )
+                )
+    if junk_fraction > 0.0:
+        n_junk = int(junk_fraction * len(reports))
+        vessels = ("ships", "helicopters", "transports", "galleys")
+        sides = list(truth)
+        for i in range(n_junk):
+            report_id += 1
+            side_id = sides[int(rng.integers(len(sides)))]
+            battle = side_id // 2
+            # Half are small counts, half are vessel counts above the floor
+            # that only the context can identify.
+            if i % 2 == 0:
+                value, context = float(rng.integers(1, 100)), "a plain figure"
+            else:
+                value = float(rng.integers(150, 900))
+                context = f"{value:.0f} {vessels[(i // 2) % len(vessels)]}"
+            reports.append(
+                Report(
+                    report_id=report_id,
+                    side_id=side_id,
+                    battle_id=battle,
+                    source_id=battle,
+                    source_key=SourceKey(
+                        "wikipedia_infobox", f"https://example.org/battle-{battle}"
+                    ),
+                    source_type="wikipedia_infobox",
+                    quantity="troops",
+                    reported_value=value,
+                    extracted_context=context,
+                    year_astronomical=1800,
+                    claim_regime="unlabelled",
+                    lineage_id=report_id,
+                )
+            )
+    return reports, truth
+
+
+def _fit_nested(
+    reports: list,  # type: ignore[type-arg]
+    inflation: object,
+    troop_priors: ModelPriors,
+) -> tuple[np.ndarray, np.ndarray]:
+    fit = run_fit(
+        reports,
+        priors=troop_priors,
+        inflation=inflation,  # type: ignore[arg-type]
+        sampler=SamplerSettings(
+            draws=1000, tune=1000, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+        ),
+        ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
+    )
+    mu = np.asarray(fit.idata.posterior["mu_side"].values)
+    mu = mu.reshape(-1, mu.shape[-1])
+    labels = [int(x) for x in fit.idata.posterior.coords["side"].values]
+    return np.median(mu, axis=0), np.array(labels)
+
+
+def _assert_nested_recovery(
+    medians: np.ndarray, labels: np.ndarray, truth: dict[int, float]
+) -> None:
+    true_values = np.array([truth[int(s)] for s in labels])
+    assert np.std(medians) >= 0.5 * NESTED_TRUE_SD, np.std(medians)
+    assert np.corrcoef(medians, true_values)[0, 1] >= 0.8
+
+
+def test_a_nested_corpus_keeps_the_spread_of_the_sides(
+    inflation_prior: object, troop_priors: ModelPriors
+) -> None:
+    reports, truth = _simulate_nested(SEED)
+
+    medians, labels = _fit_nested(reports, inflation_prior, troop_priors)
+
+    _assert_nested_recovery(medians, labels, truth)
+
+
+def test_a_nested_corpus_with_junk_rows_keeps_the_spread_once_they_are_filtered(
+    inflation_prior: object, troop_priors: ModelPriors
+) -> None:
+    from pipeline.reconcilers.plausibility import filter_troop_reports
+    from pipeline.reconcilers.records import ReconcileCounts
+
+    reports, truth = _simulate_nested(SEED + 1, junk_fraction=0.10)
+    counts = ReconcileCounts()
+
+    kept = filter_troop_reports(reports, counts, min_plausible_troops=100)
+
+    assert counts.excluded_implausible_small + counts.excluded_non_personnel > 0
+    medians, labels = _fit_nested(kept, inflation_prior, troop_priors)
+    _assert_nested_recovery(medians, labels, truth)
+
+
+def _fit_nested_intervals(
+    reports: list,  # type: ignore[type-arg]
+    inflation: object,
+    troop_priors: ModelPriors,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Medians, 95% bounds and side labels of ``mu_side`` for a nested corpus."""
+    fit = run_fit(
+        reports,
+        priors=troop_priors,
+        inflation=inflation,  # type: ignore[arg-type]
+        sampler=SamplerSettings(
+            draws=1000, tune=1000, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+        ),
+        ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
+    )
+    mu = np.asarray(fit.idata.posterior["mu_side"].values)
+    mu = mu.reshape(-1, mu.shape[-1])
+    labels = np.array([int(x) for x in fit.idata.posterior.coords["side"].values])
+    lo, hi = np.quantile(mu, [0.025, 0.975], axis=0)
+    return np.median(mu, axis=0), lo, hi, labels
+
+
+def _decile_coverage(
+    lo: np.ndarray, hi: np.ndarray, labels: np.ndarray, truth: dict[int, float]
+) -> tuple[float, float]:
+    """Share of the top and of the bottom decile (by true level) inside their 95% interval."""
+    true_values = np.array([truth[int(s)] for s in labels])
+    order = np.argsort(true_values)
+    k = max(1, len(order) // 10)
+    inside = (lo <= true_values) & (true_values <= hi)
+    return float(inside[order[-k:]].mean()), float(inside[order[:k]].mean())
+
+
+def test_heavy_tailed_sides_with_component_contamination_keep_the_extremes_in_their_intervals(
+    inflation_prior: object, troop_priors: ModelPriors
+) -> None:
+    """A few sides sit 2-3 log units out, and a quarter carry a one-sided component row.
+
+    Most sides are tightly clustered (battle sd 0.5) with noisy single reports, so a
+    Normal side prior reads a large side's report as an outlier around a typical one
+    and shrinks it toward the middle. The Student-t side prior must keep the top
+    decile inside its 95% intervals markedly more often than a Normal one does.
+    """
+    reports, truth = _simulate_nested(
+        SEED + 2,
+        heavy_tail_fraction=0.06,
+        contamination_fraction=0.25,
+        battle_sd=0.5,
+        noise_sd=1.0,
+        key_bias_sd=0.5,
+        p_second_row=0.0,
+    )
+    normal_priors = replace(troop_priors, side_prior_nu=1.0e6)
+
+    medians, lo, hi, labels = _fit_nested_intervals(reports, inflation_prior, troop_priors)
+    n_medians, n_lo, n_hi, _ = _fit_nested_intervals(reports, inflation_prior, normal_priors)
+
+    true_values = np.array([truth[int(s)] for s in labels])
+    top, bottom = _decile_coverage(lo, hi, labels, truth)
+    normal_top, _ = _decile_coverage(n_lo, n_hi, labels, truth)
+    assert np.corrcoef(medians, true_values)[0, 1] >= 0.5
+    assert np.std(medians) >= np.std(n_medians)
+    assert top >= 0.45, top
+    assert bottom >= 0.8, bottom
+    assert top >= normal_top + 0.15, (top, normal_top)

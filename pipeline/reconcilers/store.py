@@ -43,6 +43,8 @@ from pipeline.reconcilers.records import (
 )
 
 __all__ = [
+    "clear_unmodelled",
+    "clear_unmodelled_neutral",
     "complete_model_run",
     "start_model_run",
     "write_neutral_estimates",
@@ -138,6 +140,59 @@ _UPDATE_SOURCE_CASUALTIES = text(
         bias_n_casualty_reports = :n_reports,
         bias_updated_at         = :updated_at
     WHERE source_id = :source_id
+    """
+)
+
+# Only rows a fit wrote (run_id set) are ever cleared: a manually entered
+# estimate has no run id and is not this stage's to remove.
+_CLEAR_SIDE_TROOPS = text(
+    """
+    UPDATE battle_sides SET
+        est_troops_total = NULL, est_troops_total_lo = NULL, est_troops_total_hi = NULL,
+        est_troops_run_id = NULL, est_troops_n_reports = NULL, est_troops_n_sources = NULL,
+        est_troops_method = NULL, est_troops_updated_at = NULL
+    WHERE est_troops_run_id IS NOT NULL AND side_id <> ALL(CAST(:keep AS INT[]))
+    """
+)
+
+_CLEAR_SIDE_CASUALTIES = text(
+    """
+    UPDATE battle_sides SET
+        est_casualties = NULL, est_casualties_lo = NULL, est_casualties_hi = NULL,
+        est_casualties_run_id = NULL, est_casualties_n_reports = NULL,
+        est_casualties_n_sources = NULL, est_casualties_method = NULL,
+        est_casualties_updated_at = NULL
+    WHERE est_casualties_run_id IS NOT NULL AND side_id <> ALL(CAST(:keep AS INT[]))
+    """
+)
+
+_CLEAR_SIDE_NEUTRAL = text(
+    """
+    UPDATE battle_sides SET
+        est_troops_neutral = NULL, est_troops_neutral_lo = NULL, est_troops_neutral_hi = NULL,
+        est_troops_neutral_log_mean = NULL, est_troops_neutral_log_sd = NULL,
+        est_troops_neutral_run_id = NULL
+    WHERE est_troops_neutral_run_id IS NOT NULL AND side_id <> ALL(CAST(:keep AS INT[]))
+    """
+)
+
+_CLEAR_SOURCE_TROOPS = text(
+    """
+    UPDATE sources SET
+        troop_bias_mu = NULL, troop_bias_sd = NULL,
+        troop_sigma_mu = NULL, troop_sigma_sd = NULL, bias_n_troop_reports = 0
+    WHERE (troop_sigma_mu IS NOT NULL OR COALESCE(bias_n_troop_reports, 0) > 0)
+      AND source_id <> ALL(CAST(:keep AS INT[]))
+    """
+)
+
+_CLEAR_SOURCE_CASUALTIES = text(
+    """
+    UPDATE sources SET
+        casualty_bias_mu = NULL, casualty_bias_sd = NULL,
+        casualty_sigma_mu = NULL, casualty_sigma_sd = NULL, bias_n_casualty_reports = 0
+    WHERE (casualty_sigma_mu IS NOT NULL OR COALESCE(bias_n_casualty_reports, 0) > 0)
+      AND source_id <> ALL(CAST(:keep AS INT[]))
     """
 )
 
@@ -256,6 +311,46 @@ def write_side_estimates(conn: Any, estimates: list[SideEstimate]) -> int:
     return written
 
 
+def clear_unmodelled(
+    conn: Any, quantity: Quantity, *, side_ids: set[int], source_ids: set[int]
+) -> tuple[int, int]:
+    """Null the fitted values of sides and sources that are not in this fit.
+
+    A re-run that newly excludes a side's rows (a plausibility rule, say) would
+    otherwise leave the estimate an earlier fit gave it, stamped with an old run
+    id, indistinguishable from a current one. Run only after the fit was
+    written, so an unconverged run leaves the previous estimates standing.
+
+    Args:
+        conn: An open database connection.
+        quantity: ``"troops"`` or ``"casualties"``.
+        side_ids: Every side in this quantity's design.
+        source_ids: Every ``source_id`` with a row in this quantity's design.
+
+    Returns:
+        ``(sides cleared, sources cleared)``.
+    """
+    side_sql = _CLEAR_SIDE_TROOPS if quantity == "troops" else _CLEAR_SIDE_CASUALTIES
+    source_sql = _CLEAR_SOURCE_TROOPS if quantity == "troops" else _CLEAR_SOURCE_CASUALTIES
+    sides = conn.execute(side_sql, {"keep": sorted(side_ids)}).rowcount
+    sources = conn.execute(source_sql, {"keep": sorted(source_ids)}).rowcount
+    logger.info("reconcile_stale_cleared", quantity=quantity, sides=sides, sources=sources)
+    return int(sides), int(sources)
+
+
+def clear_unmodelled_neutral(conn: Any, *, side_ids: set[int]) -> int:
+    """Null the neutral troop estimate of sides that are not in the neutral fit.
+
+    Args:
+        conn: An open database connection.
+        side_ids: Every side in the neutral fit's design.
+
+    Returns:
+        How many sides were cleared.
+    """
+    return int(conn.execute(_CLEAR_SIDE_NEUTRAL, {"keep": sorted(side_ids)}).rowcount)
+
+
 def write_neutral_estimates(conn: Any, estimates: list[NeutralSideEstimate]) -> int:
     """Write the regime-neutral troop estimates onto ``battle_sides``.
 
@@ -285,11 +380,11 @@ def write_neutral_estimates(conn: Any, estimates: list[NeutralSideEstimate]) -> 
 def write_source_biases(conn: Any, biases: list[SourceBias]) -> int:
     """Write one quantity's fitted source biases onto ``sources``.
 
-    A source with no reports of this quantity never appears in ``biases`` --
-    see :func:`~pipeline.reconcilers.summarise.summarise_fit`'s
-    ``_source_biases`` -- so it is never touched here, and keeps whatever the
-    ``troop_bias_*`` / ``casualty_bias_*`` columns already held (the schema
-    default, i.e. the prior, on a source that has never been fitted).
+    A source with no reports of this quantity never appears in ``biases``, so
+    it is never touched here; :func:`clear_unmodelled` nulls the ones an earlier
+    fit had written. A ``bias_mu`` of None is stored as NULL: the key is pooled
+    and its bias is identically zero, which is not a measurement. Such a row is
+    recognisable as ``bias_n_*_reports > 0`` with a NULL bias.
 
     Args:
         conn: An open database connection.

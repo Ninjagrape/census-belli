@@ -221,6 +221,11 @@ class ReconcileCounts:
     excluded_non_total_branch: int = 0
     excluded_naval: int = 0
     excluded_non_positive: int = 0
+    excluded_implausible_small: int = 0
+    excluded_non_personnel: int = 0
+    excluded_date_context: int = 0
+    excluded_parenthetical_subfigure: int = 0
+    excluded_component_of_stated_total: int = 0
     censored_upper: int = 0
     censored_lower: int = 0
     both_bounds: int = 0
@@ -243,6 +248,11 @@ class ReconcileCounts:
             "excluded_non_total_branch": self.excluded_non_total_branch,
             "excluded_naval": self.excluded_naval,
             "excluded_non_positive": self.excluded_non_positive,
+            "excluded_implausible_small": self.excluded_implausible_small,
+            "excluded_non_personnel": self.excluded_non_personnel,
+            "excluded_date_context": self.excluded_date_context,
+            "excluded_parenthetical_subfigure": self.excluded_parenthetical_subfigure,
+            "excluded_component_of_stated_total": self.excluded_component_of_stated_total,
             "censored_upper": self.censored_upper,
             "censored_lower": self.censored_lower,
             "both_bounds": self.both_bounds,
@@ -334,8 +344,9 @@ class SourceBias:
             key rather than fitting one per row.
         quantity: ``"troops"`` or ``"casualties"``.
         bias_mu: Posterior mean log-scale bias, relative to the
-            ``modern_scholarly`` anchor.
-        bias_sd: Posterior SD of that bias.
+            ``modern_scholarly`` anchor, or None for a pooled key whose bias is
+            identically zero (a corpus with a single source type).
+        bias_sd: Posterior SD of that bias, or None alongside `bias_mu`.
         sigma_mu: Posterior mean log-scale observation SD, or None when not
             estimated for this quantity.
         sigma_sd: Posterior SD of that, or None alongside `sigma_mu`.
@@ -348,8 +359,8 @@ class SourceBias:
 
     source_id: int
     quantity: Quantity
-    bias_mu: float
-    bias_sd: float
+    bias_mu: float | None
+    bias_sd: float | None
     sigma_mu: float | None
     sigma_sd: float | None
     run_id: int

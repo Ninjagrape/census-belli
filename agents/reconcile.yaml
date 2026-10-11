@@ -67,7 +67,20 @@ params:
   likelihood_family: student_t        # 'normal' for the ablation in the recovery test
   ci_mass: 0.95
 
+  # ── load-time plausibility (pipeline/reconcilers/plausibility.py) ─────────
+  # The extractor defaults branch to 'total', so day numbers, vessel counts and
+  # the contingents listed beside a stated total arrive as armies. Values below
+  # this are never an army's strength; each exclusion is counted by reason in
+  # reconciliation_report.json.
+  min_plausible_troops: 100
+
   # ── hierarchical scales ───────────────────────────────────────────────────
+  # A source key gets its own bias and noise terms only if it reports on at
+  # least this many distinct battles. On the real corpus every key is one
+  # battle's infobox, so a per-key bias is the battle level under another name:
+  # it absorbed the side spread and every estimate collapsed to ~35k on a clean
+  # convergence. Other keys use their source type's effect and noise scale.
+  min_battles_per_source_effect: 3
   source_deviation_prior_sd: 0.5      # tau_u, per-source deviation from its type
   regime_deviation_prior_sd: 0.3      # tau_a, source_type x claim-regime interaction
   sigma_deviation_prior_sd: 0.3       # tau_sigma
@@ -86,6 +99,12 @@ params:
   side_prior_mu: 9.2                  # log troops; e^9.2 ~ 10,000
   side_prior_mu_sd: 1.0
   side_prior_sd_scale: 1.5
+  # Degrees of freedom of the Student-t on the standardised side offsets. A
+  # Normal side prior against a Student-t likelihood makes the model call a
+  # genuinely large side's reports outliers around a typical one (Kursk's
+  # 2.5M pulled to ~180k). Fixed, not fitted: 4 is heavy enough to let a side
+  # sit 3 sd out, and one dof estimate on ~270 sides would be mostly prior.
+  side_prior_nu: 4
   casualty_side_prior_mu: 7.0
   casualty_side_prior_mu_sd: 1.0
   casualty_side_prior_sd_scale: 1.5
@@ -146,27 +165,84 @@ quality_checks:
       force ratios. Kept apart from model_convergence, which reads the
       published fits only.
 
+  - name: estimates_not_collapsed
+    check: >
+      SELECT COUNT(*)
+      FROM (
+        SELECT diagnostics
+        FROM model_runs
+        WHERE model_type = 'source_disagreement'
+          AND completed_at IS NOT NULL
+        ORDER BY run_id DESC
+        LIMIT 1
+      ) latest
+      WHERE latest.diagnostics -> 'troops' IS NOT NULL
+        AND COALESCE(
+              (latest.diagnostics -> 'troops' ->> 'spread_ratio')::float,
+              1::float) < 0.25
+    threshold: "= 0"
+    severity: error
+    description: >
+      The estimates keep at least a quarter of the reports' between-side spread
+      (spread_ratio: sd across sides of log est_troops_total over sd across sides
+      of the mean observed log value). On the pilot corpus a fit that converged
+      cleanly gave every side about 35,000, at a ratio near 0.005, because
+      per-source terms confounded with battles absorbed the between-side
+      variation. No sampler diagnostic sees that. A run whose ratio cannot be
+      computed (under two sides, or no point observations) is not failed.
+
+  - name: reports_honoured
+    check: >
+      SELECT COUNT(*)
+      FROM (
+        SELECT diagnostics
+        FROM model_runs
+        WHERE model_type = 'source_disagreement'
+          AND completed_at IS NOT NULL
+        ORDER BY run_id DESC
+        LIMIT 1
+      ) latest
+      WHERE latest.diagnostics -> 'troops' IS NOT NULL
+        AND COALESCE(
+              (latest.diagnostics -> 'troops' -> 'reports_honoured' ->> 'n_violations')::int,
+              0) > 0
+    threshold: "= 0"
+    severity: error
+    description: >
+      Every side with two or more point reports within a factor of two of each
+      other has at least one report inside the credible interval of that row's
+      modelled location (mu_side plus the source, regime, scope and era terms
+      for that row). A violation means the fit pulled a side away from reports
+      that agree with each other, which is what a side prior too tight for large
+      sides does and what spread_ratio can miss. The violating side ids, s0, the
+      type-level sigma and the observed within-side MAD are in
+      model_runs.diagnostics -> troops. spread_ratio stays as the collapse
+      backstop.
+
   - name: estimates_populated
     check: >
       SELECT COUNT(*) FILTER (WHERE bs.est_troops_total IS NOT NULL)::float
            / NULLIF(COUNT(*), 0)
       FROM battle_sides bs
-      WHERE EXISTS (
-        SELECT 1 FROM troop_reports tr
-        WHERE tr.side_id = bs.side_id
-          AND tr.branch = 'total'
-          AND tr.reported_value > 0
+      WHERE EXISTS (SELECT 1 FROM troop_reports tr WHERE tr.side_id = bs.side_id)
+      AND NOT EXISTS (
+        SELECT 1 FROM missing_data_log mdl
+        WHERE mdl.side_id = bs.side_id
+          AND mdl.field_name = 'troop_total'
+          AND mdl.notes LIKE 'reconcile: %'
       )
     threshold: ">= 0.99"
     severity: error
     description: >
       Every side with at least one modellable troop report has an estimate.
-      The denominator is narrowed to branch='total' and a positive value
-      because a side whose only report is a cavalry count or a non-positive
-      number is structurally un-fillable -- est_troops_total is personnel-only
-      and has no per-branch column, so counting those sides made the gate
-      permanently red for a reason that was not a defect. The narrowing cannot
-      hide a loss: unfillable_sides_are_logged counts exactly what it excludes.
+      The denominator is every side with a troop report that reconcile did not
+      itself log as unfillable, i.e. every side with at least one usable row
+      after the load filters (a side whose only report is a cavalry count, a
+      non-positive number, a day number or a vessel count is structurally
+      un-fillable: est_troops_total is personnel-only and has no per-branch
+      column). Counting those sides made the gate permanently red for a reason
+      that was not a defect. The narrowing cannot hide a loss:
+      unfillable_sides_are_logged counts exactly what it excludes.
 
   - name: unfillable_sides_are_logged
     check: >

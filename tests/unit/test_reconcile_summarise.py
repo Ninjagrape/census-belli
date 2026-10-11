@@ -135,6 +135,14 @@ def _build_idata(
     dims["b_type"] = ["source_type"]
 
     posterior["a_era"] = rng.normal(inflation.era_mu, a_era_sd, size=(n_chains, n_draws))
+    # Read by reports_honoured and the type-level sigma diagnostic.
+    posterior["g_regime"] = rng.normal(0.0, 0.05, size=(n_chains, n_draws, len(coords["regime"])))
+    dims["g_regime"] = ["regime"]
+    posterior["delta_level"] = rng.normal(0.0, 0.05, size=(n_chains, n_draws, len(coords["level"])))
+    dims["delta_level"] = ["level"]
+    posterior["s0"] = np.abs(rng.normal(1.0, 0.1, size=(n_chains, n_draws)))
+    posterior["sigma_sq_type"] = np.abs(rng.normal(0.5, 0.05, size=(n_chains, n_draws, n_types)))
+    dims["sigma_sq_type"] = ["source_type"]
     posterior["corpus_level"] = rng.normal(9.2, level_sd, size=(n_chains, n_draws))
     posterior["m0"] = rng.normal(9.0, 0.3, size=(n_chains, n_draws))
     posterior["offset_bar"] = rng.normal(0.1, 0.05, size=(n_chains, n_draws))
@@ -143,6 +151,8 @@ def _build_idata(
         "side": coords["side"],
         "source_key": coords["source_key"],
         "source_type": coords["source_type"],
+        "regime": coords["regime"],
+        "level": coords["level"],
     }
     if free_regimes:
         posterior["g_free"] = rng.normal(0.5, 0.3, size=(n_chains, n_draws, len(free_regimes)))
@@ -497,9 +507,7 @@ def test_b_type_contraction_uses_the_zero_sum_normal_marginal_prior_sd() -> None
     # 1.0 * sqrt((2-1)/2) = 0.7071...
     prior_marginal_sd = 1.0 * math.sqrt(0.5)
 
-    idata = _build_idata(
-        design, inflation, seed=13, b_type_sd=prior_marginal_sd, n_draws=4000
-    )
+    idata = _build_idata(design, inflation, seed=13, b_type_sd=prior_marginal_sd, n_draws=4000)
 
     result = summarise_fit(
         idata,
@@ -522,9 +530,7 @@ def test_b_type_contraction_uses_the_zero_sum_normal_marginal_prior_sd() -> None
 # ─── JSON round-trip and the quality gate ───────────────────────────────────────
 
 
-def test_the_diagnostics_payload_round_trips_through_json_and_the_quality_rollup_reads_it() -> (
-    None
-):
+def test_the_diagnostics_payload_round_trips_through_json_and_the_quality_rollup_reads_it() -> None:
     reports = [_report(1, side_id=1)]
     design = _design(reports)
     # A real date, because that is what yaml.safe_load makes of the fitted
