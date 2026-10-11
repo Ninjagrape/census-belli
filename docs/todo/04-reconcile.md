@@ -2,10 +2,24 @@
 Built, reviewed, and writing estimates against live Postgres on fixtures;
 see handover-log §19-§21. Estimates are written only after convergence.
 
-- [ ] (pilot P4) on the real corpus every side's estimate is ~35k (log-sd 0.0117)
+- [x] (pilot P4) fixed 2026-10-11: on the real corpus every side's estimate is ~35k (log-sd 0.0117)
       whatever its reports (Kursk 2.5M -> 36,947). Diagnose before anything else;
       defaults also missed ESS 400 (359.6). unfillable_sides_are_logged 16 vs 3;
       ci_width_reasonable returns NULL
+- [ ] (pilot) ci_width_reasonable still returns NULL on the corpus after the P4
+      fix (run 12); calibration_set_is_not_empty 0 (warning)
+- [ ] (pilot review) one-sided contamination component per row (component rows
+      sit below the side total; a symmetric t inflates the shared sigma), e.g.
+      pm.Mixture of the t and a downward-shifted component, pi ~ Beta(1, 9)
+- [ ] (pilot review) a range "X–Y" enters as two independent half-line censorings;
+      use one interval-censored row. 60 sides (23%) have only censored rows
+- [ ] (pilot review S3) a key's own effect should require co-reporting (other keys
+      on the same sides in >= k battles), not k battles alone. Latent today
+- [ ] (pilot review S4) in a type mixing qualifying and pooled keys the zero-sum
+      pins pooled keys to the qualifying mean; drop the zero-sum there. Latent
+- [ ] (pilot review N1) floor of ~5 qualifying keys before tau_u goes hierarchical
+- [ ] (pilot review N3) a_era (on unlabelled rows) learns that ancient armies were
+      smaller and calls it inflation; needs a design before adding a period mean
 - [ ] est_troops_method counts lineages the cross-regime merge dropped (handover-log §21.7)
 - [ ] Parameterise gate thresholds from the spec so integration can pass neutral_fit_converged (handover-log §21.5)
 - [ ] Width gates on the identified scale; n_identifying_sides (handover-log §20.10)

@@ -12,7 +12,8 @@ here.
 2026-10-10. Code comments cite its section numbers ("handover-log §16.1").
 Do not read it by default; open the cited section when a comment points there.
 
-Last updated: 2026-10-11. Everything through the model stage is committed.
+Last updated: 2026-10-11. Everything through the model stage is committed,
+including the pilot fixes P1-P4 (`a2930a1`, `2978ac0`).
 The gap review findings (`docs/todo/*.md`, tagged `(gap review)`) are unfixed.
 **A real-corpus pilot (§11) found that the CLI pipeline cannot produce a
 ranking today**; its findings are tagged `(pilot)` in `docs/todo/` and come
@@ -25,25 +26,25 @@ before everything else in §7.
 | Stage | Implemented | Verified against a database | Real corpus (pilot, §11) |
 |---|---|---|---|
 | crawl | yes | **yes**, plus live against Wikipedia | runs; 211/211 articles, gates mis-measure |
-| extract | yes | **yes** (deterministic path; LLM path fixture-only) | **broken via CLI**: writes 0 rows (P1, P2, P3) |
-| resolve | yes | **yes**, incl. an end-to-end run and live Wikidata | **broken via CLI** (P1); with a context it runs, Hannibal/Caesar/Alexander unresolved |
-| reconcile | yes, incl. the regime-neutral fit | on fixtures | runs, but **estimates collapse to the prior** (P4) |
+| extract | yes | **yes** (deterministic path; LLM path fixture-only) | was broken via CLI (P1-P3, fixed); not yet re-run on the corpus |
+| resolve | yes | **yes**, incl. an end-to-end run and live Wikidata | P1 fixed; Hannibal/Caesar/Alexander unresolved |
+| reconcile | yes, incl. the regime-neutral fit | on fixtures | P4 fixed: converges, spread restored; `reports_honoured` fails on 1 side from extract junk |
 | classify | first slice | on fixtures; LLM path offline/cache only | deterministic path runs; naval typing misfires |
-| impute | yes | on fixtures | **fails** on the neutral scale (consequence of P4) |
+| impute | yes | on fixtures | failed on the neutral scale because of P4; not re-run since the fix |
 | model | yes | on fixtures | never reached; 13 of 154 battles would enter |
 | evaluate | **no** | — | — |
 | report | **no** | — | — |
 
-The baseline below was re-run on 2026-10-11 and matched exactly (959 passed,
-0 skipped; model suite 30 passed, 1 xfailed).
+Counts below are after the P1-P4 fixes (2026-10-11): full suite 1170 passed,
+0 skipped; model suite 33 passed, 1 xfailed (the known bound-only ablation).
 
 **Verify before trusting this file:**
 
 ```bash
 export DATABASE_URL="postgresql+psycopg://general_war:general_war@127.0.0.1:5432/general_war"
 ruff check pipeline/ tests/ scripts/ alembic/   # expect: All checks passed
-python -m mypy pipeline/                         # expect: Success, 112 source files (strict)
-python -m pytest tests/ -q -m "not live and not model"   # expect: 959 passed, 0 skipped
+python -m mypy pipeline/                         # expect: Success, 114 source files (strict)
+python -m pytest tests/ -q -m "not live and not model"   # expect: 1170 passed, 0 skipped
 python -m pytest tests/model -m model            # recovery suites; slow (~15 min)
 ```
 
@@ -218,10 +219,13 @@ floor. Recurring classes, with the log section that records each:
 
 ## 7. Next steps, in order
 
-0. **Fix the pilot findings P1-P4 (§11)**, in that order, each with a test that
-   fails first. P1 to P3 are mechanical; P4 is a statistical diagnosis (Sonnet,
-   then `bayesian-model-reviewer`). Then the gap review items (A1, A2, A4, A5,
-   A8, A10, A13) and the rest of §11.
+0. **P1-P4 are fixed and committed** (§11). Next: **extract troop branches**.
+   Extract labels arm-of-service and component figures `branch='total'`
+   ("7,232 gunners", "25,000 Romans"); it is now the main error left in
+   reconcile (Waterloo French 25k vs 72-73k, the one `reports_honoured`
+   violation). Fix it in extract, not with more load-time regexes. Then the
+   deferred reconcile review items in `docs/todo/04-reconcile.md`, then the gap
+   review items (A1, A2, A4, A5, A8, A10, A13) and the rest of §11.
 1. **Re-run the curated corpus** (`config/sources_seed_arsht.yaml`) into
    `general_war_corpus` through the CLI, not a driver. `data/raw/` from the
    pilot can be reused (crawl takes ~2h); drop the extract batch files first.
@@ -505,24 +509,39 @@ are the worker's observations, with evidence, not yet re-checked.
 
 **Blocking**
 
-- **P1. The orchestrator never passes a `StageContext`.** `run_stage` calls
+- **P1. [fixed 2026-10-11] The orchestrator never passed a `StageContext`.** Fix: `_call_stage` passes one and commits after `run` returns (also on the offline halt), rolls back if it raises; reconcile, impute and model set `OWNS_DB_CONNECTION = True` and keep their own connection so a failed fit's run row survives. Test: `test_orchestrator_persistence.py`. Original finding: `run_stage` calls
   `runner_module.run(spec)` (`orchestrator.py:169`). Extract logs
   `extract_database_write_skipped` and writes 0 rows; resolve spends ~6 min on
   SPARQL and writes 0 generals. Crawl, reconcile, classify, impute and model
   open their own connection and are unaffected. Extract's LLM service also has
   no connection, so no `llm_calls` audit trail.
-- **P2. One bad row aborts all of extract's writes.** `write_battle` shares one
+- **P2. [fixed] One bad row aborted all of extract's writes.** Fix: `write_battle_isolated` (savepoint per battle; a failed battle leaves a bare `needs_review` row), and the same in resolve's per-identity loop. Classify had no such loop. Original finding: `write_battle` shares one
   transaction with no savepoint (`extract.py:686-693`): the first
   `InvalidDatetimeFormat` turns the remaining 207 battles into
   `InFailedSqlTransaction` and the commit rolls back. The comment there claims
   the opposite. Check resolve and classify write loops for the same pattern.
-- **P3. Unparsed date text reaches `date_start`.** 56 of 211 battles (27%) fail
+- **P3. [fixed] Unparsed date text reached `date_start`.** Fix: `pipeline/extractors/dates.py`, plus a guard in `store._upsert_battle`; 209 of 211 real infoboxes now parse (1982 Lebanon War has two incompatible spans, one infobox has no date). `c. 1200 BC` parses as year 1200 BC and loses the circa. Original finding: 56 of 211 battles (27%) fail
   to insert, mostly ancient or multi-day: `"212 BC"`, `"Spring 208 BC"`,
   `"21–22 May 1809"`, `"5–6 June 1967 ( 1967-06-05 – 1967-06-06 )"`,
   `"15 November [ O.S. 3 November ] 1812 – ..."`, `"January 635 AD (13 AH)"`.
   58 records have `date_precision` None. Losing them biases the corpus further
   toward the modern era (already 121 of 155 written battles are 17th-20th c.).
-- **P4. Reconcile's real-data estimates ignore the reports.** Converged fit
+- **P4. [fixed; reviewed by `bayesian-model-reviewer`]** Cause:
+  per-source bias and noise were nested in battles (every infobox covers one
+  battle) and absorbed each battle's level; junk `total` rows inflated noise; a
+  Normal side prior against a t likelihood called large armies' reports
+  outliers. Fix: a source key gets its own effect only if it covers >= 3
+  battles (`min_battles_per_source_effect`), else type-level bias and sigma
+  (pooled keys write NULL bias); load-time plausibility filter
+  (`reconcilers/plausibility.py`); `z_side` Student-t (`side_prior_nu: 4`);
+  troop-unfillable sides judged on troop rows only and stale estimates
+  cleared; new gates `estimates_not_collapsed` (spread_ratio >= 0.25) and
+  `reports_honoured`. Corpus after the fix (run 12): rhat 1.007, ESS 699; log-sd
+  of estimates 0.51 (was 0.0117), corr with max report 0.76 (was 0.31); Kursk
+  Soviet 427,739 (25k-5.2M); stale and unfillable gates pass;
+  `reports_honoured` 1 of 39 (Waterloo French, component rows); impute not
+  re-run. Deferred review items are in `docs/todo/04-reconcile.md`.
+  Original finding: **Reconcile's real-data estimates ignored the reports.** Converged fit
   (5000 draws; the default 1000 missed ESS 400 at 359.6), yet all 275 sides lie
   in 33,798-37,171 (log-sd 0.0117): Kursk Soviet max report 2,500,000 gives
   36,947; Actium Octavian (report 3,000) 35,069; Gaugamela Achaemenid
