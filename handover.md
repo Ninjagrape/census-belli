@@ -12,39 +12,41 @@ here.
 2026-10-10. Code comments cite its section numbers ("handover-log §16.1").
 Do not read it by default; open the cited section when a comment points there.
 
-Last updated: 2026-10-11. Everything through the model stage is committed,
-including the pilot fixes P1-P4 (`a2930a1`, `2978ac0`).
-The gap review findings (`docs/todo/*.md`, tagged `(gap review)`) are unfixed.
-**A real-corpus pilot (§11) found that the CLI pipeline cannot produce a
-ranking today**; its findings are tagged `(pilot)` in `docs/todo/` and come
-before everything else in §7.
+Last updated: 2026-10-12. Everything through the model stage is committed,
+including the pilot fixes P1-P4 and the 2026-10-12 sweep of pilot and gap
+review findings (§12). **A CLI run on the real corpus now passes crawl,
+extract and resolve and halts at reconcile on a model question awaiting the
+user's decision** (§7 step 0). Evaluate and report are unbuilt.
 
 ---
 
 ## 1. Current state
 
-| Stage | Implemented | Verified against a database | Real corpus (pilot, §11) |
+| Stage | Implemented | Verified against a database | Real corpus via CLI (2026-10-12, `general_war_corpus2`) |
 |---|---|---|---|
-| crawl | yes | **yes**, plus live against Wikipedia | runs; 211/211 articles, gates mis-measure |
-| extract | yes | **yes** (deterministic path; LLM path fixture-only) | was broken via CLI (P1-P3, fixed); not yet re-run on the corpus |
-| resolve | yes | **yes**, incl. an end-to-end run and live Wikidata | P1 fixed; Hannibal/Caesar/Alexander unresolved |
-| reconcile | yes, incl. the regime-neutral fit | on fixtures | P4 fixed: converges, spread restored; `reports_honoured` fails on 1 side from extract junk |
-| classify | first slice | on fixtures; LLM path offline/cache only | deterministic path runs; naval typing misfires |
-| impute | yes | on fixtures | failed on the neutral scale because of P4; not re-run since the fix |
-| model | yes | on fixtures | never reached; 13 of 154 battles would enter |
+| crawl | yes | **yes**, plus live against Wikipedia | **passes all gates**; 211/211 articles, Wikidata coverage 1.0 |
+| extract | yes | **yes** (deterministic path; LLM path fixture-only) | **passes**; 236 battles, 272/420 side outcomes; 14,944 LLM requests deferred |
+| resolve | yes | **yes**, incl. live Wikidata | **passes**; 678 linked, 189 unresolved, 146 LLM requests deferred |
+| reconcile | yes, incl. the regime-neutral fit | on fixtures | **halts**: over-shrinkage (§7 step 0); neutral ESS 313 (fixed by draws, not re-run) |
+| classify | first slice | on fixtures; LLM path offline/cache only | not reached; offline sweep: 131 field, 10 naval, 11 siege, 2 unknown |
+| impute | yes | on fixtures | not reached |
+| model | yes | on fixtures | not reached |
 | evaluate | **no** | — | — |
 | report | **no** | — | — |
 
-Counts below are after the P1-P4 fixes (2026-10-11): full suite 1170 passed,
-0 skipped; model suite 33 passed, 1 xfailed (the known bound-only ablation).
+Counts after the 2026-10-12 sweep: see the commit message of the sweep commit
+and §7; the expected full-suite count is whatever the last green run printed
+(~1353 passed, 0 skipped). Model suite: reconcile subset 22 passed, 1 xfailed;
+the rest of `-m model` was not re-run this session.
 
 **Verify before trusting this file:**
 
 ```bash
 export DATABASE_URL="postgresql+psycopg://general_war:general_war@127.0.0.1:5432/general_war"
 ruff check pipeline/ tests/ scripts/ alembic/   # expect: All checks passed
-python -m mypy pipeline/                         # expect: Success, 114 source files (strict)
-python -m pytest tests/ -q -m "not live and not model"   # expect: 1170 passed, 0 skipped
+python -m mypy pipeline/                         # expect: Success, 116 source files (strict)
+python -m pytest tests/ -q -m "not live and not model"   # expect: 0 failed, 0 skipped (~1353 passed)
+PYTHONIOENCODING=utf-8 alembic heads             # expect: one head, a7b8c9d0e1f2
 python -m pytest tests/model -m model            # recovery suites; slow (~15 min)
 ```
 
@@ -219,34 +221,41 @@ floor. Recurring classes, with the log section that records each:
 
 ## 7. Next steps, in order
 
-0. **P1-P4 are fixed and committed** (§11). Next: **extract troop branches**.
-   Extract labels arm-of-service and component figures `branch='total'`
-   ("7,232 gunners", "25,000 Romans"); it is now the main error left in
-   reconcile (Waterloo French 25k vs 72-73k, the one `reports_honoured`
-   violation). Fix it in extract, not with more load-time regexes. Then the
-   deferred reconcile review items in `docs/todo/04-reconcile.md`, then the gap
-   review items (A1, A2, A4, A5, A8, A10, A13) and the rest of §11.
-1. **Re-run the curated corpus** (`config/sources_seed_arsht.yaml`) into
-   `general_war_corpus` through the CLI, not a driver. `data/raw/` from the
-   pilot can be reused (crawl takes ~2h); drop the extract batch files first.
-2. **Classify, second slice.** Run classify (offline: it writes the batch file
-   and halts), `/process-llm-batch <file>`, re-run classify; populate `is_defender`; LLM missingness for
-   `unclassified` rows. Until this runs, every multi-commander side is
-   `default_split`, credits nobody, and `exclusion_concentration` will fire.
+0. **Reconcile over-shrinkage: a model decision for the user.** The CLI corpus
+   run (`general_war_corpus2`, run_id 1) fails `estimates_not_collapsed`
+   (0.214 < 0.25). It is real, not a gate bug: on 244 sides with point total
+   reports, sigma_type(wikipedia_infobox) 0.909 against side sd s0 0.38, and
+   212 of the 244 have one report, so a singleton keeps ~15% of its distance
+   from the corpus level (est sd 0.285 vs report sd 1.31; corr with max report
+   0.76; "300" becomes 30,919 and "3.8M" becomes 48,116). The likely cause is
+   that the symmetric Student-t treats scope-different reports on multi-report
+   sides (engaged vs total, different days) as noise, inflating sigma. Options
+   put to the user: (A) informative prior on infobox sigma from the reconcile
+   gold set; (B) the one-sided contamination component in
+   `docs/todo/04-reconcile.md`; (C) a `bayesian-model-reviewer` opinion first.
+   **Do not lower `min_spread_ratio`.** Ask which option before building.
+1. **Re-run reconcile onward via the CLI** once 0 is settled:
+   `python -m pipeline.orchestrator --stages reconcile,classify,impute,model --continue-past-deferred`
+   with `DATABASE_URL` on `general_war_corpus2` (crawl, extract, resolve are
+   already there). `mcmc_samples` is now 5000 for the neutral fit's ESS 313;
+   that is untested on the corpus. Expect classify, impute and model to surface
+   their own real-data problems; read the gate lines, not just the exit code.
+2. **Answer the deferred LLM batches** (`data/llm_requests/extract_20261012T095006Z.jsonl`,
+   14,944 requests; `resolve_20261012T095357Z.jsonl`, 146) with
+   `/process-llm-batch`, starting with resolve (small, and it unblocks Hannibal,
+   Caesar, Alexander). Pilot extract on ~10 battles first and measure requests
+   per session. 19,790 of the remaining extract passages are `web_secondary`
+   citations (~94 per battle); whether to keep them is an open cost decision.
+   Then classify's LLM slice (roles; until it runs every multi-commander side is
+   `default_split` and credits nobody).
 3. **Reconcile and impute open items** (`docs/todo/04-reconcile.md`,
    `06-impute.md`), above all propagating the shared reconcile error into impute.
 4. **Evaluate and report.** Fix the two BLOCKING report items first
    (`docs/todo/09-report.md`).
-5. Full-pipeline integration test.
-
-**LLM throughput**: the pilot measured 22,591 unique extract requests for 211
-battles (~107 per battle), so the earlier full-corpus estimate of 6,000-12,000
-is far too low. Before answering any, check why passages are so many (1,652
-were flagged for review) and whether passage size or filtering should change.
-The offline path has never run on a real request file; pilot it on ~10
-battles' requests and measure requests per session.
+5. Full-pipeline integration test on fixtures (crawl through model).
 
 Say explicitly what was and was not verified against a database.
+
 
 ---
 
@@ -483,9 +492,10 @@ is in the log section cited.
 Built and verified against a real Postgres: crawl, extract, resolve, and
 reconcile, classify, impute and model on fixtures. The recovery suites pass on
 synthetic data. The real-corpus pilot (§11) showed that "verified against a
-database" meant "verified when a test passes the connection in": through the
-CLI, extract and resolve write nothing, and reconcile's real-data estimates
-ignore the reports.
+database" meant "verified when a test passes the connection in". After the
+2026-10-12 sweep (§12), crawl, extract and resolve pass their gates through
+the CLI on the real corpus; reconcile converges but over-shrinks (§7 step 0);
+classify, impute and model have not run on real data since.
 
 Not proven: any real corpus producing a ranking, the offline batch path on a real
 request file (`/process-llm-batch` has never run), any billed API call
@@ -594,3 +604,47 @@ are the worker's observations, with evidence, not yet re-checked.
 **Runtimes**: crawl 7,034 s; extract 128 s; resolve 353 s cold, 140 s with the
 SPARQL cache; reconcile 206 s per attempt at defaults, ~310 s at 5000 draws;
 impute (published) 82 s per attempt.
+
+---
+
+## 12. Sweep of pilot and gap-review findings, 2026-10-12
+
+Seven parallel workers (one worktree and one scratch database each,
+`general_war_wt_*`), merged and committed. What a future session needs:
+
+- **Orchestrator**: `--continue-past-deferred` runs later stages on
+  deterministic data after an offline LLM deferral (exit code 3 at the end;
+  the result is provisional). A gate failure retries only with
+  `retry_policy.retry_on_gate_failure: true` (crawl only); reconcile, impute
+  and model have `max_stage_retries: 0` (fixed seed; model retries
+  non-convergence itself, reconcile and impute do not). `--stages all` skips
+  unbuilt stages. Gate thresholds may say `{params.<name>}`; a missing param
+  fails the check. `imputation_gate` reads the run's `params.scale`.
+- **Crawl**: gates read a marker row `crawl-plan://battle-articles?targets=..&fetched=..&entities=..&floor=..`
+  (http_status 0) written to crawl_log at the end of each run; error-rate SQL
+  excludes it. Named corpora fetch each article's Wikidata entity via
+  `Special:EntityData` (robots allows it), Q-id read from the article HTML.
+- **Extract**: arm-of-service figures get their branch, contingents/nationalities
+  `other`; a side with only components gets one derived total marked
+  `is_lower_bound`, `page_or_section='infobox:derived_total'`. Victor matching
+  uses demonym stems plus a small table, still exactly-one-side. Battles are
+  keyed by `battles.source_slug` (the crawl filename stem), so same-name
+  battles stay apart. Offline batch files with identical hash sets are reused.
+  Circa dates are not flagged (`c. 1200 BC` reads as exact) - open.
+- **Resolve**: non-person filter by name pattern and P31; title/particle
+  stripping and a search fallback for zero-candidate names (fixture-tested
+  only, not live); generals get born/died and `*_year_astronomical` columns.
+- **Classify**: `battles.wikipedia_url` (Wikidata/DBpedia form) never matched
+  crawl's hashed filenames, so no article had ever been read; lookup now uses
+  `source_slug`, then title. Naval needs ship vocabulary to dominate. An
+  existing non-`unknown` battle_type is never rewritten, so reset it before
+  re-running classify on an old database. `is_defender` is set only for
+  "Siege of X" where one side names X.
+- **Reconcile**: `data_era` is centred over the unlabelled rows it applies to
+  (reviewed, approved); a non-finite rhat/ESS fails the write gate; withheld
+  sides are logged; `ci_width_reasonable` and the singleton gate measure
+  multi-claim and single-claim sides by `est_troops_method`.
+- **Model**: `scale=published` runs write model types with a `_published`
+  suffix so the neutral ranking stays `MAX(run_id)` of the plain type.
+- **Parallel workers**: give each its own database; three workers once picked
+  the same Alembic revision id, so check `alembic heads` after any merge.

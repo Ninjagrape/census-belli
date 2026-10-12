@@ -34,9 +34,9 @@ Standing rules worth knowing before changing these:
 - [x] (pilot P1) fixed 2026-10-11: orchestrator `run_stage` calls `run(spec)` with no StageContext, so
       extract and resolve write nothing from the CLI. Pass a context with the
       connection; add a test that drives a stage through `run_pipeline`
-- [ ] (pilot) stage retry reruns a fixed-seed sampler; a non-converged fit fails
+- [x] fixed 2026-10-12: (pilot) stage retry reruns a fixed-seed sampler; a non-converged fit fails
       identically and doubles runtime. Skip retry for deterministic failures
-- [ ] (gap review A13) `--stages all` halts at evaluate (module missing; the
+- [x] fixed 2026-10-12: (gap review A13) `--stages all` halts at evaluate (module missing; the
       complete_with_warnings policy does not prevent the halt). Skip unbuilt
       stages loudly or leave them out of `all` until built
 - [ ] (gap review) no end-to-end integration test chains crawl through model

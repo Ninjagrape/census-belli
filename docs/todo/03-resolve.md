@@ -30,13 +30,14 @@ Built and verified against live Wikidata and Postgres. Decisions to keep:
       mentions, agent-labelled, unreviewed) both show 0 wrong links at defaults
       (85.0/6.0), but the gold set is too clear-cut to discriminate thresholds.
       Sweep: `scripts/resolve_sweep.py`, `/resolve-eval`.
-- [ ] (pilot) organisations become generals (Luftwaffe, Stavka, Army Group B);
+- [x] fixed 2026-10-12: (pilot) organisations become generals (Luftwaffe, Stavka, Army Group B);
       "no candidate returned" for Schwarzenberg, Grouchy, Platov, Amr ibn al-As;
       Blücher rejected by the date gate. Check write loop for the P2 pattern
-- [ ] (gap review A8) mentions whose battle/side is missing from the DB are counted but
+- [x] fixed 2026-10-12: (gap review A8) mentions whose battle/side is missing from the DB are counted but
       not logged to missing_data_log, so resolution_rate reads high; an extract re-run
       also clears resolve's denominator rows
-- [ ] (gap review A9) generals.born / died / era / highest_rank never written, though
+- [x] fixed 2026-10-12: (gap review A9) generals.born / died / era / highest_rank never written, though
       candidates carry birth and death years
-- [ ] (gap review) `no_duplicate_generals` is vacuous (wikidata_id is UNIQUE); it cannot
+- [x] fixed 2026-10-12: (gap review) `no_duplicate_generals` is vacuous (wikidata_id is UNIQUE); it cannot
       see duplicates among corpus-local generals
+- [ ] Confirm the title/particle and search-fallback fixes live (Schwarzenberg, MacDonald, Grouchy, Platov, Amr ibn al-As, Blücher): fixture-tested only
