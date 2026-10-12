@@ -19,9 +19,9 @@ translation happens once, here, under a test that pins the direction.
 
 Two further decisions worth knowing before changing anything:
 
-**The era covariate is centred.** In a heavily ancient corpus an uncentred
-ancient/modern indicator is a column of mostly ones, which makes the era term
-a second intercept confounded with the corpus mean: the sampler funnels, or
+**The era covariate is centred, over the rows it applies to.** In a heavily ancient
+corpus an uncentred ancient/modern indicator is a column of mostly ones, which
+makes the era term a second intercept confounded with the corpus mean: the sampler funnels, or
 every estimate shifts by a constant nobody can see. Centring costs nothing and
 removes the failure. A corpus that is entirely ancient degenerates gracefully
 to an identically zero column, which is the correct answer -- with no contrast
@@ -81,6 +81,7 @@ CASUALTY_TYPE_ORDER: Final[tuple[str, ...]] = (
 )
 
 _TROOPS: Final[str] = "troops"
+_UNLABELLED: Final[str] = "unlabelled"
 
 # A source key earns its own bias (u_source) and noise scale (sigma_source) only
 # when it reports on at least this many distinct battles. A key confined to one
@@ -118,8 +119,10 @@ class Design:
         era: The centred era covariate. Zero means "no information", which is
             what both an undated battle and a corpus with no era contrast
             should contribute.
-        era_mean: The report-weighted fraction of ancient reports that was
-            subtracted. Recorded so a run's anchoring is reconstructable.
+        era_mean: The fraction of ancient reports among the dated unlabelled
+            rows (the only rows the era term applies to), subtracted from
+            those rows. Recorded so a run's anchoring is reconstructable.
+        era_centre_rows: How many rows ``era_mean`` was computed over.
         roundness: 0..1 per row; conventional figures get more observation
             variance because they are coarsened, not merely noisy.
         is_estimate: Whether the source hedged the figure.
@@ -164,6 +167,7 @@ class Design:
     regimes: tuple[str, ...]
     levels: tuple[str, ...]
     lineage_ids: tuple[int, ...]
+    era_centre_rows: int = 0
 
     @property
     def n_obs(self) -> int:
@@ -311,9 +315,17 @@ def build_design(
         flag = era_flag(report.year_astronomical, ancient_cutoff_year)
         era_values.append(np.nan if flag is None else flag)
     era_raw = np.array(era_values, dtype=float)
-    known = ~np.isnan(era_raw)
+    # The era term only ever applies to unlabelled rows (model.py gates it so),
+    # so the centre is taken over those rows. Centring over every dated row
+    # left the applied column with a non-zero mean whenever labelled and
+    # unlabelled rows differed in era, which re-introduced the confounding with
+    # the intercept that centring exists to remove. Rows outside the term are
+    # zeroed so the stored column is exactly what the model uses.
+    unlabelled = np.array([r.claim_regime == _UNLABELLED for r in rows], dtype=bool)
+    known = ~np.isnan(era_raw) & unlabelled
     era_mean = float(era_raw[known].mean()) if bool(known.any()) else 0.0
     era = np.where(known, era_raw - era_mean, 0.0)
+    era_centre_rows = int(known.sum())
 
     upper_flag = np.array([r.is_upper_bound for r in rows], dtype=bool)
     lower_flag = np.array([r.is_lower_bound for r in rows], dtype=bool)
@@ -362,6 +374,7 @@ def build_design(
         regimes=tuple(str(x) for x in sorted(regime_ix, key=lambda k: regime_ix[k])),
         levels=tuple(str(x) for x in sorted(level_ix, key=lambda k: level_ix[k])),
         lineage_ids=tuple(sorted(lineage_ix, key=lambda k: lineage_ix[k])),
+        era_centre_rows=era_centre_rows,
     )
 
     logger.info(
@@ -373,6 +386,7 @@ def build_design(
         n_source_keys_own_effect=design.n_source_keys_own_effect,
         n_lineages=len(design.lineage_ids),
         era_mean=round(era_mean, 4),
+        era_centre_rows=era_centre_rows,
         censor_lower_at=int(censor_lower.sum()),
         censor_upper_at=int(censor_upper.sum()),
         both_bounds=int(both.sum()),

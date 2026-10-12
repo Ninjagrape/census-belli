@@ -376,6 +376,61 @@ def test_a_singleton_side_gets_single_report_debiased_and_a_multi_lineage_side_g
     assert by_side[2].n_reports == 2
 
 
+def test_method_counts_the_claims_that_entered_the_fit_not_the_loaded_reports() -> None:
+    # The unlabelled figure restates the chronicle row's, so the cross-regime
+    # merge drops it: the model saw one claim, whatever the loader counted.
+    reports = [
+        _report(1, side_id=1, regime="chronicle", url="https://example/a", lineage_id=1),
+        _report(2, side_id=1, regime="unlabelled", url="https://example/b", lineage_id=2),
+    ]
+    design = _design(reports)
+    inflation = InflationPrior()
+    idata = _build_idata(design, inflation, seed=10)
+
+    result = summarise_fit(
+        idata,
+        design,
+        reports,
+        run_id=1,
+        ci_mass=0.95,
+        inflation=inflation,
+        priors=ModelPriors(),
+        computed_at=_COMPUTED_AT,
+    )
+
+    estimate = result.side_estimates[0]
+    assert estimate.n_reports == 1
+    assert estimate.n_sources == 1
+    assert estimate.method == "single_report_debiased"
+
+
+def test_zero_valued_rows_count_neither_towards_the_method_nor_the_lineage_count() -> None:
+    # The zero row never enters the likelihood, so it cannot make a side a
+    # "source_disagreement" or inflate n_reports / n_sources.
+    reports = [
+        _report(1, side_id=1, value=10_000.0, url="https://example/a", lineage_id=1),
+        _report(2, side_id=1, value=0.0, url="https://example/b", lineage_id=2),
+    ]
+    design = _design(reports)
+    inflation = InflationPrior()
+    idata = _build_idata(design, inflation, seed=11)
+
+    result = summarise_fit(
+        idata,
+        design,
+        reports,
+        run_id=1,
+        ci_mass=0.95,
+        inflation=inflation,
+        priors=ModelPriors(),
+        computed_at=_COMPUTED_AT,
+    )
+
+    estimate = result.side_estimates[0]
+    assert (estimate.n_reports, estimate.n_sources) == (1, 1)
+    assert estimate.method == "single_report_debiased"
+
+
 # ─── n_identifying_sides ─────────────────────────────────────────────────────────
 
 
@@ -588,3 +643,16 @@ def test_a_side_with_only_upper_bound_reports_is_labelled_bound_only() -> None:
     by_side = {e.side_id: e for e in result.side_estimates}
     assert by_side[1].method == "bound_only"
     assert by_side[2].method == "source_disagreement"
+
+
+# ─── Write gate ──────────────────────────────────────────────────────────────
+
+
+def test_a_non_finite_rhat_or_ess_fails_the_write_gate() -> None:
+    from pipeline.stages.reconcile import _failed_thresholds
+
+    ok = {"max_rhat": 1.001, "min_ess_bulk": 900.0, "divergences": 0}
+    assert _failed_thresholds(ok, {}) == []
+    assert _failed_thresholds({**ok, "max_rhat": float("nan")}, {})
+    assert _failed_thresholds({**ok, "max_rhat": float("inf")}, {})
+    assert _failed_thresholds({**ok, "min_ess_bulk": float("nan")}, {})

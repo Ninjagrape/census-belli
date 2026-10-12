@@ -39,6 +39,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
+from urllib.parse import quote
 
 import structlog
 
@@ -50,6 +51,7 @@ from pipeline.extractors import (
     ExtractWriteCounts,
     SourceExtraction,
     build_passages,
+    drop_repeated_passages,
     extract_from_passages,
     iter_batches,
     map_entity,
@@ -60,6 +62,7 @@ from pipeline.extractors import (
     write_battle_isolated,
 )
 from pipeline.extractors.article import DEFAULT_MAX_PASSAGE_CHARS
+from pipeline.extractors.store import reserve_battle_id
 from pipeline.llm import LLMService
 from pipeline.stages.base import StageContext, StageOutcome
 
@@ -74,6 +77,20 @@ _ARTICLE_DIR: Final[str] = "battles_html"
 _WIKIDATA_DIR: Final[str] = "wikidata"
 _CITATIONS_DIR: Final[str] = "citations"
 _DBPEDIA_DIR: Final[str] = "dbpedia"
+_CRAWL_STATE_FILE: Final[str] = "crawl_state.json"
+
+_WIKIPEDIA_ARTICLE_PREFIX: Final[str] = "https://en.wikipedia.org/wiki/"
+_WIKIDATA_ENTITY_PREFIX: Final[str] = "https://www.wikidata.org/wiki/"
+_DBPEDIA_RESOURCE_PREFIX: Final[str] = "http://dbpedia.org/resource/"
+_QID_RE: Final = re.compile(r"^Q\d+$")
+
+# A fetched citation shorter than this is a page title or a cookie banner, not
+# a source that discusses the battle.
+_MIN_CITATION_CHARS: Final[int] = 40
+
+# A run cut short by --limit writes its processed files under this suffix, so
+# that a smoke test cannot overwrite the full corpus's outputs.
+_LIMITED_SUFFIX: Final[str] = ".limited"
 
 # Preferred first: mwparserfromhell reads templates, so a wikitext sibling
 # gives a better infobox than the rendered HTML the crawl stage stores.
@@ -98,6 +115,7 @@ class RawBattle:
     dbpedia_path: Path | None = None
     citation_paths: list[Path] = field(default_factory=list)
     title: str = ""
+    wikipedia_url: str = ""
 
     @property
     def name(self) -> str:
@@ -110,6 +128,25 @@ class RawBattle:
         if self.title:
             return self.title
         return _URL_DIGEST_RE.sub("", self.slug).replace("_", " ").strip()
+
+    @property
+    def article_ref(self) -> str:
+        """The canonical Wikipedia URL of the article, for provenance.
+
+        Returns:
+            The URL the crawl stage fetched when it is known, otherwise one
+            rebuilt from the article title. The local file path is never
+            used: ``sources.url`` is a citation, and a path on one machine
+            is not one.
+        """
+        if self.wikipedia_url:
+            return self.wikipedia_url
+        return f"{_WIKIPEDIA_ARTICLE_PREFIX}{quote(self.name.replace(' ', '_'), safe='_(),:')}"
+
+    @property
+    def dbpedia_ref(self) -> str:
+        """The DBpedia resource URI that mirrors the article."""
+        return _DBPEDIA_RESOURCE_PREFIX + self.article_ref.rsplit("/wiki/", 1)[-1]
 
     @property
     def article_is_html(self) -> bool:
@@ -157,6 +194,25 @@ def _wikidata_index(wikidata_dir: Path) -> dict[str, Path]:
             index[Path(article_filename(url)).stem] = path
 
     return index
+
+
+def _crawl_urls(raw_root: Path) -> dict[str, str]:
+    """Map article slugs onto the URLs the crawl stage fetched them from.
+
+    The slug is a sanitised title plus a hash of the URL, so it cannot be
+    turned back into a URL; the crawl state remembers the pairing.
+
+    Args:
+        raw_root: The ``data/raw`` directory.
+
+    Returns:
+        Article slug to URL. Empty when there is no readable crawl state.
+    """
+    state = _read_json(raw_root / _CRAWL_STATE_FILE)
+    urls = state.get("battle_urls") if state else None
+    if not isinstance(urls, list):
+        return {}
+    return {Path(article_filename(str(u))).stem: str(u) for u in urls if u}
 
 
 def _enwiki_urls(payload: dict[str, Any]) -> list[str]:
@@ -237,7 +293,9 @@ def discover_battles(raw_root: Path = RAW_ROOT) -> list[RawBattle]:
             matched += 1
         logger.info("wikidata_entities_joined_to_articles", joined=matched)
 
+    crawl_urls = _crawl_urls(raw_root)
     for battle in battles.values():
+        battle.wikipedia_url = crawl_urls.get(battle.slug, "")
         if battle.article_path is None:
             continue
         head = _read_text(battle.article_path)
@@ -297,7 +355,10 @@ def _citation_records(path: Path) -> list[dict[str, Any]]:
         return []
 
     records: list[dict[str, Any]] = []
-    for number, line in enumerate(raw.splitlines(), start=1):
+    # Split on "\n" only. str.splitlines() also breaks on U+2028, U+0085 and
+    # the like, which appear unescaped inside a citation's page text and cut
+    # one valid record into fragments that all fail to parse.
+    for number, line in enumerate(raw.split("\n"), start=1):
         if not line.strip():
             continue
         try:
@@ -348,6 +409,7 @@ def _llm_sources(
     template: str,
     schema: dict[str, Any],
     max_passage_chars: int,
+    battle_id: int | None = None,
 ) -> ArticleExtraction:
     """Run the LLM pass over a battle's body text and citations.
 
@@ -358,6 +420,7 @@ def _llm_sources(
         template: ``prompt.user_template`` from the spec.
         schema: ``prompt.output_schema`` from the spec.
         max_passage_chars: Chunk size for long articles.
+        battle_id: Database id recorded on each request, when known.
 
     Returns:
         The extractions and the failures from every passage.
@@ -365,6 +428,10 @@ def _llm_sources(
     combined = ArticleExtraction()
     if service is None:
         return combined
+
+    # Shared by the article and every citation, so a page cited ten times, or
+    # archived under ten URLs, is put to the model once per battle.
+    seen_texts: set[str] = set()
 
     if battle.article_path is not None:
         raw = _read_text(battle.article_path)
@@ -378,11 +445,12 @@ def _llm_sources(
             )
             result = extract_from_passages(
                 service,
-                passages,
+                drop_repeated_passages(passages, seen_texts),
                 system_prompt=system,
                 user_template=template,
                 json_schema=schema,
-                source_ref=str(battle.article_path),
+                source_ref=battle.article_ref,
+                battle_id=battle_id,
             )
             combined.extractions.extend(result.extractions)
             combined.failures.extend(result.failures)
@@ -402,19 +470,42 @@ def _llm_sources(
                 source_type="web_secondary",
                 source_title=str(record.get("title") or record.get("url") or path.name),
                 max_chars=max_passage_chars,
+                min_chars=_MIN_CITATION_CHARS,
             )
             result = extract_from_passages(
                 service,
-                passages,
+                drop_repeated_passages(passages, seen_texts),
                 system_prompt=system,
                 user_template=template,
                 json_schema=schema,
                 source_ref=str(record.get("url") or path),
+                battle_id=battle_id,
             )
             combined.extractions.extend(result.extractions)
             combined.failures.extend(result.failures)
 
     return combined
+
+
+def _wikidata_ref(path: Path, payload: dict[str, Any]) -> str:
+    """Name a Wikidata entity file by the entity's own URL.
+
+    Args:
+        path: The stored entity file, named by Q-id.
+        payload: Its decoded contents.
+
+    Returns:
+        ``https://www.wikidata.org/wiki/Q...`` when the entity id is known,
+        otherwise the file path, so a source is never given an empty URL.
+    """
+    if _QID_RE.match(path.stem):
+        return f"{_WIKIDATA_ENTITY_PREFIX}{path.stem}"
+    entities = payload.get("entities")
+    candidates = list(entities) if isinstance(entities, dict) else [payload.get("id")]
+    for candidate in candidates:
+        if isinstance(candidate, str) and _QID_RE.match(candidate):
+            return f"{_WIKIDATA_ENTITY_PREFIX}{candidate}"
+    return str(path)
 
 
 def extract_battle(
@@ -425,6 +516,7 @@ def extract_battle(
     template: str,
     schema: dict[str, Any],
     max_passage_chars: int = DEFAULT_MAX_PASSAGE_CHARS,
+    battle_id: int | None = None,
 ) -> BattleExtraction:
     """Extract and merge every source for one battle.
 
@@ -436,6 +528,7 @@ def extract_battle(
         template: ``prompt.user_template`` from the spec.
         schema: ``prompt.output_schema`` from the spec.
         max_passage_chars: Chunk size for long articles.
+        battle_id: Database id to record on the LLM requests, when known.
 
     Returns:
         The merged record, carrying any extraction failures so that the
@@ -450,7 +543,7 @@ def extract_battle(
             infobox = parse_article_infobox(
                 raw,
                 is_html=battle.article_is_html,
-                source_ref=str(battle.article_path),
+                source_ref=battle.article_ref,
                 source_title=battle.name,
             )
             if infobox is not None:
@@ -470,7 +563,7 @@ def extract_battle(
         else:
             mapped = map_entity(
                 payload,
-                source_ref=str(battle.wikidata_path),
+                source_ref=_wikidata_ref(battle.wikidata_path, payload),
                 fallback_name=battle.name,
             )
             if mapped is not None:
@@ -490,7 +583,7 @@ def extract_battle(
         else:
             resource = map_resource(
                 payload,
-                source_ref=str(battle.dbpedia_path),
+                source_ref=battle.dbpedia_ref,
                 fallback_name=battle.name,
             )
             if resource is not None:
@@ -503,6 +596,7 @@ def extract_battle(
         template=template,
         schema=schema,
         max_passage_chars=max_passage_chars,
+        battle_id=battle_id,
     )
     sources.extend(llm_result.extractions)
     failures.extend(llm_result.failures)
@@ -525,12 +619,16 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     logger.info("processed_file_written", path=str(path), rows=len(rows))
 
 
-def _write_outputs(battles: list[BattleExtraction], processed_root: Path) -> None:
+def _write_outputs(
+    battles: list[BattleExtraction], processed_root: Path, *, suffix: str = ""
+) -> None:
     """Write the stage's four processed files.
 
     Args:
         battles: Every merged battle from this run.
         processed_root: The ``data/processed`` directory.
+        suffix: Inserted before ``.jsonl``. A run restricted by ``--limit``
+            passes one so the files downstream stages read are left alone.
     """
     battle_rows: list[dict[str, Any]] = []
     commander_rows: list[dict[str, Any]] = []
@@ -575,10 +673,10 @@ def _write_outputs(battles: list[BattleExtraction], processed_root: Path) -> Non
             for casualty in side.casualty_reports:
                 casualty_rows.append({"battle_slug": battle.slug, **to_jsonable(casualty)})
 
-    _write_jsonl(processed_root / "battles.jsonl", battle_rows)
-    _write_jsonl(processed_root / "commanders_raw.jsonl", commander_rows)
-    _write_jsonl(processed_root / "troop_reports.jsonl", troop_rows)
-    _write_jsonl(processed_root / "casualty_reports.jsonl", casualty_rows)
+    _write_jsonl(processed_root / f"battles{suffix}.jsonl", battle_rows)
+    _write_jsonl(processed_root / f"commanders_raw{suffix}.jsonl", commander_rows)
+    _write_jsonl(processed_root / f"troop_reports{suffix}.jsonl", troop_rows)
+    _write_jsonl(processed_root / f"casualty_reports{suffix}.jsonl", casualty_rows)
 
 
 def _build_service(spec: dict[str, Any], context: StageContext) -> LLMService | None:
@@ -633,8 +731,16 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
     system, template, schema = _prompt_parts(spec)
 
     discovered = discover_battles(raw_root)
+    output_suffix = ""
     if ctx.limit is not None:
         discovered = discovered[: ctx.limit]
+        output_suffix = _LIMITED_SUFFIX
+        logger.warning(
+            "extract_limited_run_writes_suffixed_files",
+            limit=ctx.limit,
+            suffix=output_suffix,
+            hint="data/processed/*.jsonl are untouched; downstream stages read those",
+        )
 
     if not discovered:
         logger.warning(
@@ -646,6 +752,7 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
 
     service = _build_service(spec, ctx)
     merged: list[BattleExtraction] = []
+    reserve_ids = service is not None and ctx.db_conn is not None and not ctx.dry_run
 
     for batch_number, batch in enumerate(iter_batches(discovered, batch_size), start=1):
         logger.info(
@@ -655,6 +762,9 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
             batch_size=batch_size,
         )
         for battle in batch:
+            battle_id = (
+                reserve_battle_id(ctx.db_conn, battle.slug, battle.name) if reserve_ids else None
+            )
             try:
                 merged.append(
                     extract_battle(
@@ -664,6 +774,7 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
                         template=template,
                         schema=schema,
                         max_passage_chars=max_passage_chars,
+                        battle_id=battle_id,
                     )
                 )
             except Exception as exc:
@@ -676,7 +787,7 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
                     error_type=type(exc).__name__,
                 )
 
-    _write_outputs(merged, processed_root)
+    _write_outputs(merged, processed_root, suffix=output_suffix)
 
     if ctx.db_conn is not None and not ctx.dry_run:
         counts = ExtractWriteCounts()

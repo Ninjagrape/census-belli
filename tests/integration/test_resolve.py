@@ -32,7 +32,6 @@ from typing import Any
 import pytest
 import yaml
 from sqlalchemy import Connection, Engine, text
-from sqlalchemy.exc import IntegrityError
 
 from pipeline.db import DatabaseConfigError, apply_schema, database_url, get_engine
 from pipeline.quality import QualityRunner
@@ -48,7 +47,7 @@ from pipeline.resolvers import (
     write_identity,
 )
 from pipeline.resolvers.records import BattleContext
-from pipeline.resolvers.store import UNRESOLVED_FIELD
+from pipeline.resolvers.store import NON_PERSON_FIELD, UNRESOLVED_FIELD
 
 AGENTS = Path(__file__).resolve().parents[2] / "agents"
 
@@ -538,6 +537,7 @@ def test_every_resolve_gate_executes_against_the_real_schema(conn: Connection) -
     assert set(results) == {
         "resolution_rate",
         "no_duplicate_generals",
+        "probable_duplicate_generals",
         "wikidata_link_rate",
         "commanders_per_battle",
         "alias_coverage",
@@ -569,18 +569,60 @@ def test_the_resolution_rate_gate_can_actually_fail(conn: Connection) -> None:
     assert not result.passed
 
 
-def test_the_duplicate_generals_gate_catches_a_split_entity(conn: Connection) -> None:
-    _seed_battle(conn)
-    _write(conn, _identity("Agrippa", qid="Q48174", mentions=[_mention("Agrippa")]))
+def _add_local_general(conn: Connection, name: str, lo: int | None, hi: int | None) -> None:
+    """Insert a corpus-local general (no Q-id) with an optional year range."""
+    conn.execute(
+        text(
+            "INSERT INTO generals (canonical_name, years_active) VALUES "
+            "(:n, CASE WHEN CAST(:lo AS INT) IS NULL THEN NULL "
+            "ELSE int4range(CAST(:lo AS INT), CAST(:hi AS INT)) END)"
+        ),
+        {"n": name, "lo": lo, "hi": hi},
+    )
+
+
+def test_the_duplicate_generals_gate_catches_a_split_corpus_local_person(
+    conn: Connection,
+) -> None:
+    # generals.wikidata_id is UNIQUE, so the gate that counted duplicate Q-ids
+    # could never fail. The duplicate that can actually happen is a general
+    # with no Q-id that is another row under a different spelling of one name.
+    _add_local_general(conn, "Gebhard von Blücher", 1806, 1816)
     assert _gates(conn)["no_duplicate_generals"].passed
 
-    # generals.wikidata_id is UNIQUE, so the schema already refuses the
-    # duplicate this gate looks for. Both defences are wanted: the constraint
-    # stops it happening, the gate says so if the constraint is ever relaxed.
-    with pytest.raises(IntegrityError):
+    _add_local_general(conn, "Gebhard von Blucher", 1813, 1815)
+    result = _gates(conn)["no_duplicate_generals"]
+    assert result.actual_value == 1
+    assert not result.passed
+
+
+def test_the_duplicate_gate_ignores_namesakes_a_century_apart(conn: Connection) -> None:
+    _add_local_general(conn, "Scipio", -210, -200)
+    _add_local_general(conn, "Scipio", 1805, 1815)
+    assert _gates(conn)["no_duplicate_generals"].passed
+
+
+def test_the_duplicate_gate_ignores_two_people_wikidata_told_apart(conn: Connection) -> None:
+    for qid, lo in (("Q1", 1805), ("Q2", 1806)):
         conn.execute(
-            text("INSERT INTO generals (canonical_name, wikidata_id) VALUES ('Other', 'Q48174')")
+            text(
+                "INSERT INTO generals (canonical_name, wikidata_id, years_active) "
+                "VALUES ('Friedrich Kleist', :q, int4range(:lo, :hi))"
+            ),
+            {"q": qid, "lo": lo, "hi": lo + 5},
         )
+    assert _gates(conn)["no_duplicate_generals"].passed
+
+
+def test_the_probable_duplicate_gate_catches_one_man_in_two_spellings(
+    conn: Connection,
+) -> None:
+    # "Karl von Wrede" and "Karl Philipp von Wrede": same first and last token,
+    # overlapping years, neither linked. Found on the 2026-10 pilot.
+    _add_local_general(conn, "Karl von Wrede", 1809, 1815)
+    _add_local_general(conn, "Karl Philipp von Wrede", 1809, 1816)
+    assert _gates(conn)["no_duplicate_generals"].passed
+    assert _gates(conn)["probable_duplicate_generals"].actual_value == 1
 
 
 def test_one_identity_that_fails_to_write_does_not_lose_the_others(conn: Connection) -> None:
@@ -595,9 +637,128 @@ def test_one_identity_that_fails_to_write_does_not_lose_the_others(conn: Connect
     fine = _identity("Agrippa", qid="Q48174", mentions=[_mention("Agrippa")])
     counts = ResolveCounts()
 
-    _write_database(StageContext(db_conn=conn), [], {}, [broken, fine], counts, {})
+    _, homeless = _write_database(StageContext(db_conn=conn), [], {}, [broken, fine], counts, {})
 
     names = {row[0] for row in conn.execute(text("SELECT canonical_name FROM generals"))}
     assert names == {"Agrippa"}
     assert counts.failed_identities == 1
     assert counts.generals_written == 1
+    assert homeless == []
+    # The failed identity's mention reached no table, so the gate must see it
+    # as a miss rather than as a mention that never existed.
+    assert (
+        _scalar(
+            conn,
+            "SELECT COUNT(*) FROM missing_data_log WHERE field_name = :f",
+            f=UNRESOLVED_FIELD,
+        )
+        == 1
+    )
+
+
+# ─── Denominators ────────────────────────────────────────────────────────────
+
+
+def test_a_resolved_mention_with_no_side_row_counts_as_a_miss(conn: Connection) -> None:
+    # write_identity used to count sides_not_in_db and forget the mention, so
+    # the resolution_rate gate never saw it and read higher than the truth.
+    _seed_battle(conn)
+    battles, sides = load_battle_index(conn), load_side_index(conn)
+    identity = _identity(
+        "Agrippa",
+        qid="Q48174",
+        mentions=[_mention("Agrippa"), _mention("Agrippa", side="A side extract never wrote")],
+    )
+    counts = ResolveCounts()
+    unplaced: list[Mention] = []
+    write_identity(conn, identity, battles, sides, counts, {}, unplaced)
+    log_unresolved(conn, [], battles, sides, counts, unplaced=unplaced)
+
+    assert counts.sides_not_in_db == 1
+    assert (
+        _scalar(
+            conn,
+            "SELECT COUNT(*) FROM missing_data_log WHERE field_name = :f",
+            f=UNRESOLVED_FIELD,
+        )
+        == 1
+    )
+    # One commander row written, one miss logged: 1 of 2 mentions reached the table.
+    assert _gates(conn)["resolution_rate"].actual_value == pytest.approx(0.5)
+
+
+def test_a_mention_whose_battle_is_missing_is_returned_for_the_file(conn: Connection) -> None:
+    # missing_data_log.battle_id is NOT NULL, so there is nowhere in that table
+    # to put it. It must come back to the caller, not vanish.
+    _seed_battle(conn)
+    ghost = _mention("Agrippa")
+    ghost = Mention(**{**ghost.__dict__, "battle_name": "Battle that was never written"})
+    counts = ResolveCounts()
+    homeless = log_unresolved(conn, [ghost], load_battle_index(conn), load_side_index(conn), counts)
+    assert homeless == [ghost]
+    assert counts.unplaced_rows == 1
+    assert counts.missing_rows == 0
+
+
+def test_non_person_mentions_are_logged_outside_the_resolution_rate(conn: Connection) -> None:
+    _seed_battle(conn)
+    battles, sides = load_battle_index(conn), load_side_index(conn)
+    _write(conn, _identity("Agrippa", qid="Q48174", mentions=[_mention("Agrippa")]))
+    counts = ResolveCounts()
+    log_unresolved(conn, [], battles, sides, counts, non_person=[_mention("Luftwaffe")])
+
+    assert (
+        _scalar(
+            conn,
+            "SELECT COUNT(*) FROM missing_data_log WHERE field_name = :f",
+            f=NON_PERSON_FIELD,
+        )
+        == 1
+    )
+    assert _gates(conn)["resolution_rate"].actual_value == pytest.approx(1.0)
+
+    # And a re-run replaces them rather than adding to them.
+    log_unresolved(conn, [], battles, sides, ResolveCounts(), non_person=[_mention("Luftwaffe")])
+    assert (
+        _scalar(
+            conn,
+            "SELECT COUNT(*) FROM missing_data_log WHERE field_name = :f",
+            f=NON_PERSON_FIELD,
+        )
+        == 1
+    )
+
+
+# ─── Biography ───────────────────────────────────────────────────────────────
+
+
+def _bio_identity(
+    name: str, qid: str, birth: int | None, death: int | None, era: str | None
+) -> Identity:
+    identity = _identity(name, qid=qid, mentions=[_mention(name)])
+    identity.birth_year, identity.death_year, identity.era = birth, death, era
+    return identity
+
+
+def test_born_died_and_era_are_written_including_for_a_bc_birth(conn: Connection) -> None:
+    _seed_battle(conn)
+    _write(conn, _bio_identity("Agrippa", "Q48174", -61, -11, "ancient"))
+
+    row = conn.execute(
+        text(
+            "SELECT born_year_astronomical, died_year_astronomical, era FROM generals "
+            "WHERE wikidata_id = 'Q48174'"
+        )
+    ).one()
+    assert tuple(row) == (-61, -11, "ancient")
+
+
+def test_a_rerun_without_a_biography_does_not_blank_an_earlier_one(conn: Connection) -> None:
+    _seed_battle(conn)
+    _write(conn, _bio_identity("Agrippa", "Q48174", -61, -11, "ancient"))
+    _write(conn, _bio_identity("Agrippa", "Q48174", None, None, None))
+
+    row = conn.execute(
+        text("SELECT born_year_astronomical, era FROM generals WHERE wikidata_id = 'Q48174'")
+    ).one()
+    assert tuple(row) == (-61, "ancient")

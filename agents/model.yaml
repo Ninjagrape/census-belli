@@ -65,7 +65,7 @@ inputs:
   - db: battles (year_astronomical), battle_sides (outcome, is_defender,
         est_troops_neutral_log_mean/_sd), battle_commanders (attribution_weight,
         attribution_method), generals
-  - data/imputed/neutral/round_{n}/sides.csv and manifest.json   # manifest run_id must be the latest written neutral impute run
+  - data/imputed/neutral/round_{n}/sides.csv and manifest.json   # manifest run_id must be the latest written impute run of the scale; published/ is read instead under params.scale=published
   - config/model_default.yaml
 
 outputs:
@@ -214,7 +214,7 @@ quality_checks:
     description: The full exclusion breakdown is in the gate's details.
 
 retry_policy:
-  max_stage_retries: 1
+  max_stage_retries: 0               # fixed-seed sampling: a re-run repeats the failure
   on_failure: pause_and_alert
   # A round that fails the write thresholds is already re-run once inside the
   # stage (new seed, target_accept 0.95). If convergence still fails, suggest:

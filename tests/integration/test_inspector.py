@@ -7,6 +7,7 @@ with Streamlit's ``AppTest``.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -304,3 +305,107 @@ def test_app_degrades_when_database_is_unreachable(
         at.switch_page(page).run()
         assert not _exceptions(at), (page, _exceptions(at))
     assert any("unreachable" in w.value for w in at.warning)
+
+
+POOLED = "bradley_terry_hierarchical"
+
+
+def _insert_pooled(
+    conn: Connection, model_type: str, scale: str, diagnostics: dict[str, Any]
+) -> int:
+    return int(
+        conn.execute(
+            text(
+                "INSERT INTO model_runs (run_name, model_type, config, started_at, completed_at, "
+                "diagnostics) VALUES (:n, :t, CAST(:c AS JSONB), now(), now(), "
+                "CAST(:d AS JSONB)) RETURNING run_id"
+            ),
+            {
+                "n": f"bt_pooled_{scale}",
+                "t": model_type,
+                "c": json.dumps({"scale": scale}),
+                "d": json.dumps(diagnostics),
+            },
+        ).scalar_one()
+    )
+
+
+@pytest.fixture
+def pooled_run(engine: Engine, ids: dict[str, int]) -> Iterator[dict[str, int]]:
+    """A pooled run with one ranked general, removed again so other tests see no model rows."""
+    diagnostics = {
+        "converged": "true",
+        "estimates_written": True,
+        "n_rounds": 2,
+        "imputation_run_id": ids["imp"],
+        "scale": "neutral",
+        "counts": {
+            "battles_in_scope": 5,
+            "battles_included": 2,
+            "battles_excluded": 3,
+            "battles_no_outcome": 2,
+            "battles_no_creditable_side": 1,
+        },
+        "gates": {"convergence": True, "prior_predictive": False},
+        "worst": {"max_rhat": 1.01},
+    }
+    with engine.begin() as setup:
+        run_id = _insert_pooled(setup, POOLED, "neutral", diagnostics)
+        pub_id = _insert_pooled(setup, POOLED + "_published", "published", diagnostics)
+        general = int(
+            setup.execute(
+                text(
+                    "INSERT INTO generals (canonical_name) VALUES ('Test General') "
+                    "RETURNING general_id"
+                )
+            ).scalar_one()
+        )
+        setup.execute(
+            text(
+                "INSERT INTO general_skill_estimates (run_id, general_id, skill_mean, skill_sd, "
+                "skill_ci_lo, skill_ci_hi, total_war, n_battles, rank) "
+                "VALUES (:r, :g, 0.8, 0.2, 0.4, 1.2, 1.5, 2, 1)"
+            ),
+            {"r": run_id, "g": general},
+        )
+    yield {"run_id": run_id, "published_id": pub_id, "general_id": general}
+    with engine.begin() as teardown:
+        teardown.execute(
+            text("DELETE FROM general_skill_estimates WHERE run_id = :r"), {"r": run_id}
+        )
+        teardown.execute(
+            text("DELETE FROM model_runs WHERE run_id IN (:a, :b)"), {"a": run_id, "b": pub_id}
+        )
+        teardown.execute(text("DELETE FROM generals WHERE general_id = :g"), {"g": general})
+
+
+def test_model_queries_list_pooled_runs_and_the_ranking(
+    pooled_run: dict[str, int], ro_engine: Engine
+) -> None:
+    with ro_engine.connect() as conn:
+        runs = queries.pooled_runs(conn)
+        ranking = queries.run_ranking(conn, pooled_run["run_id"])
+        empty = queries.run_ranking(conn, pooled_run["published_id"])
+
+    assert set(runs["scale"]) == {"neutral", "published"}
+    assert list(ranking["canonical_name"]) == ["Test General"]
+    assert ranking.loc[0, "skill_ci_lo"] < ranking.loc[0, "skill_mean"]
+    assert ranking.loc[0, "skill_mean"] < ranking.loc[0, "skill_ci_hi"]
+    assert empty.empty
+
+
+def test_model_page_shows_counts_gates_and_ranking(
+    pooled_run: dict[str, int],
+    engine: Engine,
+    data_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    at = _run_app(monkeypatch, engine, data_root)
+    at.run()
+    at.switch_page("inspector_pages/model.py").run()
+
+    assert not _exceptions(at), _exceptions(at)
+    assert at.selectbox[-1].value == pooled_run["run_id"]  # primary run is preselected
+    assert [m.label for m in at.metric] == ["Battles in scope", "Included", "Excluded"]
+    assert at.metric[1].value == "2"
+    assert any("Estimates written" in s.value for s in at.success)

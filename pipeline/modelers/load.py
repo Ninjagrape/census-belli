@@ -287,7 +287,7 @@ def check_round_provenance(rounds: Sequence[ImputedRound], expected_run_id: int 
 
     Args:
         rounds: The rounds read from disk.
-        expected_run_id: The latest written neutral imputation run in the
+        expected_run_id: The latest written imputation run of the rounds' scale in the
             database, or None if there is none.
 
     Returns:
@@ -306,8 +306,9 @@ def check_round_provenance(rounds: Sequence[ImputedRound], expected_run_id: int 
     run_id = run_ids[0]
     if expected_run_id is None or run_id != expected_run_id:
         raise ValueError(
-            f"imputed rounds come from impute run {run_id}, but the latest neutral impute run "
-            f"that wrote rounds is {expected_run_id}: the files are stale or from a different "
-            "database. Re-run impute, or point params.imputed_root at the matching directory."
+            f"imputed rounds come from impute run {run_id}, but the latest impute run of "
+            f"this scale that wrote rounds is {expected_run_id}: the files are stale or from "
+            "a different database. Re-run impute, or point params.imputed_root at the "
+            "matching directory."
         )
     return run_id

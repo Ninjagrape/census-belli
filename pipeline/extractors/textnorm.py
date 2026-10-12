@@ -30,6 +30,8 @@ from pipeline.extractors.records import coerce_scope
 
 __all__ = [
     "Quantity",
+    "classify_figure",
+    "is_equipment_count",
     "infer_branch",
     "infer_casualty_type",
     "infer_scope",
@@ -39,6 +41,7 @@ __all__ = [
     "resolve_scope",
     "split_list_items",
     "strip_markup",
+    "tidy_spacing",
 ]
 
 logger = structlog.get_logger()
@@ -152,7 +155,29 @@ def strip_markup(raw: str) -> str:
     text = html.unescape(text)
     text = _WHITESPACE_RE.sub(" ", text)
     text = _BLANKLINES_RE.sub("\n\n", text)
-    return "\n".join(line.strip() for line in text.splitlines()).strip()
+    return tidy_spacing("\n".join(line.strip() for line in text.splitlines()).strip())
+
+
+_SPACE_BEFORE_PUNCT_RE: Final = re.compile(r"[ \t]+(?=[,.;:)\]])|(?<=[(\[])[ \t]+")
+_SPACE_BEFORE_POSSESSIVE_RE: Final = re.compile(r"[ \t]+(?=['’]s\b)")
+
+
+def tidy_spacing(text: str) -> str:
+    """Remove the stray spaces left by joining inline HTML elements with spaces.
+
+    Reading a rendered cell with ``get_text(" ")`` is needed so adjacent
+    elements do not weld together, but it also puts a space between a link
+    and the punctuation that follows it ("Octavian 's forces", "Rome , Italy").
+
+    Args:
+        text: Text that may hold spaces before punctuation or inside brackets.
+
+    Returns:
+        The text with those spaces removed. A space before a colon is only
+        removed when it follows a letter, so "Total : 5" becomes "Total: 5".
+    """
+    text = _SPACE_BEFORE_POSSESSIVE_RE.sub("", text)
+    return _SPACE_BEFORE_PUNCT_RE.sub("", text)
 
 
 _ITEM_SPLIT_RE: Final = re.compile(r"[\n;•]+|^\s*[*#]+\s*", re.MULTILINE)
@@ -225,7 +250,7 @@ _ORDINAL_RE: Final = re.compile(r"\s*(?:st|nd|rd|th)\b", re.IGNORECASE)
 # "12 legions" counts formations, not men. Recording it as a troop report
 # would put a force of twelve into the force-ratio covariate.
 _FORMATION_RE: Final = re.compile(
-    r"\s*(?:legions?|corps|divisions?|regiments?|battalions?|brigades?|squadrons?"
+    r"\s*(?:[A-Za-z]+\s+)?(?:legions?|corps|divisions?|regiments?|battalions?|brigades?|squadrons?"
     r"|companies|cohorts?|maniples?|armies|columns?|wings?)\b",
     re.IGNORECASE,
 )
@@ -235,23 +260,37 @@ _YEAR_PREFIX_RE: Final = re.compile(
     re.IGNORECASE,
 )
 _ERA_SUFFIX_RE: Final = re.compile(r"\s*(?:BCE?|AD|CE)\b")
+# "16-17 October:" is a date heading inside a strength field, not a force.
+_MONTH_AFTER_RE: Final = re.compile(
+    r"\s*(?:January|February|March|April|May|June|July|August|September|October|November"
+    r"|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\b\.?",
+    re.IGNORECASE,
+)
 
 _ESTIMATE_RE: Final = re.compile(
     r"\b(?:about|approximately|approx\.?|roughly|around|some|estimated|an estimate"
     r"|circa|perhaps|possibly|nearly|almost|upwards of)\b|c\.\s|ca\.\s|~",
     re.IGNORECASE,
 )
-_UPPER_RE: Final = re.compile(r"\b(?:up to|at most|no more than|fewer than|less than|under)\b",
-                              re.IGNORECASE)
-_LOWER_RE: Final = re.compile(r"\b(?:at least|more than|over|in excess of|upwards of|at minimum)\b",
-                              re.IGNORECASE)
+_UPPER_RE: Final = re.compile(
+    r"\b(?:up to|at most|no more than|fewer than|less than|under)\b", re.IGNORECASE
+)
+_LOWER_RE: Final = re.compile(
+    r"\b(?:at least|more than|over|in excess of|upwards of|at minimum)\b", re.IGNORECASE
+)
 
 _SEGMENT_SPLIT_RE: Final = re.compile(r"[\n;]+")
 
 
 @dataclass(frozen=True)
 class Quantity:
-    """A number read out of prose, with what the prose said about it."""
+    """A number read out of prose, with what the prose said about it.
+
+    ``lead`` is the text between the previous number (or the line start) and
+    this one, and ``noun`` the words directly after it. They are what tells
+    "Total: 86,400" from "25,000 Romans" and "II Corps: 20,000" when the
+    branch keyword alone says only "total".
+    """
 
     value: float
     branch: str = "total"
@@ -260,6 +299,8 @@ class Quantity:
     is_lower_bound: bool = False
     is_upper_bound: bool = False
     context: str = ""
+    lead: str = ""
+    noun: str = ""
 
 
 def parse_number(token: str) -> float | None:
@@ -349,27 +390,61 @@ _SCOPE_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
 )
 
 _BRANCH_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
-    (re.compile(r"\b(?:infantry|foot(?:men)?|legionaries|hoplites|musketeers)\b", re.I),
-     "infantry"),
-    (re.compile(r"\b(?:cavalry|horse(?:men)?|horse archers|cuirassiers|hussars|knights)\b", re.I),
-     "cavalry"),
-    (re.compile(r"\b(?:artillery|guns?|cannons?|field pieces?|siege engines?|howitzers?)\b", re.I),
-     "artillery"),
-    (re.compile(r"\b(?:ships?|galleys?|vessels?|warships?|triremes?|men-of-war|fleet of)\b", re.I),
-     "naval"),
-    (re.compile(r"\b(?:aircraft|aeroplanes?|airplanes?|planes?|bombers?|fighters?)\b", re.I),
-     "air"),
+    (
+        re.compile(
+            r"\b(?:infantry(?:men)?|foot(?:men)?|legionaries|hoplites|musketeers|riflemen"
+            r"|skirmishers|slingers|spearmen|pikemen|swordsmen|grenadiers|fusiliers)\b",
+            re.I,
+        ),
+        "infantry",
+    ),
+    (
+        re.compile(
+            r"\b(?:cavalry(?:men)?|horse(?:men)?|horse archers|cuirassiers|hussars|knights"
+            r"|dragoons|lancers|cataphracts)\b",
+            re.I,
+        ),
+        "cavalry",
+    ),
+    (
+        re.compile(
+            r"\b(?:artillery(?:men)?|gunners|guns?|cannons?|field pieces?|siege engines?"
+            r"|howitzers?)\b",
+            re.I,
+        ),
+        "artillery",
+    ),
+    (
+        re.compile(
+            r"\b(?:ships?|galleys?|vessels?|warships?|triremes?|men-of-war|fleet of|sailors|seamen"
+            r"|marines|frigates?|destroyers?|battleships?|cruisers?|submarines?|corvettes?|carriers?)\b",
+            re.I,
+        ),
+        "naval",
+    ),
+    (
+        re.compile(r"\b(?:aircraft|aeroplanes?|airplanes?|planes?|bombers?|fighters?)\b", re.I),
+        "air",
+    ),
     (re.compile(r"\b(?:tanks?|armou?r(?:ed)?|panzers?|AFVs?)\b", re.I), "armour"),
     (re.compile(r"\b(?:irregulars?|militia|partisans?|tribesmen|levies)\b", re.I), "irregular"),
-    (re.compile(r"\b(?:men|soldiers|troops|total|strength|combatants?|effectives?)\b", re.I),
-     "total"),
+    (
+        re.compile(r"\b(?:men|soldiers|troops|total|strength|combatants?|effectives?)\b", re.I),
+        "total",
+    ),
 )
 
 _CASUALTY_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     # "killed or wounded" is one undifferentiated figure, so it is a total
     # rather than being claimed for either bucket.
-    (re.compile(r"\b(?:killed|dead|deaths?|slain|fatalities)\b\s*(?:or|and|,)\s*"
-                r"\b(?:wounded|injured)\b", re.I), "total"),
+    (
+        re.compile(
+            r"\b(?:killed|dead|deaths?|slain|fatalities)\b\s*(?:or|and|,)\s*"
+            r"\b(?:wounded|injured)\b",
+            re.I,
+        ),
+        "total",
+    ),
     (re.compile(r"\b(?:killed|dead|deaths?|slain|fatalities|kia)\b", re.I), "killed"),
     (re.compile(r"\b(?:wounded|injured|wia)\b", re.I), "wounded"),
     (re.compile(r"\b(?:captured|prisoners?|pows?|taken prisoner|surrendered)\b", re.I), "captured"),
@@ -539,9 +614,18 @@ def _range_quantities(segment: str, default_scope: str) -> tuple[list[Quantity],
             high = parse_number(match.group("hi"))
             if low is None or high is None or high < low:
                 continue
+            if _MONTH_AFTER_RE.match(remainder[match.end() :]):
+                # Blanked so the single-number pass does not read "16" alone.
+                remainder = (
+                    remainder[: match.start()]
+                    + " " * (match.end() - match.start())
+                    + remainder[match.end() :]
+                )
+                continue
             branch = _branch_near(segment, match.start(), match.end())
             scope = resolve_scope(None, segment, default_scope)
             estimate = bool(_ESTIMATE_RE.search(segment))
+            lead, noun = _surround(segment, match.start(), match.end())
             quantities.append(
                 Quantity(
                     value=low,
@@ -550,6 +634,8 @@ def _range_quantities(segment: str, default_scope: str) -> tuple[list[Quantity],
                     is_estimate=estimate,
                     is_lower_bound=True,
                     context=segment.strip(),
+                    lead=lead,
+                    noun=noun,
                 )
             )
             quantities.append(
@@ -560,12 +646,183 @@ def _range_quantities(segment: str, default_scope: str) -> tuple[list[Quantity],
                     is_estimate=estimate,
                     is_upper_bound=True,
                     context=segment.strip(),
+                    lead=lead,
+                    noun=noun,
                 )
             )
-            remainder = remainder[: match.start()] + " " * (match.end() - match.start()) \
+            remainder = (
+                remainder[: match.start()]
+                + " " * (match.end() - match.start())
                 + remainder[match.end() :]
+            )
 
     return quantities, remainder
+
+
+_NOUN_STOP_RE: Final = re.compile(r"[,;:()\[\]\d]")
+_LEAD_NOISE_RE: Final = re.compile(
+    r"\b(?:about|approximately|approx|roughly|around|some|estimated|circa|perhaps|possibly"
+    r"|nearly|almost|over|under|up to|at least|at most|more than|less than|fewer than|c|ca|est"
+    r"|strength|forces?|army|total|combined|overall|entire|whole)\b",
+    re.IGNORECASE,
+)
+# Words after a number that describe the men in general rather than naming a
+# contingent, so "30,000 men" or "86,000 engaged" is a side-level figure.
+_GENERIC_NOUNS: Final[frozenset[str]] = frozenset(
+    {
+        "men",
+        "soldiers",
+        "troops",
+        "combatants",
+        "effectives",
+        "personnel",
+        "strong",
+        "engaged",
+        "total",
+        "present",
+        "regulars",
+        "regular",
+        "fighting",
+        "in",
+        "at",
+        "on",
+        "of",
+        "to",
+        "or",
+        "and",
+        "plus",
+        "from",
+        "by",
+        "with",
+        "under",
+        "after",
+        "during",
+        "est",
+        "estimated",
+        "approx",
+        "available",
+        "deployed",
+        "men-at-arms",
+        "warriors",
+        "ration",
+        "combat",
+        "operational",
+        "strength",
+        "force",
+        "forces",
+        "effective",
+        "manpower",
+        "initial",
+        "overall",
+    }
+)
+_EQUIPMENT_NOUN_RE: Final = re.compile(
+    r"^(?:guns?|cannons?|pieces|howitzers?|mortars?|ships?|vessels?|galleys?|warships?|triremes?"
+    r"|frigates?|destroyers?|battleships?|cruisers?|submarines?|corvettes?|carriers?"
+    r"|aircraft|planes?|aeroplanes?|bombers?|fighters?|tanks?|vehicles?|gunboats?|junks?"
+    r"|boats?|barges?|elephants?|oxen|camels?|chariots?|wagons?|supply)\b",
+    re.IGNORECASE,
+)
+
+
+def _surround(segment: str, start: int, end: int) -> tuple[str, str]:
+    """Read the words before and after one number in its clause.
+
+    Args:
+        segment: The clause the number was found in.
+        start: Start offset of the number.
+        end: End offset of the number.
+
+    Returns:
+        The text since the previous number (or the clause start), and the
+        words right after the number up to the next number or punctuation.
+    """
+    previous_end = 0
+    for found in _NUMBER_RE.finditer(segment):
+        if found.end() > start:
+            break
+        previous_end = found.end()
+    lead = segment[previous_end:start].strip()
+    tail = segment[end:]
+    cut = _NOUN_STOP_RE.search(tail)
+    noun = (tail[: cut.start()] if cut else tail).strip()
+    return lead, noun
+
+
+def is_equipment_count(quantity: Quantity) -> bool:
+    """Whether a figure counts guns, ships, aircraft or vehicles rather than men.
+
+    Args:
+        quantity: A parsed figure.
+
+    Returns:
+        True when the words right after the number name equipment. Such a
+        count must never be summed with, or mistaken for, a headcount.
+    """
+    return any(_EQUIPMENT_NOUN_RE.match(w) for w in quantity.noun.split()[:3])
+
+
+def is_labelled_figure(quantity: Quantity) -> bool:
+    """Whether words before the number label it ("Wellington's army:", "II Corps:").
+
+    Args:
+        quantity: A parsed figure.
+
+    Returns:
+        True when the lead holds a label once estimate words are removed.
+        Such a label names a unit, a phase or a date as often as a part of
+        the side, so the figure is not safe to sum.
+    """
+    residue = _LEAD_NOISE_RE.sub(" ", quantity.lead)
+    return bool(re.search(r"[A-Za-z]{2,}", residue) or re.search(r"\b[IVX]{1,4}\b", residue))
+
+
+def is_orphan_figure(quantity: Quantity) -> bool:
+    """Whether a figure has neither a label nor a noun saying what it counts.
+
+    Args:
+        quantity: A parsed figure.
+
+    Returns:
+        True for a bare number such as the "31,000" left under a heading the
+        page dropped.
+    """
+    return not re.search(r"[A-Za-z]", quantity.noun) and not re.search(r"\w", quantity.lead)
+
+
+def classify_figure(quantity: Quantity, *, first_in_field: bool) -> str:
+    """Decide whether a headcount is the side's total, one arm, or one component.
+
+    Args:
+        quantity: A parsed figure.
+        first_in_field: Whether the figure sits on the first line of its
+            field. A bare number is a side-level total only there; the same
+            bare number on a later line follows labels the page dropped
+            (nested contingents) and is a component.
+
+    Returns:
+        ``"arm"`` when the wording names an arm of service, ``"component"``
+        for a contingent, nationality, unit or labelled sub-force, and
+        ``"total"`` for an explicit total or an unqualified side figure.
+    """
+    if quantity.branch != "total":
+        return "arm"
+
+    if re.search(r"\btotal\b", f"{quantity.lead} {quantity.noun}", re.IGNORECASE):
+        return "total"
+
+    # Whatever precedes the number once estimate and generic words are
+    # removed is a label ("Wellington's army:", "II Corps:", "French:").
+    if is_labelled_figure(quantity):
+        return "component"
+
+    words = re.findall(r"[^\W\d_][\w'-]*", quantity.noun)
+    if words and words[0].lower() not in _GENERIC_NOUNS:
+        return "component"
+
+    if is_orphan_figure(quantity) and not first_in_field:
+        return "component"
+    return "total"
 
 
 def parse_quantities(text: str, *, default_scope: str = "unknown") -> list[Quantity]:
@@ -598,7 +855,11 @@ def parse_quantities(text: str, *, default_scope: str = "unknown") -> list[Quant
 
         for match in _NUMBER_RE.finditer(remainder):
             trailing = remainder[match.end() :]
-            if _ORDINAL_RE.match(trailing) or _FORMATION_RE.match(trailing):
+            if (
+                _ORDINAL_RE.match(trailing)
+                or _FORMATION_RE.match(trailing)
+                or _MONTH_AFTER_RE.match(trailing)
+            ):
                 continue
             if _looks_like_year(remainder, match):
                 continue
@@ -607,6 +868,7 @@ def parse_quantities(text: str, *, default_scope: str = "unknown") -> list[Quant
                 continue
 
             before = remainder[max(0, match.start() - 60) : match.start()]
+            lead, noun = _surround(segment, match.start(), match.end())
             quantities.append(
                 Quantity(
                     value=value,
@@ -616,6 +878,8 @@ def parse_quantities(text: str, *, default_scope: str = "unknown") -> list[Quant
                     is_lower_bound=bool(_LOWER_RE.search(before)),
                     is_upper_bound=bool(_UPPER_RE.search(before)),
                     context=segment.strip(),
+                    lead=lead,
+                    noun=noun,
                 )
             )
 

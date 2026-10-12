@@ -196,6 +196,34 @@ _CLEAR_SOURCE_CASUALTIES = text(
     """
 )
 
+# A side the fit covered but whose estimate was not written (the fit missed the
+# write thresholds) must reach missing_data_log, or downstream missingness reads
+# it as a side nobody tried to fill. Only sides left without an estimate are
+# logged: one that still carries an earlier run's value is a staleness matter,
+# which estimates_are_not_stale reports. The notes prefix is the one load.py's
+# write_unfillable clears at the start of each run, so a re-run does not stack
+# rows, and the "estimate withheld" wording lets estimates_populated keep
+# counting these sides as failures instead of as unfillable.
+WITHHELD_NOTE_PREFIX: Final[str] = "reconcile: estimate withheld"
+
+_LOG_WITHHELD_TROOPS = text(
+    """
+    INSERT INTO missing_data_log (battle_id, side_id, field_name, missingness_class, notes)
+    SELECT bs.battle_id, bs.side_id, 'troop_total', 'unclassified', :notes
+    FROM battle_sides bs
+    WHERE bs.side_id = ANY(CAST(:side_ids AS INT[])) AND bs.est_troops_total IS NULL
+    """
+)
+
+_LOG_WITHHELD_CASUALTIES = text(
+    """
+    INSERT INTO missing_data_log (battle_id, side_id, field_name, missingness_class, notes)
+    SELECT bs.battle_id, bs.side_id, 'casualties', 'unclassified', :notes
+    FROM battle_sides bs
+    WHERE bs.side_id = ANY(CAST(:side_ids AS INT[])) AND bs.est_casualties IS NULL
+    """
+)
+
 _SIDE_STATEMENT_BY_QUANTITY: Final[dict[Quantity, Any]] = {
     "troops": _UPDATE_SIDE_TROOPS,
     "casualties": _UPDATE_SIDE_CASUALTIES,
@@ -336,6 +364,30 @@ def clear_unmodelled(
     sources = conn.execute(source_sql, {"keep": sorted(source_ids)}).rowcount
     logger.info("reconcile_stale_cleared", quantity=quantity, sides=sides, sources=sources)
     return int(sides), int(sources)
+
+
+def log_withheld_sides(
+    conn: Any, quantity: Quantity, *, side_ids: set[int], run_id: int, reason: str
+) -> int:
+    """Log the sides of an unwritten fit that are left without an estimate.
+
+    Args:
+        conn: An open database connection.
+        quantity: ``"troops"`` or ``"casualties"``.
+        side_ids: Every side in the unwritten fit's design.
+        run_id: The run whose fit was withheld, named in the log notes.
+        reason: Short human-readable cause, e.g. which threshold failed.
+
+    Returns:
+        How many sides were logged.
+    """
+    statement = _LOG_WITHHELD_TROOPS if quantity == "troops" else _LOG_WITHHELD_CASUALTIES
+    notes = f"{WITHHELD_NOTE_PREFIX}, fit did not meet write thresholds (run {run_id}): {reason}"
+    logged = int(conn.execute(statement, {"side_ids": sorted(side_ids), "notes": notes}).rowcount)
+    logger.warning(
+        "reconcile_withheld_sides_logged", quantity=quantity, run_id=run_id, sides=logged
+    )
+    return logged
 
 
 def clear_unmodelled_neutral(conn: Any, *, side_ids: set[int]) -> int:

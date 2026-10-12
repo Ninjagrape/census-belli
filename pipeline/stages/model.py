@@ -11,7 +11,8 @@ the model and its departures from the original spec.
 
 1. Load sides and commanders, build the design (exclusion rules and
    counters), read the imputed rounds and refuse them unless they come from the
-   latest neutral impute run.
+   latest written impute run of the configured scale (``neutral`` primary,
+   ``published`` sensitivity).
 2. Prior predictive check on the real design.
 3. One fit per round (``bradley_terry_round`` run rows, one retry with a new
    seed and a higher ``target_accept``), WAR computed once per round and
@@ -97,6 +98,17 @@ JOINT_SEED_OFFSET = 50_000
 ROUND_MODEL_TYPE = "bradley_terry_round"
 JOINT_MODEL_TYPE = "bradley_terry_joint_latent"
 POOLED_MODEL_TYPE = "bradley_terry_hierarchical"
+PUBLISHED_SUFFIX = "_published"
+
+
+def _model_type(base: str, scale: str) -> str:
+    """The ``model_runs.model_type`` for a run on ``scale``.
+
+    A published-scale run is a sensitivity analysis. Quality gates and report
+    select the primary ranking with ``MAX(run_id)`` over the plain pooled
+    type, so a suffix keeps a sensitivity run from ever becoming "the latest".
+    """
+    return base if scale == "neutral" else f"{base}{PUBLISHED_SUFFIX}"
 
 
 @dataclass
@@ -168,9 +180,13 @@ def _fit_rounds(
         run_id = _begin(
             conn,
             owns_connection,
-            model_type=ROUND_MODEL_TYPE,
-            run_name=f"bt_round_{rnd.index}_imputation{imputation_run_id}",
-            config={"round": rnd.index, "imputation_run_id": imputation_run_id},
+            model_type=_model_type(ROUND_MODEL_TYPE, mp.scale),
+            run_name=f"bt_round_{rnd.index}_{mp.scale}_imputation{imputation_run_id}",
+            config={
+                "round": rnd.index,
+                "scale": mp.scale,
+                "imputation_run_id": imputation_run_id,
+            },
             imputation_set=rnd.index,
         )
         model = build_model(design, x_diff, mp.priors)
@@ -221,9 +237,13 @@ def _fit_joint(
     run_id = _begin(
         conn,
         owns_connection,
-        model_type=JOINT_MODEL_TYPE,
-        run_name=f"bt_joint_latent_imputation{imputation_run_id}",
-        config={"imputation_run_id": imputation_run_id, "sigma_w": mp.joint_sigma_w},
+        model_type=_model_type(JOINT_MODEL_TYPE, mp.scale),
+        run_name=f"bt_joint_latent_{mp.scale}_imputation{imputation_run_id}",
+        config={
+            "scale": mp.scale,
+            "imputation_run_id": imputation_run_id,
+            "sigma_w": mp.joint_sigma_w,
+        },
     )
     outcome = fit_with_retry(
         model, mp, seed=mp.sampler.random_seed + JOINT_SEED_OFFSET, label="joint"
@@ -431,6 +451,7 @@ def _pooled_diagnostics(
     combined: dict[str, Any],
     rounds: list[_RoundResult],
     imputation_run_id: int,
+    scale: str,
     joint: _JointResult | None,
     pp: PriorPredictive,
     pooled: PooledFit | None,
@@ -449,6 +470,7 @@ def _pooled_diagnostics(
         "n_rounds": len(rounds),
         "estimates_written": pooled is not None,
         "imputation_run_id": imputation_run_id,
+        "scale": scale,
         "joint_run_id": None if joint is None else joint.run_id,
         "joint_converged": None if joint is None else joint.converged,
         "counts": {**design.counts.as_dict(), **type_counts},
@@ -640,6 +662,7 @@ def _finish(
     """Create the pooled run row last, write rows and files, then complete it."""
     config = {
         **mp.raw,
+        "scale": mp.scale,
         "pooled_round_run_ids": [r.run_id for r in results],
         "joint_run_id": None if joint is None else joint.run_id,
         "imputation_run_id": imputation_run_id,
@@ -647,8 +670,8 @@ def _finish(
     pooled_id = _begin(
         conn,
         owns_connection,
-        model_type=POOLED_MODEL_TYPE,
-        run_name=f"bt_pooled_imputation{imputation_run_id}",
+        model_type=_model_type(POOLED_MODEL_TYPE, mp.scale),
+        run_name=f"bt_pooled_{mp.scale}_imputation{imputation_run_id}",
         config=config,
     )
     directory = outputs.run_directory(Path(mp.diagnostics_root), pooled_id)
@@ -677,6 +700,7 @@ def _finish(
             combined=combined,
             rounds=results,
             imputation_run_id=imputation_run_id,
+            scale=mp.scale,
             joint=joint,
             pp=pp,
             pooled=pooled,

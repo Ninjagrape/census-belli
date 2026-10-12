@@ -201,9 +201,7 @@ def _seed_general(conn: Connection, name: str, *, wikidata_id: str | None = None
     )
 
 
-def _seed_commander(
-    conn: Connection, battle_id: int, side_id: int, general_id: int
-) -> int:
+def _seed_commander(conn: Connection, battle_id: int, side_id: int, general_id: int) -> int:
     """Insert one ``battle_commanders`` row with ``command_role = 'unknown'``."""
     return int(
         conn.execute(
@@ -667,14 +665,10 @@ def test_running_classify_twice_writes_identical_rows(conn: Connection, tmp_path
             )
         ).fetchall()
         battles = conn.execute(
-            text(
-                "SELECT battle_id, battle_type, fortified FROM battles ORDER BY battle_id"
-            )
+            text("SELECT battle_id, battle_type, fortified FROM battles ORDER BY battle_id")
         ).fetchall()
         missing = conn.execute(
-            text(
-                "SELECT log_id, missingness_class, notes FROM missing_data_log ORDER BY log_id"
-            )
+            text("SELECT log_id, missingness_class, notes FROM missing_data_log ORDER BY log_id")
         ).fetchall()
         return tuple(commanders), tuple(battles), tuple(missing)
 
@@ -715,3 +709,101 @@ def test_all_three_classify_gates_execute_with_no_sql_error(
     for name, result in results.items():
         assert "does not exist" not in (result.message or ""), f"{name}: {result.message}"
         print(f"{name}: passed={result.passed} value={result.actual_value}")
+
+
+# ─── Troop gaps, reconciled presence and siege defenders ─────────────────────
+
+
+def _seed_troop_gap_battle(conn: Connection) -> dict[str, int]:
+    """Seed a 1750 battle: a winner with a reconciled estimate, and a loser
+    whose only report reconcile found unusable, so it has no estimate."""
+    battle_id = _seed_battle(conn, "Battle of Gapville", "1750-05-01")
+    winner = _seed_side(conn, battle_id, "Winners")
+    loser = _seed_side(conn, battle_id, "Losers")
+    conn.execute(
+        text(
+            "UPDATE battle_sides SET est_troops_total = 20000, est_troops_method = 'x', "
+            "outcome = 'victory' WHERE side_id = :s"
+        ),
+        {"s": winner},
+    )
+    conn.execute(
+        text("UPDATE battle_sides SET outcome = 'defeat' WHERE side_id = :s"), {"s": loser}
+    )
+    source_id = conn.execute(
+        text(
+            "INSERT INTO sources (source_type, title) VALUES ('wikipedia_infobox', 't') "
+            "RETURNING source_id"
+        )
+    ).scalar_one()
+    conn.execute(
+        text(
+            "INSERT INTO troop_reports (side_id, source_id, reported_value, branch, "
+            "extracted_context) VALUES (:s, :src, 3, 'total', '3 batteries')"
+        ),
+        {"s": loser, "src": source_id},
+    )
+    log_id = _seed_missing(conn, battle_id, "troop_total", side_id=loser)
+    return {"battle_id": battle_id, "winner": winner, "loser": loser, "log_id": log_id}
+
+
+def test_a_side_reconcile_left_without_an_estimate_is_treated_as_having_no_troops(
+    conn: Connection, tmp_path: Path
+) -> None:
+    ids = _seed_troop_gap_battle(conn)
+    spec = _load_spec(tmp_path / "raw")
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    # Raw reports exist for the loser, but reconcile gave no estimate; the
+    # other side has one, so the losing-side-only-winner-known rule fires.
+    assert (
+        _scalar(
+            conn,
+            "SELECT missingness_class FROM missing_data_log WHERE log_id = :id",
+            id=ids["log_id"],
+        )
+        == "mnar"
+    )
+
+
+def test_a_side_with_no_estimate_and_no_log_row_gets_one(conn: Connection, tmp_path: Path) -> None:
+    battle_id = _seed_battle(conn, "Battle of Silence", "1750-05-01")
+    side_id = _seed_side(conn, battle_id, "Nobody")
+    spec = _load_spec(tmp_path / "raw")
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    rows = conn.execute(
+        text(
+            "SELECT notes FROM missing_data_log WHERE side_id = :s AND field_name = 'troop_total'"
+        ),
+        {"s": side_id},
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0].notes.startswith("classify: ")
+    results = {r.name: r for r in QualityRunner(conn).run_all(spec["quality_checks"])}
+    assert results["missing_data_all_logged"].passed
+
+
+def test_the_besieged_side_of_a_named_siege_is_marked_defender(
+    conn: Connection, tmp_path: Path
+) -> None:
+    battle_id = _seed_battle(conn, "Siege of Massilia", "0049-06-01 BC")
+    besiegers = _seed_side(conn, battle_id, "Supporters of Julius Caesar")
+    city = _seed_side(conn, battle_id, "City of Massilia")
+    other_id = _seed_battle(conn, "Siege of Acre (1799)", "1799-03-20")
+    acre_a = _seed_side(conn, other_id, "Ottoman Empire")
+    acre_b = _seed_side(conn, other_id, "French Republic")
+    spec = _load_spec(tmp_path / "raw")
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    def flag(side_id: int) -> Any:
+        return _scalar(conn, "SELECT is_defender FROM battle_sides WHERE side_id = :s", s=side_id)
+
+    assert flag(city) is True
+    assert flag(besiegers) is False
+    assert flag(acre_a) is None
+    assert flag(acre_b) is None

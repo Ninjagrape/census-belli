@@ -159,5 +159,5 @@ quality_checks:
     description: The imputation model's sampler converged.
 
 retry_policy:
-  max_stage_retries: 1
+  max_stage_retries: 0               # fixed-seed sampling: a re-run repeats the failure
   on_failure: pause_and_alert

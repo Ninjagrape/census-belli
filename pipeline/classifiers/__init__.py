@@ -27,15 +27,18 @@ Typical use::
 from __future__ import annotations
 
 from pipeline.classifiers.battle_type import extract_categories, infer_battle_type
+from pipeline.classifiers.defender import SideLabel, besieged_place, infer_siege_defenders
 from pipeline.classifiers.load import (
     ARTICLE_SUFFIXES,
     HTML_SUFFIXES,
     find_article_path,
     find_unclassified_battle_type_log_ids,
+    load_battle_source_slugs,
     load_battle_wikipedia_urls,
     load_battles_needing_type,
     load_missingness_inputs,
     load_side_groups,
+    load_siege_sides,
     load_troop_evidence,
     read_article_text,
 )
@@ -61,7 +64,9 @@ from pipeline.classifiers.roles import (
     normalize_name,
 )
 from pipeline.classifiers.store import (
+    log_unlogged_troop_totals,
     write_battle_type_decisions,
+    write_defender_flags,
     write_missingness_decisions,
     write_role_decisions,
 )
@@ -82,24 +87,31 @@ __all__ = [
     "MissingnessInput",
     "RoleDecision",
     "SideGroup",
+    "SideLabel",
     "apply_llm_classification",
+    "besieged_place",
     "build_role_request",
     "classify_missingness",
     "classify_side_roles",
     "extract_categories",
     "find_article_path",
+    "load_battle_source_slugs",
     "find_unclassified_battle_type_log_ids",
     "infer_battle_type",
+    "infer_siege_defenders",
     "load_battle_wikipedia_urls",
     "load_battles_needing_type",
     "load_missingness_inputs",
     "load_side_groups",
+    "load_siege_sides",
     "load_troop_evidence",
+    "log_unlogged_troop_totals",
     "normalize_name",
     "read_article_text",
     "select_excerpt",
     "to_jsonable",
     "write_battle_type_decisions",
+    "write_defender_flags",
     "write_missingness_decisions",
     "write_role_decisions",
 ]

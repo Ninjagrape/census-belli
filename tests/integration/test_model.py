@@ -558,7 +558,7 @@ def test_a_stale_manifest_is_refused_before_any_run_row_is_written(
         path.write_text(
             json.dumps({"run_id": FAKE_IMPUTE_RUN_ID - 1, "scale": "neutral"}), encoding="utf-8"
         )
-    with pytest.raises(ValueError, match="latest neutral impute run"):
+    with pytest.raises(ValueError, match="latest impute run of this scale"):
         model_stage.run(
             _spec(seeded, tmp_path / "out", imputed_root=str(stale_root)),
             context=StageContext(db_conn=conn),
@@ -595,3 +595,93 @@ def test_dry_run_writes_nothing(
 
     assert _count_runs(engine) == before
     assert not (tmp_path / "out").exists()
+
+
+PUBLISHED_IMPUTE_RUN_ID = 9_999
+
+
+def test_published_scale_runs_under_its_own_model_types_and_leaves_neutral_alone(
+    engine: Engine, fitted: dict[str, Any], tmp_path: Path
+) -> None:
+    root = tmp_path / "imputed"
+    shutil.copytree(fitted["root"] / "neutral", root / "published")
+    for n in range(N_ROUNDS):
+        manifest = root / "published" / f"round_{n}" / "manifest.json"
+        manifest.write_text(
+            json.dumps({"run_id": PUBLISHED_IMPUTE_RUN_ID, "scale": "published", "round": n}),
+            encoding="utf-8",
+        )
+    with engine.begin() as setup:
+        setup.execute(
+            text(
+                "INSERT INTO model_runs (run_id, run_name, model_type, config, completed_at, "
+                "diagnostics) VALUES (:r, 'fake published impute', 'imputation', '{}'::jsonb, "
+                'now(), \'{"scale": "published", "written": true}\'::jsonb)'
+            ),
+            {"r": PUBLISHED_IMPUTE_RUN_ID},
+        )
+        setup.execute(_BUMP_SEQUENCE)
+    with engine.connect() as probe:
+        primary_before = int(
+            probe.execute(
+                text("SELECT MAX(run_id) FROM model_runs WHERE model_type = :t"), {"t": POOLED}
+            ).scalar_one()
+        )
+        neutral_rows = int(
+            probe.execute(
+                text("SELECT COUNT(*) FROM general_skill_estimates WHERE run_id = :r"),
+                {"r": fitted["pooled_id"]},
+            ).scalar_one()
+        )
+
+    _run_committed(
+        engine,
+        _spec(fitted, tmp_path / "out", imputed_root=str(root), scale="published"),
+    )
+
+    with engine.connect() as probe:
+        types = [
+            str(t)
+            for (t,) in probe.execute(
+                text("SELECT model_type FROM model_runs WHERE run_id > :r ORDER BY run_id"),
+                {"r": PUBLISHED_IMPUTE_RUN_ID},
+            ).fetchall()
+        ]
+        latest_primary = int(
+            probe.execute(
+                text("SELECT MAX(run_id) FROM model_runs WHERE model_type = :t"), {"t": POOLED}
+            ).scalar_one()
+        )
+        pooled_config, pooled_diag = probe.execute(
+            text(
+                "SELECT config, diagnostics FROM model_runs "
+                "WHERE model_type = 'bradley_terry_hierarchical_published'"
+            )
+        ).one()
+        neutral_after = int(
+            probe.execute(
+                text("SELECT COUNT(*) FROM general_skill_estimates WHERE run_id = :r"),
+                {"r": fitted["pooled_id"]},
+            ).scalar_one()
+        )
+
+    assert types == [
+        "bradley_terry_round_published",
+        "bradley_terry_round_published",
+        "bradley_terry_joint_latent_published",
+        "bradley_terry_hierarchical_published",
+    ]
+    assert latest_primary == primary_before
+    assert neutral_after == neutral_rows > 0
+    assert pooled_config["scale"] == pooled_diag["scale"] == "published"
+    assert pooled_diag["imputation_run_id"] == PUBLISHED_IMPUTE_RUN_ID
+    assert pooled_diag["estimates_written"] is True
+
+
+def test_an_unknown_scale_is_refused(
+    conn: Connection, seeded: dict[str, Any], tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match="scale must be one of"):
+        model_stage.run(
+            _spec(seeded, tmp_path / "out", scale="bogus"), context=StageContext(db_conn=conn)
+        )

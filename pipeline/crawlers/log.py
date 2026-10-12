@@ -177,19 +177,57 @@ class SqlCrawlLog:
     def flush(self) -> None:
         """Write and commit any buffered rows.
 
-        A failure to write the log must not lose the crawl itself, so the
-        error is logged and the batch dropped rather than raised: the pages
-        are already on disk and the crawl can continue.
+        A failure to write the log must not lose the crawl itself, so errors
+        are logged and the rows dropped rather than raised: the pages are
+        already on disk and the crawl can continue.
+
+        Each write runs in a SAVEPOINT. On PostgreSQL a failed statement
+        aborts the whole transaction ("current transaction is aborted,
+        commands ignored"), so without one a single bad row would make every
+        later flush fail too, silently, for the rest of the run. If the batch
+        fails, its rows are retried one at a time so that only the offending
+        row is lost.
         """
         if not self._pending:
             return
 
         batch: Sequence[CrawlLogEntry] = tuple(self._pending)
         self._pending.clear()
+
+        if self._insert(batch):
+            self.written += len(batch)
+        else:
+            self.written += sum(1 for entry in batch if self._insert([entry], isolated=True))
+        self._commit()
+
+    def _insert(self, entries: Sequence[CrawlLogEntry], *, isolated: bool = False) -> bool:
+        """Insert rows inside a savepoint.
+
+        Args:
+            entries: Rows to insert together.
+            isolated: True when retrying a single row of a failed batch, which
+                changes only how loudly the failure is logged.
+
+        Returns:
+            True if the rows were inserted, False if the savepoint was rolled
+            back.
+        """
         try:
-            self._conn.execute(_INSERT_SQL, [entry.as_params() for entry in batch])
+            with self._conn.begin_nested():
+                self._conn.execute(_INSERT_SQL, [entry.as_params() for entry in entries])
+        except Exception as exc:
+            logger.error(
+                "crawl_log_row_failed" if isolated else "crawl_log_write_failed",
+                rows=len(entries),
+                urls=[entry.url for entry in entries[:3]],
+                error=str(exc),
+            )
+            return False
+        return True
+
+    def _commit(self) -> None:
+        """Commit what the savepoints kept, logging rather than raising."""
+        try:
             self._conn.commit()
         except Exception as exc:
-            logger.error("crawl_log_write_failed", rows=len(batch), error=str(exc))
-            return
-        self.written += len(batch)
+            logger.error("crawl_log_commit_failed", error=str(exc))

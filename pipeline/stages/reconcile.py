@@ -87,6 +87,7 @@ already do for a connection they did not open.
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -176,6 +177,23 @@ def _combined_worst(per_quantity: dict[str, dict[str, Any]]) -> dict[str, float 
     }
 
 
+def _write_thresholds(params: dict[str, Any]) -> dict[str, float]:
+    """Read the limits a fit must clear before its estimates are written.
+
+    Args:
+        params: The spec's ``params`` mapping.
+
+    Returns:
+        ``max_rhat``, ``min_ess_bulk`` and ``max_divergences``. Recorded in the
+        run's config so ``neutral_fit_converged`` judges by what the run used.
+    """
+    return {
+        "max_rhat": float(params.get("write_max_rhat", 1.05)),
+        "min_ess_bulk": float(params.get("write_min_ess_bulk", 400)),
+        "max_divergences": float(params.get("write_max_divergences", 0)),
+    }
+
+
 def _passes_write_thresholds(worst: dict[str, Any], params: dict[str, Any]) -> bool:
     """Whether a fit's worst diagnostics clear the thresholds for writing.
 
@@ -186,11 +204,39 @@ def _passes_write_thresholds(worst: dict[str, Any], params: dict[str, Any]) -> b
     Returns:
         True when rhat, bulk ESS and divergences are all acceptable.
     """
-    return bool(
-        (worst.get("max_rhat") or 0.0) <= float(params.get("write_max_rhat", 1.05))
-        and (worst.get("min_ess_bulk") or 0.0) >= float(params.get("write_min_ess_bulk", 400))
-        and (worst.get("divergences") or 0) <= int(params.get("write_max_divergences", 0))
+    return not _failed_thresholds(worst, params)
+
+
+def _failed_thresholds(worst: dict[str, Any], params: dict[str, Any]) -> list[str]:
+    """Name each write threshold a fit's worst diagnostics breach.
+
+    Args:
+        worst: A diagnostics payload's ``"worst"`` object.
+        params: The spec's ``params`` mapping, for the ``write_*`` thresholds.
+
+    Returns:
+        Short descriptions such as ``"max_rhat 1.2 > 1.05"``; empty when the fit
+        clears every threshold.
+    """
+    limits = _write_thresholds(params)
+    max_rhat, min_ess, max_div = (
+        limits["max_rhat"],
+        limits["min_ess_bulk"],
+        int(limits["max_divergences"]),
     )
+    rhat = worst.get("max_rhat") or 0.0
+    ess = worst.get("min_ess_bulk") or 0.0
+    divergences = worst.get("divergences") or 0
+    failed: list[str] = []
+    # NaN compares False against every threshold, so a diverged fit with a NaN
+    # diagnostic would otherwise sail through the gate.
+    if not math.isfinite(rhat) or rhat > max_rhat:
+        failed.append(f"max_rhat {rhat:.3g} > {max_rhat:g}")
+    if not math.isfinite(ess) or ess < min_ess:
+        failed.append(f"min_ess_bulk {ess:.0f} < {min_ess:g}")
+    if divergences > max_div:
+        failed.append(f"divergences {divergences} > {max_div}")
+    return failed
 
 
 def _fit_neutral_troops(
@@ -356,6 +402,13 @@ def _fit_quantity(
             worst=worst,
             hint="estimates left at their previous values; see model_convergence",
         )
+        store.log_withheld_sides(
+            conn,
+            cast(Quantity, quantity),
+            side_ids=set(design.side_ids),
+            run_id=run_id,
+            reason="; ".join(_failed_thresholds(worst, params)),
+        )
 
     # Judged and written on its own diagnostics, whatever happened to the
     # published fit above.
@@ -444,6 +497,7 @@ def _run_body(
             "inflation": asdict(inflation),
             "ancient_cutoff_year": ancient_cutoff_year,
             "ci_mass": ci_mass,
+            "write_thresholds": _write_thresholds(params),
             "priors": {
                 quantity: asdict(ModelPriors.from_params(params, quantity=quantity))
                 for quantity in quantities_with_reports

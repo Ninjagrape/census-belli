@@ -364,8 +364,8 @@ def merge_cross_regime_duplicates(
     agrees with it. Two unlabelled rows that agree are left alone, as are two
     labelled rows: this function cannot tell independent agreement from
     repetition without a regime to break the tie, so it does not guess. The
-    dropped rows still count towards a side's ``n_reports``, because that
-    count is taken from the loader's full list, not from the design's rows.
+    dropped rows do not count towards a side's ``n_reports``, which is taken
+    from the rows that entered the fit.
 
     Args:
         reports: One quantity's reports.

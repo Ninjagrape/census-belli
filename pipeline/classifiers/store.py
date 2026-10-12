@@ -36,6 +36,8 @@ from sqlalchemy import text
 from pipeline.classifiers.records import BattleTypeDecision, MissingnessDecision, RoleDecision
 
 __all__ = [
+    "log_unlogged_troop_totals",
+    "write_defender_flags",
     "write_battle_type_decisions",
     "write_missingness_decisions",
     "write_role_decisions",
@@ -190,4 +192,70 @@ def write_missingness_decisions(conn: Any, decisions: list[MissingnessDecision])
             },
         )
         written += 1
+    return written
+
+
+_LOG_UNLOGGED_TROOP_TOTALS = text(
+    """
+    INSERT INTO missing_data_log (battle_id, side_id, field_name, notes)
+    SELECT bs.battle_id, bs.side_id, 'troop_total',
+           :note
+    FROM battle_sides bs
+    WHERE bs.est_troops_total IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM missing_data_log mdl
+          WHERE mdl.side_id = bs.side_id AND mdl.field_name = 'troop_total'
+      )
+    """
+)
+
+
+def log_unlogged_troop_totals(conn: Any) -> int:
+    """Log a ``troop_total`` gap for every side that has none and no row for it.
+
+    Extract logs a side with no reports and reconcile logs one whose reports
+    were all unusable, but a side can still end up with neither: the extract
+    rows are cleared when a battle is re-extracted, and a side with no reports
+    never reaches reconcile at all. Impute selects its targets from this log,
+    so an unlogged gap is silently never imputed. Classify runs after both
+    stages and owns the missingness classes, so it closes the hole here and
+    the new rows go through the same heuristics as the others.
+
+    Args:
+        conn: An open database connection.
+
+    Returns:
+        How many rows were inserted.
+    """
+    result = conn.execute(
+        _LOG_UNLOGGED_TROOP_TOTALS,
+        {"note": f"{_NOTE_PREFIX}no reconciled troop estimate and no earlier log entry"},
+    )
+    return int(result.rowcount or 0)
+
+
+_UPDATE_DEFENDER = text(
+    """
+    UPDATE battle_sides SET is_defender = :is_defender
+    WHERE side_id = :side_id AND is_defender IS NULL
+    """
+)
+
+
+def write_defender_flags(conn: Any, flags: dict[int, bool]) -> int:
+    """Set ``is_defender`` on sides where it is still unset.
+
+    Args:
+        conn: An open database connection.
+        flags: ``side_id`` to the flag, from
+            :func:`pipeline.classifiers.defender.infer_siege_defenders`.
+
+    Returns:
+        How many sides were updated. A flag already on the row is never
+        overwritten.
+    """
+    written = 0
+    for side_id, is_defender in flags.items():
+        result = conn.execute(_UPDATE_DEFENDER, {"side_id": side_id, "is_defender": is_defender})
+        written += int(result.rowcount or 0)
     return written

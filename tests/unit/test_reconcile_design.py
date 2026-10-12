@@ -167,7 +167,9 @@ def test_an_all_ancient_corpus_has_an_identically_zero_era_covariate() -> None:
 
 
 def test_a_battle_with_a_null_year_sits_at_the_corpus_average_not_at_modern() -> None:
-    # A missing date is not evidence that a battle is recent.
+    # A missing date is not evidence that a battle is recent. (Passes only
+    # because `_report` defaults to the unlabelled regime, the one the era
+    # covariate is centred over.)
     design = _design([_report(1, year=-330), _report(2, year=1815), _report(3, year=None)])
 
     assert design.era[2] == pytest.approx(0.0)
@@ -182,6 +184,37 @@ def test_an_undated_battle_does_not_drag_the_era_mean() -> None:
     mixed = _design([_report(1, year=-330), _report(2, year=1815), _report(3, year=None)])
 
     assert mixed.era_mean == pytest.approx(dated.era_mean)
+
+
+def test_the_era_centre_is_taken_over_unlabelled_rows_only() -> None:
+    # a_era multiplies the column on unlabelled rows alone, so a labelled
+    # ancient row must neither move the centre nor receive an era value.
+    design = _design(
+        [
+            _report(1, year=-330, regime="unlabelled"),
+            _report(2, year=1815, regime="unlabelled"),
+            _report(
+                3, side_id=2, value=50_000.0, year=-330, regime="chronicle", url="https://example/b"
+            ),
+            _report(
+                4, side_id=3, value=60_000.0, year=-330, regime="chronicle", url="https://example/c"
+            ),
+        ]
+    )
+
+    assert design.era_mean == pytest.approx(0.5)
+    assert design.era_centre_rows == 2
+    assert design.era[2] == 0.0
+    assert design.era[3] == 0.0
+    unlabelled = design.regime_index == design.regimes.index("unlabelled")
+    assert design.era[unlabelled].sum() == pytest.approx(0.0)
+
+
+def test_a_corpus_with_no_unlabelled_rows_has_a_zero_era_column() -> None:
+    design = _design([_report(1, year=-330, regime="chronicle")])
+
+    assert np.allclose(design.era, 0.0)
+    assert design.era_centre_rows == 0
 
 
 # ─── Reference levels ────────────────────────────────────────────────────────
@@ -229,9 +262,7 @@ def test_two_source_rows_sharing_a_type_and_url_collapse_to_one_bias_key() -> No
     # sources has no unique constraint, so one document can hold several
     # source_ids. Indexing bias by source_id splits its evidence across two
     # parameters that each shrink further toward zero.
-    design = _design(
-        [_report(1, url="https://example/x"), _report(2, url="https://example/x")]
-    )
+    design = _design([_report(1, url="https://example/x"), _report(2, url="https://example/x")])
 
     assert design.n_sources == 1
     assert design.source_index.tolist() == [0, 0]

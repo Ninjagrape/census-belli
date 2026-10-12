@@ -182,7 +182,10 @@ def summarise_fit(
         # payload promises plain JSON; a store that papers over it with
         # default=str only moved the crash to the report writer.
         "inflation_provenance": json.loads(json.dumps(inflation.provenance, default=str)),
+        # Centre of the era column, over the dated unlabelled rows only (the rows
+        # a_era applies to), so the column the model saw is reproducible.
         "era_mean": design.era_mean,
+        "era_centre_rows": design.era_centre_rows,
         "worst": worst,
         "worst_variable": worst_variable,
         "offset_bar": _scalar_stats(idata, "offset_bar"),
@@ -426,8 +429,10 @@ def _side_estimates(
     upper_q = 1.0 - lower_q
     quantity = cast(Quantity, design.quantity)
 
+    upper_bound_rows = set(design.censor_lower_at.tolist())
+    lower_bound_rows = set(design.censor_upper_at.tolist())
     estimates: list[SideEstimate] = []
-    for side_id in design.side_ids:
+    for design_position, side_id in enumerate(design.side_ids):
         position = side_labels.index(str(side_id))
         samples = mu[:, position]
         # Median first, exponentiate after: see the module docstring for why
@@ -436,17 +441,23 @@ def _side_estimates(
         lo_log = float(np.quantile(samples, lower_q))
         hi_log = float(np.quantile(samples, upper_q))
 
-        side_reports = reports_by_side.get(side_id, [])
-        n_lineages = len({r.lineage_id for r in side_reports})
+        # Judged on the rows that entered the fit, not on the loaded reports:
+        # the cross-regime merge and the lineage collapse drop restatements, so
+        # counting loaded reports called a side "source_disagreement" when the
+        # model saw one claim.
+        # Zero-valued rows are dropped from the likelihood, so they are not
+        # evidence either; the counts below follow the method on the same rows.
+        on_side = design.side_index == design_position
+        on_side[design.zero_rows] = False
+        fitted_rows = np.flatnonzero(on_side)
+        n_lineages = len({int(design.lineage_index[row]) for row in fitted_rows})
         method = "source_disagreement" if n_lineages >= 2 else "single_report_debiased"
         # Every report bounds the side from the same direction ("up to X" and
         # nothing else): the estimate is the hierarchical prior truncated at X,
         # not evidence of where below X the truth lies. Flagged so downstream
         # stages can down-weight it (docs/handover-log.md 20.10, MEDIUM 4).
-        if side_reports and (
-            all(r.is_upper_bound and not r.is_lower_bound for r in side_reports)
-            or all(r.is_lower_bound and not r.is_upper_bound for r in side_reports)
-        ):
+        row_set = set(fitted_rows.tolist())
+        if row_set and (row_set <= upper_bound_rows or row_set <= lower_bound_rows):
             method = "bound_only"
 
         estimates.append(
@@ -457,8 +468,8 @@ def _side_estimates(
                 lo=math.exp(lo_log),
                 hi=math.exp(hi_log),
                 run_id=run_id,
-                n_reports=len(side_reports),
-                n_sources=len({r.source_key for r in side_reports}),
+                n_reports=len(fitted_rows),
+                n_sources=len({int(design.source_index[row]) for row in fitted_rows}),
                 method=method,
                 updated_at=computed_at,
             )

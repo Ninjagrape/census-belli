@@ -20,9 +20,11 @@ from pipeline.quality import (
     QualityRunner,
     Severity,
     StageResult,
+    ThresholdParamError,
     ThresholdParseError,
     has_blocking_failure,
     parse_threshold,
+    resolve_threshold_params,
 )
 
 AGENTS_DIR = Path(__file__).resolve().parents[2] / "agents"
@@ -337,6 +339,11 @@ def test_success_never_halts() -> None:
 # ─── Every real spec's thresholds must be handled ────────────────────────────
 
 
+def _spec_params(stage: str) -> dict[str, Any]:
+    spec = yaml.safe_load((AGENTS_DIR / f"{stage}.yaml").read_text(encoding="utf-8"))
+    return dict(spec.get("params") or {})
+
+
 def _spec_checks() -> list[tuple[str, dict[str, Any]]]:
     pairs: list[tuple[str, dict[str, Any]]] = []
     for path in sorted(AGENTS_DIR.glob("*.yaml")):
@@ -357,8 +364,11 @@ def test_every_spec_check_is_either_sql_or_method() -> None:
         if check.get("method") is not None:
             continue
         try:
-            parse_threshold(str(check.get("threshold", "")))
-        except ThresholdParseError:
+            # Specs write thresholds as `{params.x}` placeholders; the runner
+            # resolves them from the spec's own params before parsing.
+            raw = resolve_threshold_params(str(check.get("threshold", "")), _spec_params(stage))
+            parse_threshold(raw)
+        except (ThresholdParseError, ThresholdParamError):
             orphans.append(f"{stage}.{check.get('name')}")
 
     assert orphans == [], (
@@ -607,3 +617,57 @@ def test_diagnostics_json_passes_when_the_converged_flag_is_true_or_absent() -> 
         conn = DiagnosticsConnection([_DiagnosticsRow(9, payload)])
 
         assert QualityRunner(conn).run_one(_diagnostics_check()).passed is True
+
+
+# ─── {params.x} thresholds and spec-param binding ────────────────────────────
+
+
+def test_threshold_placeholder_resolves_from_spec_params() -> None:
+    check = {
+        "name": "n",
+        "check": "SELECT 5",
+        "threshold": ">= {params.min_n}",
+        "severity": "error",
+    }
+
+    ok = QualityRunner(StubConnection(value=5), {"min_n": 3}).run_one(check)
+    low = QualityRunner(StubConnection(value=5), {"min_n": 9}).run_one(check)
+
+    assert ok.passed is True
+    assert low.passed is False
+
+
+def test_threshold_placeholder_naming_a_missing_param_fails() -> None:
+    check = {
+        "name": "n",
+        "check": "SELECT 5",
+        "threshold": ">= {params.nope}",
+        "severity": "error",
+    }
+
+    result = QualityRunner(StubConnection(value=5), {"other": 1}).run_one(check)
+
+    assert result.passed is False
+    assert "params.nope" in result.message
+
+
+def test_imputation_gate_follows_the_spec_scale_and_root(tmp_path: Path) -> None:
+    import json
+
+    for scale, passed in (("neutral", False), ("published", True)):
+        directory = tmp_path / scale
+        directory.mkdir()
+        gates = [{"name": "g", "passed": passed, "actual": 1, "threshold": "= 1"}]
+        (directory / "gate_report.json").write_text(json.dumps({"gates": gates}), encoding="utf-8")
+    check = {
+        "name": "g",
+        "method": "imputation_gate",
+        "params": {"gate": "g", "root": "data/imputed", "scale": "neutral"},
+        "severity": "error",
+    }
+
+    result = QualityRunner(None, {"scale": "published", "imputed_root": str(tmp_path)}).run_one(
+        check
+    )
+
+    assert result.passed is True

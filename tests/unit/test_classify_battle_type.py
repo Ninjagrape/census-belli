@@ -153,7 +153,8 @@ def test_amphibious_needs_naval_and_land_and_an_explicit_mention() -> None:
     decision = infer_battle_type(
         9,
         "Battle of the Beachhead",
-        "The amphibious landing put infantry ashore under naval gunfire support.",
+        "The amphibious assault began at dawn. Amphibious forces took the beach, and the "
+        "amphibious group's gunfire support ships stayed offshore until noon.",
         [],
         ["naval", "infantry"],
         [],

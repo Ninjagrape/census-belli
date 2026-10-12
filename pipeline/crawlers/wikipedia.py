@@ -35,6 +35,7 @@ __all__ = [
     "is_battle_title",
     "normalise_url",
     "parse_battle_links",
+    "read_article",
     "title_from_url",
     "write_article",
 ]
@@ -354,3 +355,20 @@ def write_article(directory: Path | str, url: str, html: str) -> Path:
     path = target / article_filename(url)
     path.write_text(html, encoding="utf-8")
     return path
+
+
+def read_article(directory: Path | str, url: str) -> str | None:
+    """Read back an article written by :func:`write_article`.
+
+    Args:
+        directory: The raw battles directory.
+        url: The article URL.
+
+    Returns:
+        The HTML, or None when the file is absent (state says fetched but the
+        raw directory was cleared or moved).
+    """
+    path = Path(directory) / article_filename(url)
+    if not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")

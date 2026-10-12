@@ -42,7 +42,12 @@ from pipeline.extractors.records import (
     TroopReport,
 )
 from pipeline.extractors.textnorm import (
+    Quantity,
+    classify_figure,
     infer_casualty_type,
+    is_equipment_count,
+    is_labelled_figure,
+    is_orphan_figure,
     parse_quantities,
     split_list_items,
     strip_markup,
@@ -67,6 +72,10 @@ logger = structlog.get_logger()
 # wins: see textnorm.resolve_scope. Prose in the article body gets no such
 # default, because a sentence carries no field semantics.
 INFOBOX_STRENGTH_DEFAULT_SCOPE: Final[str] = "engaged"
+
+# A component below this is far likelier a count of guns, ships or animals
+# than of men, so it is kept as a report but never summed into a derived total.
+_MIN_SUMMED_HEADCOUNT: Final[float] = 100.0
 
 
 @dataclass(frozen=True)
@@ -173,6 +182,13 @@ _RESULT_RE: Final = re.compile(
     r"(?P<who>[A-Za-zÀ-ɏ'’\- ]{2,60}?)\s+victory",
     re.IGNORECASE,
 )
+# "Victory for Octavian" puts the victor after the word rather than before it.
+_VICTORY_FOR_RE: Final = re.compile(
+    r"\bvictory\s+for\s+(?:the\s+)?(?P<who>[A-Za-zÀ-ɏ'’\- ]{2,60}?)(?=\s*(?:[,;.\n(]|$))",
+    re.IGNORECASE,
+)
+# Cross-references an editor leaves in a result field: "(see § Aftermath)".
+_RESULT_DEBRIS_RE: Final = re.compile(r"\((?:see|cf\.?)\b[^)]*\)", re.IGNORECASE)
 _INDECISIVE_RE: Final = re.compile(
     r"\b(?:inconclusive|indecisive|stalemate|draw|status quo ante)\b", re.IGNORECASE
 )
@@ -300,9 +316,14 @@ def _parse_result(result_text: str) -> tuple[str | None, str | None]:
     if _INDECISIVE_RE.search(result_text):
         return None, "indecisive"
 
+    result_text = _RESULT_DEBRIS_RE.sub("", result_text)
     match = _RESULT_RE.search(result_text)
     if match is None:
-        return None, None
+        victory_for = _VICTORY_FOR_RE.search(result_text)
+        if victory_for is None:
+            return None, None
+        who = re.sub(r"\s+", " ", victory_for.group("who")).strip(" -–—")
+        return (who or None), "victory"
 
     qualifier = (match.group("qualifier") or "").lower()
     who = re.sub(r"\s+", " ", match.group("who")).strip(" -–—")
@@ -355,6 +376,90 @@ def _commander_mentions(
     return mentions
 
 
+def _classified_branch(
+    quantity: Quantity, implied_branch: str | None, *, first_line: bool
+) -> tuple[str, bool]:
+    """Pick the branch a headcount is stored under.
+
+    A line naming an arm keeps that arm. A line naming a contingent,
+    nationality or unit is a component, stored as ``other`` so reconcile does
+    not read "25,000 Romans" as the Roman side's total. Only an explicit total
+    or a lone unqualified figure stays ``total``.
+
+    Args:
+        quantity: The parsed figure.
+        implied_branch: Branch the field itself implies (``ships1`` is naval).
+        first_line: Whether the figure is on the first line of its field.
+
+    Returns:
+        The branch, and whether the figure counts equipment rather than men.
+    """
+    equipment = implied_branch is not None or is_equipment_count(quantity)
+    if implied_branch:
+        return implied_branch, equipment
+    role = classify_figure(quantity, first_in_field=first_line)
+    if role == "component":
+        return "other", equipment
+    return quantity.branch, equipment
+
+
+def _derived_total(
+    reports: list[TroopReport], unsafe: set[int], side_label: str, provenance: Provenance
+) -> TroopReport | None:
+    """Sum a side's components into one lower-bound total when it has none.
+
+    Components may be incomplete, so the sum is a lower bound and is marked
+    as derived in ``extracted_context``. Contingents and arms of service are
+    separate partitions of the same side, so each is summed on its own and the
+    larger wins; adding both would count the same men twice. Within the arms
+    partition only the largest figure per arm is used, because "8,050 gunners
+    and engineers" and a nested "7,232 gunners" describe overlapping men.
+
+    Args:
+        reports: The side's reports, none of which is a total.
+        unsafe: Indexes into ``reports`` that must not be summed: equipment
+            counts, figures behind a label that may name a phase or date, and
+            numbers too small to be a headcount.
+        side_label: The side the sum describes.
+        provenance: Where the figures came from.
+
+    Returns:
+        The derived report, or None when fewer than two components exist.
+    """
+    contingents: list[TroopReport] = []
+    arms: dict[str, TroopReport] = {}
+    for index, report in enumerate(reports):
+        if index in unsafe or report.is_upper_bound:
+            continue
+        if report.branch == "other":
+            contingents.append(report)
+        elif report.branch != "total":
+            held = arms.get(report.branch)
+            if held is None or report.reported_value > held.reported_value:
+                arms[report.branch] = report
+
+    partitions = [contingents, list(arms.values())]
+    best = max(partitions, key=lambda part: sum(r.reported_value for r in part))
+    if len(best) < 2:
+        return None
+
+    scopes = {r.scope for r in best}
+    return TroopReport(
+        side_label=side_label,
+        reported_value=sum(r.reported_value for r in best),
+        provenance=provenance,
+        branch="total",
+        scope=scopes.pop() if len(scopes) == 1 else "unknown",
+        is_estimate=True,
+        is_lower_bound=True,
+        extracted_context=(
+            f"derived: sum of {len(best)} component figures, a lower bound "
+            "because components may be incomplete"
+        ),
+        page_or_section="infobox:derived_total",
+    )
+
+
 def _side_troop_reports(
     fields: list[tuple[str, str]],
     variant: InfoboxVariant,
@@ -371,8 +476,15 @@ def _side_troop_reports(
 
     Returns:
         One report per number found. Ranges yield two, flagged as bounds.
+        Component and arm figures are never stored as ``total``. When a side
+        has no total but several components, one derived lower-bound total is
+        appended; when it has no total and a single component, that figure is
+        promoted to the total.
     """
     reports: list[TroopReport] = []
+    equipment: set[int] = set()
+    unsafe: set[int] = set()
+    has_orphan = False
 
     for field_name, value in fields:
         stem = _SIDE_SUFFIX_RE.match(field_name)
@@ -381,13 +493,30 @@ def _side_troop_reports(
             continue
         implied_branch = variant.strength_fields[stem_name]
 
-        for quantity in parse_quantities(value, default_scope=INFOBOX_STRENGTH_DEFAULT_SCOPE):
+        quantities = parse_quantities(value, default_scope=INFOBOX_STRENGTH_DEFAULT_SCOPE)
+        first_context = quantities[0].context if quantities else ""
+        for quantity in quantities:
+            branch, is_equipment = _classified_branch(
+                quantity, implied_branch, first_line=quantity.context == first_context
+            )
+            if is_equipment:
+                equipment.add(len(reports))
+            # A label before the number may name a phase or a date ("Skirmish:
+            # 20,000", "Battle: 40,000"), and a tiny count is more likely guns
+            # or animals than men; neither is safe to add into a total.
+            if (
+                is_equipment
+                or is_labelled_figure(quantity)
+                or quantity.value < _MIN_SUMMED_HEADCOUNT
+            ):
+                unsafe.add(len(reports))
+            has_orphan = has_orphan or is_orphan_figure(quantity)
             reports.append(
                 TroopReport(
                     side_label=side_label,
                     reported_value=quantity.value,
                     provenance=provenance,
-                    branch=implied_branch or quantity.branch,
+                    branch=branch,
                     scope=quantity.scope,
                     is_estimate=quantity.is_estimate,
                     is_upper_bound=quantity.is_upper_bound,
@@ -397,7 +526,54 @@ def _side_troop_reports(
                 )
             )
 
+    if reports and not any(r.branch == "total" for r in reports):
+        _complete_total(
+            reports, equipment, unsafe, side_label, provenance, may_derive=not has_orphan
+        )
+
     return reports
+
+
+def _complete_total(
+    reports: list[TroopReport],
+    equipment: set[int],
+    unsafe: set[int],
+    side_label: str,
+    provenance: Provenance,
+    *,
+    may_derive: bool,
+) -> None:
+    """Give a side without a total either a promoted lone figure or a derived sum.
+
+    Args:
+        reports: The side's reports, modified in place.
+        equipment: Indexes of reports that count equipment, not men.
+        unsafe: Indexes of reports that must not be summed.
+        side_label: The side the reports describe.
+        provenance: Where the figures came from.
+        may_derive: False when the field holds bare figures under headings
+            the page dropped; their structure is unknown, so no sum is made.
+    """
+    components = [r for i, r in enumerate(reports) if r.branch == "other" and i not in equipment]
+    arms = [
+        r
+        for i, r in enumerate(reports)
+        if r.branch not in ("other", "total") and i not in equipment
+    ]
+    lines = {(r.page_or_section, r.extracted_context) for r in components}
+    # "50,000 French troops" on the French side is that side's own figure
+    # even though a nationality was named; with nothing else to compare it to,
+    # it is the unqualified figure for the side.
+    if len(lines) == 1 and not arms:
+        for report in components:
+            report.branch = "total"
+        return
+
+    if not may_derive:
+        return
+    derived = _derived_total(reports, unsafe, side_label, provenance)
+    if derived is not None:
+        reports.append(derived)
 
 
 def _side_casualty_reports(

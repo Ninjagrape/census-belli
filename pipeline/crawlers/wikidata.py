@@ -51,6 +51,7 @@ __all__ = [
     "entity_data_url",
     "entity_ids",
     "parse_sparql_bindings",
+    "qid_from_article_html",
     "qid_from_uri",
     "run_query",
 ]
@@ -61,6 +62,14 @@ SPARQL_ENDPOINT = "https://query.wikidata.org/sparql"
 ENTITY_DATA_TEMPLATE = "https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
 
 _QID_RE = re.compile(r"/(Q\d+)$")
+
+# MediaWiki embeds the page's Wikibase item twice: in the RLCONF script block
+# and in the sidebar "Wikidata item" link. Both are written by Wikipedia for
+# every article with an item, so reading either costs no extra request.
+_ARTICLE_QID_PATTERNS = (
+    re.compile(r'"wgWikibaseItemId"\s*:\s*"(Q\d+)"'),
+    re.compile(r"Special:EntityPage/(Q\d+)"),
+)
 
 
 def qid_from_uri(uri: str) -> str | None:
@@ -74,6 +83,27 @@ def qid_from_uri(uri: str) -> str | None:
     """
     match = _QID_RE.search(uri.strip())
     return match.group(1) if match else None
+
+
+def qid_from_article_html(html: str) -> str | None:
+    """Read the Wikidata item a Wikipedia article is linked to.
+
+    Resolving through the article's own markup is exact (it is the sitelink
+    Wikidata itself holds) and costs no request, unlike a title search, which
+    can land on a different item with a similar name.
+
+    Args:
+        html: The article's raw HTML.
+
+    Returns:
+        The Q-id, or None when the page carries no item (a redirect stub or
+        an article not yet connected to Wikidata).
+    """
+    for pattern in _ARTICLE_QID_PATTERNS:
+        match = pattern.search(html)
+        if match:
+            return match.group(1)
+    return None
 
 
 def entity_data_url(qid: str) -> str:

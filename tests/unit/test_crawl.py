@@ -948,6 +948,11 @@ def write_seed(tmp_path: Path) -> None:
     )
 
 
+# What Wikipedia embeds in every article that has a Wikidata item; appended to
+# the stored fixture so its other consumers are unchanged.
+ARTICLE_QID_SCRIPT = '<script>RLCONF={"wgWikibaseItemId":"Q12345"};</script>'
+
+
 def crawl_handler() -> Any:
     """Build a handler serving the fixture corpus.
 
@@ -970,7 +975,7 @@ def crawl_handler() -> Any:
         if "Special:EntityData" in path:
             return httpx.Response(200, text='{"entities": {}}')
         if request.url.host == "en.wikipedia.org":
-            return httpx.Response(200, text=fixture("battle_article.html"))
+            return httpx.Response(200, text=fixture("battle_article.html") + ARTICLE_QID_SCRIPT)
         if request.url.host in ("www.jstor.org", "doi.org", "archive.org"):
             return httpx.Response(200, text="citation body")
         return httpx.Response(404, text="not served")
@@ -1082,7 +1087,7 @@ async def test_crawl_writes_articles_citations_and_log(tmp_path: Path) -> None:
     logged = sink.urls()
     assert ARTICLE_URL in logged
     assert all(not url.endswith("robots.txt") for url in logged)
-    assert all(entry.content_hash for entry in sink.entries)
+    assert all(entry.content_hash for entry in sink.entries if entry.http_status != 0)
 
 
 @sync
@@ -1096,8 +1101,12 @@ async def test_an_interrupted_crawl_resumes_instead_of_refetching(tmp_path: Path
 
     async with make_client(handler) as client:
         await crawl_stage.crawl(
-            params, loaded, state.load_state(params.paths.state_file), InMemoryCrawlLog(),
-            client=client, limit=1,
+            params,
+            loaded,
+            state.load_state(params.paths.state_file),
+            InMemoryCrawlLog(),
+            client=client,
+            limit=1,
         )
         after_first = len(handler.seen)
 
@@ -1256,3 +1265,195 @@ async def test_named_articles_are_not_refetched_on_resume(tmp_path: Path) -> Non
     assert first.battles_fetched == 1
     assert second.battles_fetched == 0
     assert second.battles_discovered == 0
+
+
+# ─── Battle article Wikidata items and the plan row ──────────────────────────
+
+
+def test_article_qid_is_read_from_the_page_config() -> None:
+    """The item id comes out of the article's own markup, with no request."""
+    html = '<script>RLCONF={"wgPageName":"X","wgWikibaseItemId":"Q479979"};</script>'
+
+    assert wikidata.qid_from_article_html(html) == "Q479979"
+
+
+def test_article_qid_falls_back_to_the_sidebar_link() -> None:
+    """A page without the config block still names its item in the sidebar."""
+    html = '<a href="https://www.wikidata.org/wiki/Special:EntityPage/Q7">item</a>'
+
+    assert wikidata.qid_from_article_html(html) == "Q7"
+
+
+def test_article_without_an_item_has_no_qid() -> None:
+    """An unconnected article yields None rather than a guess."""
+    assert wikidata.qid_from_article_html("<html>no item</html>") is None
+
+
+def plan_fields(sink: InMemoryCrawlLog) -> dict[str, int]:
+    """Parse the last plan row a crawl logged.
+
+    Args:
+        sink: The in-memory crawl log.
+
+    Returns:
+        The plan row's counts.
+    """
+    plans = [e for e in sink.entries if e.url.startswith(crawl_stage.PLAN_URL_PREFIX)]
+    assert plans, "the crawl logged no plan row"
+    query = plans[-1].url.split("?", 1)[1]
+    return {key: int(value) for key, value in (pair.split("=") for pair in query.split("&"))}
+
+
+def named_params(tmp_path: Path, **overrides: Any) -> crawl_stage.CrawlParams:
+    """Build params for a one-article named corpus.
+
+    Args:
+        tmp_path: The test's temporary directory.
+        **overrides: Params to replace.
+
+    Returns:
+        Params with the output directories created.
+    """
+    (tmp_path / "seed.yaml").write_text(
+        f"wikipedia_battle_articles:\n  - {ARTICLE_URL}\n", encoding="utf-8"
+    )
+    params = crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path, **overrides))
+    params.paths.ensure()
+    return params
+
+
+@sync
+async def test_named_corpus_fetches_each_articles_wikidata_item(tmp_path: Path) -> None:
+    """A named corpus has no SPARQL query yet still gets its battle's entity."""
+    params = named_params(tmp_path)
+    sink = InMemoryCrawlLog()
+    handler = crawl_handler()
+
+    async with make_client(handler) as client:
+        summary = await crawl_stage.crawl(
+            params, seeds.load_seeds(params.seed_path), state.CrawlState(), sink, client=client
+        )
+
+    assert (params.paths.wikidata / "Q12345.json").exists()
+    assert summary.wikidata_queries == 0
+    assert summary.battle_entities == 1
+    assert any("Special:EntityData/Q12345.json" in url for url in sink.urls())
+    assert plan_fields(sink) == {"targets": 1, "fetched": 1, "entities": 1, "floor": 0}
+
+
+@sync
+async def test_rerun_over_existing_articles_fetches_only_the_missing_entity(
+    tmp_path: Path,
+) -> None:
+    """The pilot case: articles are on disk, entities are not."""
+    params = named_params(tmp_path, fetch_battle_entities=False)
+    loaded = seeds.load_seeds(params.seed_path)
+
+    async with make_client(crawl_handler()) as client:
+        await crawl_stage.crawl(
+            params, loaded, state.CrawlState(), InMemoryCrawlLog(), client=client
+        )
+
+    backfill = crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path))
+    handler = crawl_handler()
+    sink = InMemoryCrawlLog()
+    async with make_client(handler) as client:
+        summary = await crawl_stage.crawl(
+            backfill, loaded, state.load_state(backfill.paths.state_file), sink, client=client
+        )
+
+    assert summary.battles_fetched == 0
+    assert ARTICLE_URL not in handler.seen
+    assert [u for u in handler.seen if "Special:EntityData" in u] == [
+        "https://www.wikidata.org/wiki/Special:EntityData/Q12345.json"
+    ]
+    assert plan_fields(sink)["entities"] == 1
+
+    # A third run has nothing left to fetch.
+    again = crawl_handler()
+    async with make_client(again) as client:
+        await crawl_stage.crawl(
+            backfill,
+            loaded,
+            state.load_state(backfill.paths.state_file),
+            InMemoryCrawlLog(),
+            client=client,
+        )
+    assert not [u for u in again.seen if "Special:EntityData" in u]
+
+
+@sync
+async def test_battle_entities_do_not_spend_the_sparql_budget(tmp_path: Path) -> None:
+    """Seed-query entities are still fetched up to their own cap."""
+    write_seed(tmp_path)
+    params = crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path))
+    params.paths.ensure()
+
+    async with make_client(crawl_handler()) as client:
+        summary = await crawl_stage.crawl(
+            params,
+            seeds.load_seeds(params.seed_path),
+            state.CrawlState(),
+            InMemoryCrawlLog(),
+            client=client,
+            limit=1,
+        )
+
+    assert summary.battle_entities == 1
+    assert summary.wikidata_entities == 2
+
+
+@sync
+async def test_a_failed_entity_fetch_is_not_counted_as_coverage(tmp_path: Path) -> None:
+    """A Wikidata outage leaves coverage at zero and the fetch retryable."""
+    params = named_params(tmp_path, max_retries=0)
+    base = crawl_handler()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "Special:EntityData" in request.url.path:
+            return httpx.Response(500, text="down")
+        return base(request)
+
+    sink = InMemoryCrawlLog()
+    resume = state.CrawlState()
+    async with make_client(handler) as client:
+        summary = await crawl_stage.crawl(
+            params, seeds.load_seeds(params.seed_path), resume, sink, client=client
+        )
+
+    assert summary.battle_entities == 0
+    assert plan_fields(sink)["entities"] == 0
+    assert not resume.is_fetched(wikidata.entity_data_url("Q12345"))
+
+
+@sync
+async def test_list_page_crawl_records_the_absolute_floor(tmp_path: Path) -> None:
+    """A list-page crawl keeps demanding thousands; a named one does not."""
+    write_seed(tmp_path)
+    params = crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path))
+    params.paths.ensure()
+    sink = InMemoryCrawlLog()
+
+    async with make_client(crawl_handler()) as client:
+        await crawl_stage.crawl(
+            params,
+            seeds.load_seeds(params.seed_path),
+            state.CrawlState(),
+            sink,
+            client=client,
+            limit=2,
+        )
+
+    fields = plan_fields(sink)
+    assert fields["floor"] == 3000
+    assert fields["targets"] == 5
+    assert fields["fetched"] == 2
+
+
+def test_project_spec_floor_defaults_to_thousands() -> None:
+    """The shipped spec still demands a full-corpus count from list pages."""
+    import yaml
+
+    spec = yaml.safe_load(Path("agents/crawl.yaml").read_text(encoding="utf-8"))
+
+    assert crawl_stage.CrawlParams.from_spec(spec).min_battle_articles == 3000

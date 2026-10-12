@@ -137,10 +137,27 @@ CREATE TABLE generals (
     canonical_name  TEXT NOT NULL,
     wikidata_id     TEXT UNIQUE,           -- e.g. 'Q517' for Napoleon
     wikipedia_url   TEXT,
+    -- born / died are DATEs but the resolve stage only knows a year (from the
+    -- linked Wikidata item), so it writes 1 January of that year. Read the
+    -- *_year_astronomical columns, not these: datetime.date cannot hold a BC
+    -- value, and the same reason gives battles.year_astronomical.
     born            DATE,
     died            DATE,
+    born_year_astronomical INT GENERATED ALWAYS AS (
+        CASE WHEN EXTRACT(YEAR FROM born) < 0
+             THEN EXTRACT(YEAR FROM born)::int + 1
+             ELSE EXTRACT(YEAR FROM born)::int END
+    ) STORED,
+    died_year_astronomical INT GENERATED ALWAYS AS (
+        CASE WHEN EXTRACT(YEAR FROM died) < 0
+             THEN EXTRACT(YEAR FROM died)::int + 1
+             ELSE EXTRACT(YEAR FROM died)::int END
+    ) STORED,
     nationality     TEXT,                  -- primary, simplified
-    era             TEXT,                  -- e.g. 'Napoleonic', 'Ancient Rome'
+    -- an era name from config/imputation_priors.yaml (ancient, medieval,
+    -- early_modern, napoleonic, industrial, modern), the bins the impute stage
+    -- uses for battles; NULL when the person cannot be placed
+    era             TEXT,
     -- biographical metadata useful as model features
     highest_rank    TEXT,
     years_active    INT4RANGE,             -- range of active years
@@ -192,6 +209,10 @@ CREATE TABLE battles (
     name            TEXT NOT NULL,
     wikidata_id     TEXT UNIQUE,
     wikipedia_url   TEXT,
+    -- The crawl stage's article filename stem (title plus a digest of the URL).
+    -- Two articles can share a display name ("Battle of Luetzen" 1632 and
+    -- 1813), so extract keys its upserts on this, never on name.
+    source_slug     TEXT UNIQUE,
     campaign_id     INT REFERENCES campaigns(campaign_id),
     war_id          INT REFERENCES wars(war_id),
 
@@ -417,7 +438,7 @@ CREATE TABLE missing_data_log (
 
     -- imputation tracking
     was_imputed         BOOLEAN DEFAULT FALSE,
-    imputation_method   TEXT,                   -- e.g. 'mice_pmm', 'era_polity_prior', 'manual'
+    imputation_method   TEXT,                   -- e.g. 'bayes_joint_v1_neutral_log', 'bayes_joint_v1_published_log', 'era_polity_prior', 'manual'
     imputed_value       DOUBLE PRECISION,
     imputed_lo          DOUBLE PRECISION,       -- 95% CI
     imputed_hi          DOUBLE PRECISION,
@@ -573,8 +594,8 @@ CREATE TABLE battle_war_details (
 
     -- per-battle WAR breakdown
     war_contribution    DOUBLE PRECISION NOT NULL,
-    win_prob_model      DOUBLE PRECISION,   -- P(win) predicted by the model
-    win_prob_baseline   DOUBLE PRECISION,   -- P(win) for a replacement-level general
+    win_prob_model      DOUBLE PRECISION,   -- expected score P(win)+0.5*P(indecisive) under the fitted model, not P(win)
+    win_prob_baseline   DOUBLE PRECISION,   -- expected score with a replacement-level general in this slot
     actual_outcome      DOUBLE PRECISION,   -- 1, 0.5 (draw), 0
     attribution_weight  DOUBLE PRECISION,   -- how much of this side's outcome is attributed to this general
 

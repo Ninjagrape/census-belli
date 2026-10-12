@@ -278,6 +278,8 @@ class ClassifyCounts:
         self.battle_type_amphibious = 0
         self.battle_type_field = 0
         self.battle_type_unknown = 0
+        self.troop_gaps_logged = 0
+        self.defenders_set = 0
         self.missing_fields_seen = 0
         self.missingness_classified = 0
         self.missingness_left_unclassified = 0
@@ -303,6 +305,8 @@ class ClassifyCounts:
             "battle_type_amphibious": self.battle_type_amphibious,
             "battle_type_field": self.battle_type_field,
             "battle_type_unknown": self.battle_type_unknown,
+            "troop_gaps_logged": self.troop_gaps_logged,
+            "defenders_set": self.defenders_set,
             "missing_fields_seen": self.missing_fields_seen,
             "missingness_classified": self.missingness_classified,
             "missingness_left_unclassified": self.missingness_left_unclassified,

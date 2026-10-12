@@ -33,7 +33,6 @@ tools:
 
 params:
   # ── source-bias model priors ──────────────────────────────────────────────
-  bias_prior_mu: 0.0                  # log-scale; 0 = no bias
   bias_prior_sd: 1.0                  # weakly informative
   precision_prior_alpha: 2.0          # inverse-gamma shape
   precision_prior_beta: 1.0
@@ -54,7 +53,7 @@ params:
   ancient_cutoff_year: 500
 
   # ── sampling ──────────────────────────────────────────────────────────────
-  mcmc_samples: 2000
+  mcmc_samples: 5000                   # neutral fit hit ESS 313 at 2000 on the 211-article corpus; 5000 cleared 400 on the pilot
   mcmc_chains: 4
   mcmc_tune: 1000
   mcmc_target_accept: 0.9
@@ -66,6 +65,21 @@ params:
   nuts_sampler: nutpie
   likelihood_family: student_t        # 'normal' for the ablation in the recovery test
   ci_mass: 0.95
+
+  # A fit is written to battle_sides only if it clears these. Also recorded in
+  # the run's model_runs.config, which neutral_fit_converged reads, so the gate
+  # judges the neutral fit by the limits the run applied rather than by numbers
+  # fixed in its SQL (a fixture that samples fewer draws lowers them here).
+  write_max_rhat: 1.05
+  write_min_ess_bulk: 400
+  write_max_divergences: 0
+
+  # ── gate thresholds (resolved into the quality_checks thresholds below) ────
+  min_spread_ratio: 0.25              # estimates_not_collapsed
+  min_estimate_coverage: 0.99         # estimates_populated
+  max_median_ci_log_width: 4.5        # ci_width_reasonable, LN(hi/lo) on multi-claim sides
+  min_singleton_ci_log_width: 0.8     # singleton_estimates_are_honestly_uncertain
+  min_calibration_sides: 20           # calibration_set_is_not_empty
 
   # ── load-time plausibility (pipeline/reconcilers/plausibility.py) ─────────
   # The extractor defaults branch to 'total', so day numbers, vessel counts and
@@ -82,7 +96,6 @@ params:
   # convergence. Other keys use their source type's effect and noise scale.
   min_battles_per_source_effect: 3
   source_deviation_prior_sd: 0.5      # tau_u, per-source deviation from its type
-  regime_deviation_prior_sd: 0.3      # tau_a, source_type x claim-regime interaction
   sigma_deviation_prior_sd: 0.3       # tau_sigma
   # lineage_prior_sd removed 2026-10-02: copies of one claim are collapsed to
   # one row in build_design, so the model has no lineage term (handover-log 20.10).
@@ -134,7 +147,7 @@ quality_checks:
     check: >
       SELECT COUNT(*)
       FROM (
-        SELECT diagnostics
+        SELECT diagnostics, config
         FROM model_runs
         WHERE model_type = 'source_disagreement'
           AND completed_at IS NOT NULL
@@ -146,19 +159,23 @@ quality_checks:
           latest.diagnostics -> 'troops_neutral' IS NULL
           OR COALESCE(
                (latest.diagnostics -> 'troops_neutral' -> 'worst' ->> 'max_rhat')::float,
-               'Infinity'::float) > 1.05
+               'Infinity'::float)
+             > COALESCE((latest.config -> 'write_thresholds' ->> 'max_rhat')::float, 1.05)
           OR COALESCE(
                (latest.diagnostics -> 'troops_neutral' -> 'worst' ->> 'min_ess_bulk')::float,
-               0::float) < 400
+               0::float)
+             < COALESCE((latest.config -> 'write_thresholds' ->> 'min_ess_bulk')::float, 400)
           OR COALESCE(
                (latest.diagnostics -> 'troops_neutral' -> 'worst' ->> 'divergences')::float,
-               1::float) > 0
+               1::float)
+             > COALESCE((latest.config -> 'write_thresholds' ->> 'max_divergences')::float, 0)
         )
     threshold: "= 0"
     severity: error
     description: >
-      The regime-neutral troops fit converged, on the same limits as
-      model_convergence. When it fails no est_troops_neutral values and no
+      The regime-neutral troops fit converged, on the limits the run applied
+      when deciding whether to write (config.write_thresholds, defaulting to
+      rhat 1.05, ESS 400, no divergences). When it fails no est_troops_neutral values and no
       neutral_draws_run file are written for that run, and there is no
       fallback to the published estimates, because the published figures carry
       the unlabelled-regime prior that the neutral fit exists to remove from
@@ -167,20 +184,19 @@ quality_checks:
 
   - name: estimates_not_collapsed
     check: >
-      SELECT COUNT(*)
-      FROM (
-        SELECT diagnostics
-        FROM model_runs
-        WHERE model_type = 'source_disagreement'
-          AND completed_at IS NOT NULL
-        ORDER BY run_id DESC
-        LIMIT 1
-      ) latest
-      WHERE latest.diagnostics -> 'troops' IS NOT NULL
-        AND COALESCE(
-              (latest.diagnostics -> 'troops' ->> 'spread_ratio')::float,
-              1::float) < 0.25
-    threshold: "= 0"
+      SELECT COALESCE((
+        SELECT COALESCE((latest.diagnostics -> 'troops' ->> 'spread_ratio')::float, 1::float)
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+        WHERE latest.diagnostics -> 'troops' IS NOT NULL
+      ), 1::float)
+    threshold: ">= {params.min_spread_ratio}"
     severity: error
     description: >
       The estimates keep at least a quarter of the reports' between-side spread
@@ -230,13 +246,16 @@ quality_checks:
         WHERE mdl.side_id = bs.side_id
           AND mdl.field_name = 'troop_total'
           AND mdl.notes LIKE 'reconcile: %'
+          AND mdl.notes NOT LIKE 'reconcile: estimate withheld%'
       )
-    threshold: ">= 0.99"
+    threshold: ">= {params.min_estimate_coverage}"
     severity: error
     description: >
       Every side with at least one modellable troop report has an estimate.
       The denominator is every side with a troop report that reconcile did not
-      itself log as unfillable, i.e. every side with at least one usable row
+      itself log as unfillable (a side logged as "estimate withheld" because
+      its fit missed the write thresholds stays in it: that is a failure, not
+      an unfillable side), i.e. every side with at least one usable row
       after the load filters (a side whose only report is a cavalry count, a
       non-positive number, a day number or a vessel count is structurally
       un-fillable: est_troops_total is personnel-only and has no per-branch
@@ -258,6 +277,11 @@ quality_checks:
     severity: error
     description: >
       A side that has reports but no estimate must say why in missing_data_log.
+      The stage logs, under the 'reconcile: ' notes prefix, every side with raw
+      troop rows it cannot estimate: only naval counts, only non-total branch
+      reports, only implausible or non-personnel figures, or no positive value;
+      and, for a fit that missed the write thresholds, 'estimate withheld' with
+      the run id. The gate and the stage read the same rows.
       The extract stage only logs troop_total when a side has no reports at
       all, so without this reconcile would leave a gap that classify's
       missing_data_all_logged gate then fails on, one stage downstream of the
@@ -269,13 +293,7 @@ quality_checks:
                ORDER BY LN(bs.est_troops_total_hi / bs.est_troops_total_lo)
              )
       FROM battle_sides bs
-      JOIN (
-        SELECT side_id, COUNT(DISTINCT source_id) AS n_sources
-        FROM troop_reports
-        WHERE branch = 'total' AND reported_value > 0
-        GROUP BY side_id
-      ) c ON c.side_id = bs.side_id
-      WHERE c.n_sources >= 2
+      WHERE bs.est_troops_method = 'source_disagreement'
         AND bs.est_troops_run_id IS NOT NULL
         AND bs.est_troops_total_lo > 0
         AND bs.est_troops_total_hi > 0
@@ -287,35 +305,40 @@ quality_checks:
     # test fixture, 2026-09-29, not real data. 4.5 leaves room above that floor to catch a
     # multi-source side whose sources genuinely disagree. Never narrow the
     # intervals to meet this; raise it with a reason instead.
-    threshold: "< 4.5"
+    # Multi-claim sides are picked by est_troops_method, which the stage sets
+    # from the claims (lineages) that entered the fit. The first version counted
+    # distinct source_id in troop_reports, which is 1 for every side on an
+    # infobox-only corpus (one infobox per battle), so the set was empty and the
+    # median NULL. A NULL still fails the gate; it now means "no multi-claim
+    # side exists to measure", not a mis-specified query.
+    threshold: "< {params.max_median_ci_log_width}"
     severity: warning
     description: >
-      Median log-scale interval width on multi-source sides. LN(hi/lo) < 4.5
+      Median log-scale interval width on multi-claim sides (those the model
+      fitted from two or more independent claims). LN(hi/lo) < 4.5
       means the 95% interval spans under a factor of 90, most of which is the
       shared, prior-driven inflation term rather than source disagreement. Measured on the log
       scale because the estimate is a lognormal median and (hi-lo)/est is a
-      tail statistic; restricted to multi-source sides because a singleton's
+      tail statistic; restricted to multi-claim sides because a singleton's
       interval is legitimately far wider, and filtered on est_troops_run_id so
       an earlier fit's estimates cannot pollute the number.
 
   - name: singleton_estimates_are_honestly_uncertain
     check: >
-      SELECT COUNT(*)
+      SELECT COALESCE(
+        MIN(LN(bs.est_troops_total_hi / bs.est_troops_total_lo)), 1000::float)
       FROM battle_sides bs
-      JOIN (
-        SELECT side_id, COUNT(DISTINCT source_id) AS n_sources
-        FROM troop_reports
-        WHERE branch = 'total' AND reported_value > 0
-        GROUP BY side_id
-      ) c ON c.side_id = bs.side_id
-      WHERE c.n_sources = 1
+      WHERE bs.est_troops_method IN ('single_report_debiased', 'bound_only')
         AND bs.est_troops_run_id IS NOT NULL
         AND bs.est_troops_total_lo > 0
-        AND LN(bs.est_troops_total_hi / bs.est_troops_total_lo) < 0.8
-    threshold: "= 0"
+        AND bs.est_troops_total_hi > 0
+    threshold: ">= {params.min_singleton_ci_log_width}"
     severity: error
     description: >
       The inverse of ci_width_reasonable, and the more important of the two.
+      Reads the narrowest interval among sides fitted from a single claim
+      (est_troops_method, not a count of source rows: on an infobox-only corpus
+      every side has one source whatever the number of claims).
       A side whose only evidence is one report cannot be known to within a
       factor of 2.2 (LN 0.8): the source's own observation sd alone is around
       0.85. A narrow interval here means the fit dropped either the source
@@ -330,9 +353,14 @@ quality_checks:
         GROUP BY side_id
         HAVING COUNT(DISTINCT source_id) >= 2
       ) t
-    threshold: ">= 20"
+    threshold: ">= {params.min_calibration_sides}"
     severity: warning
     description: >
+      Zero is the expected value on an all-infobox corpus: every battle then
+      has one infobox source per side, so no side is reported by two sources
+      and the gate is correct to warn that the biases are the prior. It
+      counts distinct source_id per side on purpose (two claims inside one
+      source say nothing about source bias).
       Bias parameters are identified only by sides that two or more sources
       both report. Below this the biases are the prior with extra steps, and
       model_convergence will still pass, because rhat measures the sampler and
@@ -380,5 +408,5 @@ quality_checks:
       on an older fit, which max_stage_retries makes possible.
 
 retry_policy:
-  max_stage_retries: 1
+  max_stage_retries: 0               # fixed-seed sampling: a re-run repeats the failure
   on_failure: pause_and_alert

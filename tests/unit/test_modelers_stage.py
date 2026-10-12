@@ -73,8 +73,8 @@ def test_provenance_accepts_matching_run() -> None:
     ("run_ids", "expected", "message"),
     [
         ((4, 5), 5, "several impute runs"),
-        ((4, 4), 5, "latest neutral impute run"),
-        ((4,), None, "latest neutral impute run"),
+        ((4, 4), 5, "latest impute run of this scale"),
+        ((4,), None, "latest impute run of this scale"),
     ],
 )
 def test_provenance_refuses_mixed_or_stale(

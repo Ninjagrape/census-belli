@@ -26,6 +26,7 @@ run and the reverse.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -59,6 +60,7 @@ __all__ = [
     "build_chunks",
     "build_request_line",
     "export_pending",
+    "find_reusable_batch",
     "import_responses",
     "index_requests",
     "pending_count",
@@ -77,6 +79,10 @@ IMPORT_PROVIDER = "claude_code"
 DEFAULT_IMPORT_MODEL = "claude-code-subagent"
 
 _HASH_PREFIX = 12
+
+# build_request_line writes request_hash first, so a batch file's hashes can be
+# read off the front of each line without decoding the (large) prompt.
+_LINE_HASH_RE = re.compile(rb'^\{"request_hash": "([0-9a-f]{64})"')
 
 
 @dataclass(frozen=True)
@@ -191,6 +197,67 @@ def write_request_file(
         for line in lines:
             f.write(json.dumps(line, ensure_ascii=False) + "\n")
     return path
+
+
+def _file_hashes(path: Path) -> set[str]:
+    """Read the request hashes of a batch file without decoding the prompts.
+
+    Args:
+        path: A batch file written by :func:`write_request_file`.
+
+    Returns:
+        Its hashes. A line that does not start with the hash is decoded in
+        full, and a line that cannot be is ignored.
+    """
+    hashes: set[str] = set()
+    with path.open("rb") as f:
+        for raw in f:
+            match = _LINE_HASH_RE.match(raw)
+            if match is not None:
+                hashes.add(match.group(1).decode("ascii"))
+                continue
+            try:
+                decoded = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(decoded, dict) and isinstance(decoded.get("request_hash"), str):
+                hashes.add(decoded["request_hash"])
+    return hashes
+
+
+def find_reusable_batch(
+    stage: str, hashes: set[str], output_dir: Path | None = None
+) -> Path | None:
+    """Find an existing batch file that holds exactly this set of requests.
+
+    The pending set is what the cache could not answer. If it equals an
+    earlier file's set, nothing in that file has been answered since (an
+    answered request would be a cache hit and drop out of the pending set),
+    so writing it again would only duplicate a possibly very large file.
+
+    Args:
+        stage: Stage name; only ``<stage>_*.jsonl`` files are considered.
+        hashes: The pending requests' hashes.
+        output_dir: Override the default ``data/llm_requests/``.
+
+    Returns:
+        The newest file with an identical hash set, or None.
+    """
+    directory = output_dir or REQUEST_DIR
+    if not hashes or not directory.is_dir():
+        return None
+    candidates = sorted(
+        (p for p in directory.glob(f"{stage}_*.jsonl") if p.is_file()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for path in candidates:
+        try:
+            if _file_hashes(path) == hashes:
+                return path
+        except OSError as exc:
+            logger.warning("llm_batch_unreadable", path=str(path), error=str(exc))
+    return None
 
 
 def export_pending(
@@ -312,6 +379,11 @@ class OfflineProvider:
         """
         if not self._pending:
             return None
+        reusable = find_reusable_batch(stage, set(self._pending), self._output_dir)
+        if reusable is not None:
+            logger.info("llm_batch_reused", stage=stage, path=str(reusable), count=self.pending)
+            self._pending.clear()
+            return reusable
         lines = [
             build_request_line(request, digest, stage, self.name, self.model)
             for digest, request in self._pending.items()

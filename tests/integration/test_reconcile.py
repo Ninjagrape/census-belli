@@ -38,6 +38,7 @@ hand and must not taint the honestly-fitted corpus everything else reads).
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -547,7 +548,15 @@ def test_one_run_covers_both_quantities_and_the_estimates_are_not_stale_gate_rea
 
 def _quality_check(name: str) -> dict[str, Any]:
     raw = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))
-    return next(check for check in raw["quality_checks"] if check["name"] == name)
+    check = dict(next(c for c in raw["quality_checks"] if c["name"] == name))
+    # Resolve "{params.<name>}" the way the orchestrator's gate runner does, so
+    # this helper does not depend on which side of that change it runs on.
+    check["threshold"] = re.sub(
+        r"\{params\.(\w+)\}",
+        lambda m: str(raw["params"][m.group(1)]),
+        str(check.get("threshold", "")),
+    )
+    return check
 
 
 def test_the_neutral_fit_writes_estimates_diagnostics_and_a_draws_file(
@@ -779,6 +788,19 @@ def test_an_unconverged_fit_writes_no_estimates(engine: Engine, tmp_path: Path) 
         ).scalar_one()
         neutral_gate = QualityRunner(conn).run_one(_quality_check("neutral_fit_converged"))
         draws_files = list((tmp_path / "reconcile").glob("neutral_draws_run*.npz"))
+        withheld_notes = (
+            conn.execute(
+                text(
+                    "SELECT notes FROM missing_data_log "
+                    "WHERE side_id = :s AND field_name = 'troop_total'"
+                ),
+                {"s": side},
+            )
+            .scalars()
+            .all()
+        )
+        unfillable_gate = QualityRunner(conn).run_one(_quality_check("unfillable_sides_are_logged"))
+        populated_gate = QualityRunner(conn).run_one(_quality_check("estimates_populated"))
     finally:
         conn.rollback()
         conn.close()
@@ -798,6 +820,14 @@ def test_an_unconverged_fit_writes_no_estimates(engine: Engine, tmp_path: Path) 
     assert neutral_estimate is None
     assert draws_files == []
     assert not neutral_gate.passed
+    # A withheld side reaches missing_data_log, naming the run and the breach, so
+    # unfillable_sides_are_logged agrees with the stage, while estimates_populated
+    # still counts it as a failure rather than as unfillable.
+    assert len(withheld_notes) == 1
+    assert withheld_notes[0].startswith("reconcile: estimate withheld")
+    assert "min_ess_bulk" in withheld_notes[0]
+    assert unfillable_gate.passed, unfillable_gate
+    assert not populated_gate.passed, populated_gate
 
 
 def _fabricate_run(conn: Connection, diagnostics_json: str) -> None:

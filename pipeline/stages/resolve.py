@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import statistics
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
@@ -37,6 +38,7 @@ import httpx
 import structlog
 
 from pipeline.crawlers.fetcher import Fetcher, RateLimiter
+from pipeline.imputers.priors import DEFAULT_PRIORS_PATH, era_of_year, load_priors
 from pipeline.llm import LLMService
 from pipeline.resolvers import (
     AMBIGUITY_MARGIN,
@@ -54,6 +56,7 @@ from pipeline.resolvers import (
     collect_query_names,
     disambiguate,
     fetch_candidates,
+    fetch_non_person_kinds,
     find_duplicate_battles,
     fold,
     group_mentions,
@@ -64,11 +67,16 @@ from pipeline.resolvers import (
     log_unresolved,
     match_against_identities,
     match_group,
+    non_person_reason,
     prompt_parts,
     write_identity,
 )
 from pipeline.resolvers.battles import DEFAULT_NAME_THRESHOLD, DEFAULT_YEAR_SLACK
-from pipeline.resolvers.candidates import DEFAULT_BATCH_SIZE, DEFAULT_MAX_NAMES_PER_GROUP
+from pipeline.resolvers.candidates import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_MAX_NAMES_PER_GROUP,
+    candidate_keys,
+)
 from pipeline.stages.base import StageContext, StageOutcome
 
 __all__ = ["LazyService", "resolve_groups", "run"]
@@ -82,6 +90,7 @@ _COMMANDERS_FILE: Final[str] = "commanders_raw.jsonl"
 _BATTLES_FILE: Final[str] = "battles.jsonl"
 _RESOLUTION_LOG: Final[str] = "resolution_log.jsonl"
 _DUPLICATE_BATTLES: Final[str] = "duplicate_battles.jsonl"
+_UNPLACED_MENTIONS: Final[str] = "unplaced_mentions.jsonl"
 _WIKIDATA_DIR: Final[str] = "wikidata"
 
 # The query service is a shared, unpaid resource and it is stricter than the
@@ -94,6 +103,17 @@ _DEFAULT_USER_AGENT: Final[str] = (
 )
 
 _PLACEHOLDER_CONFIDENCE: Final[float] = 0.0
+
+# How many surface forms of a still-unplaced person the ranked-search fallback
+# asks about. Fewer than the exact lookup: a search returns many hits per name
+# and the later forms are mostly near-duplicates of the first.
+_DEFAULT_SEARCH_NAMES_PER_GROUP: Final[int] = 2
+_DEFAULT_SEARCH_BATCH_SIZE: Final[int] = 10
+
+# A person with no dated battles and no Wikidata birth year gets no era rather
+# than a guess; a person with only a birth year is placed at the age they could
+# first have commanded.
+_ADULT_AGE_YEARS: Final[int] = 35
 
 
 class LazyService:
@@ -171,6 +191,27 @@ def _placeholder_decision(group: MentionGroup) -> Decision:
     )
 
 
+def _non_person_decision(group: MentionGroup, reason: str) -> Decision:
+    """Refuse to make a general out of an organisation, formation or place.
+
+    Args:
+        group: The mention group.
+        reason: Why the mention cannot be a person, for the audit trail.
+
+    Returns:
+        An unresolved decision. "Luftwaffe" and "Stavka" appear as commanders
+        in infoboxes; a general created for either would be credited with every
+        battle it is named in and would rank like a man.
+    """
+    return Decision(
+        status="unresolved",
+        canonical_name=group.display_name,
+        method="non_person",
+        confidence=_PLACEHOLDER_CONFIDENCE,
+        reasoning=f"the mention {reason}",
+    )
+
+
 def _stranded_decision(group: MentionGroup, decision: Decision) -> Decision:
     """Close out a group that is still ambiguous with no model to ask.
 
@@ -245,6 +286,8 @@ def _build_identities(
                 nationality=decision.candidate.country if decision.candidate else "",
                 confidence=decision.confidence,
                 method=decision.method,
+                birth_year=decision.candidate.birth_year if decision.candidate else None,
+                death_year=decision.candidate.death_year if decision.candidate else None,
             )
             identities[key] = identity
         elif decision.confidence > identity.confidence:
@@ -262,6 +305,37 @@ def _build_identities(
         identity.aliases = [a for a in identity.aliases if a != identity.canonical_name]
 
     return list(identities.values())
+
+
+def _refuse_non_person(
+    group: MentionGroup,
+    found: list[Candidate],
+    decision: Decision,
+    source: CandidateSource,
+) -> Decision:
+    """Turn a would-be new entity into a refusal when Wikidata says it is no man.
+
+    Args:
+        group: The mention group.
+        found: The human candidates the source returned for it.
+        decision: The matcher's ``new`` decision.
+        source: Where candidates came from; asked what the name is.
+
+    Returns:
+        A non-person decision when the name is the exact label or alias of an
+        item that is not a human and no human with that exact name exists,
+        otherwise the decision unchanged. The exact-human exception matters:
+        "Gebhard von Blücher" is the label of a 1865 grandson who fails the
+        date gate, and that must not make the name a non-person; the same goes
+        for any commander who shares a label with a place.
+    """
+    group_keys = set(group.keys)
+    if any(group_keys & set(candidate_keys(c)) for c in found):
+        return decision
+    kind = source.non_person_kind(group)
+    if kind is None:
+        return decision
+    return _non_person_decision(group, f"is the name of a non-human Wikidata item ({kind})")
 
 
 def resolve_groups(
@@ -300,9 +374,16 @@ def resolve_groups(
         if is_placeholder(group.display_name):
             decisions[group.key] = _placeholder_decision(group)
             continue
+        reason = non_person_reason(group.display_name)
+        if reason is not None:
+            decisions[group.key] = _non_person_decision(group, reason)
+            continue
         found = source.search(group)
         candidates_by_group[group.key] = found
-        decisions[group.key] = match_group(group, found, threshold=threshold, margin=margin)
+        decision = match_group(group, found, threshold=threshold, margin=margin)
+        if decision.status == "new":
+            decision = _refuse_non_person(group, found, decision, source)
+        decisions[group.key] = decision
 
     # Step 2, second half: a bare surname Wikidata did not answer for often
     # belongs to somebody this corpus has already pinned to an entity. Only
@@ -430,26 +511,82 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     logger.info("processed_file_written", path=str(path), rows=len(rows))
 
 
+def _is_lookup_candidate(group: MentionGroup) -> bool:
+    """Whether a group is worth asking Wikidata about.
+
+    Args:
+        group: The mention group.
+
+    Returns:
+        False for a placeholder and for a name the deterministic filter has
+        already refused. They never reach the matcher, so spending a query on
+        them only slows the run and floods the VALUES block.
+    """
+    return not is_placeholder(group.display_name) and non_person_reason(group.display_name) is None
+
+
+def _is_unsettled(
+    group: MentionGroup, source: PrefetchedCandidateSource, threshold: float, margin: float
+) -> bool:
+    """Whether the matcher would still make this group a new entity.
+
+    Args:
+        group: The mention group.
+        source: The candidates fetched so far.
+        threshold: The spec's ``fuzzy_threshold``.
+        margin: The spec's ``ambiguity_margin``.
+
+    Returns:
+        True when the lookups so far leave the group with no link and no
+        ambiguity for the model to settle: the groups a wider search might
+        still place.
+    """
+    decision = match_group(group, source.search(group), threshold=threshold, margin=margin)
+    return decision.status == "new"
+
+
 async def _gather_sparql_candidates(
-    names: list[str],
+    groups: list[MentionGroup],
     *,
     user_agent: str,
     rate_limit: float,
     batch_size: int,
     respect_robots: bool,
-) -> dict[str, list[Candidate]]:
-    """Open one client and ask the query service about every name.
+    max_names_per_group: int,
+    search_names_per_group: int,
+    search_batch_size: int,
+    threshold: float,
+    margin: float,
+) -> PrefetchedCandidateSource:
+    """Open one client and ask the query service about every group.
+
+    Three passes, each only for what the one before left unplaced:
+
+    1. **Exact**: humans whose label or alias is the surface form.
+    2. **Search**: a ranked name search, for a commander whose Wikidata label
+       is longer than the name an infobox writes ("Grouchy" against "Emmanuel
+       de Grouchy, Marquis de Grouchy"). The hits are candidates only; the
+       matcher's threshold, date gate and margin still decide.
+    3. **Non-person**: items that are not human but carry the name, for
+       groups still unplaced after both ("Stavka", "Jena").
 
     Args:
-        names: Distinct surface forms to look up.
+        groups: The groups to look up.
         user_agent: Sent on every request.
         rate_limit: Seconds between requests to the query service.
-        batch_size: Names per query.
+        batch_size: Names per exact query.
         respect_robots: Whether to consult robots.txt.
+        max_names_per_group: Surface forms asked about per group.
+        search_names_per_group: Surface forms asked about in the search pass.
+        search_batch_size: Names per search query; searches cost more each.
+        threshold: The spec's ``fuzzy_threshold``.
+        margin: The spec's ``ambiguity_margin``.
 
     Returns:
-        Surface form to candidates.
+        A source holding the candidates and non-person verdicts found.
     """
+    lookup = [group for group in groups if _is_lookup_candidate(group)]
+
     async with httpx.AsyncClient(
         timeout=_DEFAULT_TIMEOUT_S,
         follow_redirects=True,
@@ -461,7 +598,27 @@ async def _gather_sparql_candidates(
             user_agent=user_agent,
             respect_robots=respect_robots,
         )
-        return await fetch_candidates(fetcher, names, batch_size=batch_size)
+        names = collect_query_names(lookup, max_names_per_group)
+        by_name = await fetch_candidates(fetcher, names, batch_size=batch_size)
+        source = PrefetchedCandidateSource(by_name, max_names_per_group=max_names_per_group)
+
+        unsettled = [g for g in lookup if _is_unsettled(g, source, threshold, margin)]
+        search_names = collect_query_names(unsettled, search_names_per_group)
+        if search_names:
+            logger.info("resolve_search_fallback", groups=len(unsettled), names=len(search_names))
+            source.extend(
+                await fetch_candidates(
+                    fetcher, search_names, batch_size=search_batch_size, search=True
+                )
+            )
+
+        still_new = [g for g in unsettled if _is_unsettled(g, source, threshold, margin)]
+        kind_names = collect_query_names(still_new, max_names_per_group)
+        if kind_names:
+            source.set_non_person(
+                await fetch_non_person_kinds(fetcher, kind_names, batch_size=batch_size)
+            )
+        return source
 
 
 def _build_candidate_source(
@@ -470,6 +627,9 @@ def _build_candidate_source(
     params: dict[str, Any],
     raw_root: Path,
     ctx: StageContext,
+    *,
+    threshold: float,
+    margin: float,
 ) -> CandidateSource:
     """Construct the candidate source the spec asks for.
 
@@ -479,6 +639,9 @@ def _build_candidate_source(
         params: The spec's params.
         raw_root: The ``data/raw`` directory.
         ctx: The stage context.
+        threshold: The spec's ``fuzzy_threshold``, for deciding which groups
+            the search fallback should try.
+        margin: The spec's ``ambiguity_margin``.
 
     Returns:
         A source. A dry run always gets the null source, because the point of
@@ -505,29 +668,38 @@ def _build_candidate_source(
             "expected 'sparql', 'local' or 'none'"
         )
 
-    limit = int(params.get("max_names_per_group", DEFAULT_MAX_NAMES_PER_GROUP))
-    names = collect_query_names(groups, limit)
-    by_name = asyncio.run(
+    return asyncio.run(
         _gather_sparql_candidates(
-            names,
+            groups,
             user_agent=str(params.get("user_agent", _DEFAULT_USER_AGENT)),
             rate_limit=float(params.get("rate_limit_sparql", _DEFAULT_SPARQL_RATE_LIMIT)),
             batch_size=int(params.get("sparql_batch_size", DEFAULT_BATCH_SIZE)),
             respect_robots=bool(params.get("respect_robots", True)),
+            max_names_per_group=int(params.get("max_names_per_group", DEFAULT_MAX_NAMES_PER_GROUP)),
+            search_names_per_group=int(
+                params.get("search_names_per_group", _DEFAULT_SEARCH_NAMES_PER_GROUP)
+            ),
+            search_batch_size=int(params.get("search_batch_size", _DEFAULT_SEARCH_BATCH_SIZE)),
+            threshold=threshold,
+            margin=margin,
         )
     )
-    return PrefetchedCandidateSource(by_name, max_names_per_group=limit)
 
 
 def _unresolved_mentions(
     groups: list[MentionGroup],
     decisions: dict[str, Decision],
+    *,
+    non_person: bool = False,
 ) -> list[Mention]:
     """Collect the mentions of every group that got no general.
 
     Args:
         groups: Every group the run resolved.
         decisions: Their final decisions.
+        non_person: Collect the groups refused as non-persons instead of the
+            groups that are merely unresolved. They are logged separately and
+            kept out of the ``resolution_rate`` denominator.
 
     Returns:
         The mentions to record in ``missing_data_log``.
@@ -536,8 +708,52 @@ def _unresolved_mentions(
         mention
         for group in groups
         if decisions[group.key].status == "unresolved"
+        and (decisions[group.key].method == "non_person") == non_person
         for mention in group.mentions
     ]
+
+
+def _derive_era(identity: Identity, bins: tuple[tuple[str, int | None], ...]) -> str | None:
+    """Bucket a person into an era with the impute stage's bins.
+
+    Args:
+        identity: The resolved person.
+        bins: ``config/imputation_priors.yaml``'s ``(name, exclusive_upper)``
+            era bins, so a general's era and a battle's era mean the same
+            thing.
+
+    Returns:
+        The era of the median year of the battles they appear in, since that
+        is when this corpus saw them command. Failing that, the year they
+        turned 35. None when neither is known: an unplaced person is left
+        unplaced rather than filed under the 'undated' bin.
+    """
+    years = identity.years
+    if years:
+        return era_of_year(int(statistics.median(years)), bins)
+    if identity.birth_year is not None:
+        return era_of_year(identity.birth_year + _ADULT_AGE_YEARS, bins)
+    return None
+
+
+def _load_era_bins(params: dict[str, Any]) -> tuple[tuple[str, int | None], ...]:
+    """Read the shared era bins, tolerating their absence.
+
+    Args:
+        params: The spec's params.
+
+    Returns:
+        The bins, or an empty tuple when the priors file cannot be read.
+        Every general's era is then left NULL: resolve does not need the
+        impute config to run, and inventing boundaries here would put two
+        definitions of 'napoleonic' in one pipeline.
+    """
+    path = Path(str(params.get("imputation_priors", DEFAULT_PRIORS_PATH)))
+    try:
+        return load_priors(path).era_bins
+    except (OSError, ValueError, KeyError) as exc:
+        logger.warning("resolve_era_bins_unavailable", path=str(path), error=str(exc))
+        return ()
 
 
 def _write_database(
@@ -547,7 +763,7 @@ def _write_database(
     identities: list[Identity],
     counts: ResolveCounts,
     params: dict[str, Any],
-) -> list[DuplicateBattle]:
+) -> tuple[list[DuplicateBattle], list[Mention]]:
     """Write generals, aliases, commanders and the missing-data rows.
 
     Args:
@@ -559,8 +775,10 @@ def _write_database(
         params: The spec's params, for the duplicate-battle thresholds.
 
     Returns:
-        Suspected duplicate battles, for the report file. They are reported
-        and never merged; see :mod:`pipeline.resolvers.battles`.
+        Suspected duplicate battles, for the report file, which are reported
+        and never merged (see :mod:`pipeline.resolvers.battles`); and the
+        mentions that could not be logged in ``missing_data_log`` because
+        their battle is not in the database at all.
     """
     conn = ctx.db_conn
     battles = load_battle_index(conn)
@@ -572,15 +790,20 @@ def _write_database(
             hint="run the extract stage with a database connection first",
         )
 
+    era_bins = _load_era_bins(params)
+    unplaced: list[Mention] = []
     source_cache: dict[tuple[str, str], int] = {}
     for identity in identities:
         before_counts = counts.as_dict()
         before_cache = dict(source_cache)
+        before_unplaced = len(unplaced)
+        if era_bins:
+            identity.era = _derive_era(identity, era_bins)
         try:
             # A savepoint per identity: on PostgreSQL one failed statement
             # aborts the whole transaction, and every later write would fail.
             with conn.begin_nested():
-                write_identity(conn, identity, battles, sides, counts, source_cache)
+                write_identity(conn, identity, battles, sides, counts, source_cache, unplaced)
         except Exception as exc:
             # One person who will not go in is a data problem, not a reason
             # to lose the rest of the run's writes.
@@ -588,6 +811,10 @@ def _write_database(
                 setattr(counts, name, value)
             source_cache.clear()
             source_cache.update(before_cache)
+            # Whatever the failed write collected is stale, and every mention
+            # of the person is now one that never reached the table.
+            del unplaced[before_unplaced:]
+            unplaced.extend(identity.mentions)
             counts.failed_identities += 1
             logger.error(
                 "resolve_write_failed",
@@ -597,7 +824,15 @@ def _write_database(
                 error_type=type(exc).__name__,
             )
 
-    log_unresolved(conn, _unresolved_mentions(groups, decisions), battles, sides, counts)
+    homeless = log_unresolved(
+        conn,
+        _unresolved_mentions(groups, decisions),
+        battles,
+        sides,
+        counts,
+        unplaced=unplaced,
+        non_person=_unresolved_mentions(groups, decisions, non_person=True),
+    )
 
     duplicates = find_duplicate_battles(
         conn,
@@ -605,7 +840,48 @@ def _write_database(
         year_slack=int(params.get("battle_duplicate_year_slack", DEFAULT_YEAR_SLACK)),
     )
     counts.duplicate_battles = len(duplicates)
-    return duplicates
+    return duplicates, homeless
+
+
+def _unplaced_row(mention: Mention) -> dict[str, Any]:
+    """Render a mention that has no battle in the database.
+
+    Args:
+        mention: A commander mention whose battle could not be found.
+
+    Returns:
+        A JSON-serialisable mapping.
+    """
+    return {
+        "battle_slug": mention.battle_slug,
+        "battle_name": mention.battle_name,
+        "side_label": mention.side_label,
+        "name": mention.name,
+    }
+
+
+def _report_unplaced(homeless: list[Mention], counts: ResolveCounts) -> None:
+    """Say loudly how many mentions could not reach the database at all.
+
+    ``missing_data_log.battle_id`` is NOT NULL, so a mention whose battle is
+    absent cannot be recorded there and the SQL ``resolution_rate`` gate cannot
+    see it. They go to ``unplaced_mentions.jsonl`` instead, and this warning is
+    what stops that being a quiet second place for them.
+
+    Args:
+        homeless: The mentions with no battle row.
+        counts: The run's counters, for the denominator.
+    """
+    if not homeless:
+        return
+    logger.warning(
+        "resolve_mentions_without_a_battle",
+        mentions=len(homeless),
+        of=counts.mentions,
+        fraction=round(len(homeless) / max(1, counts.mentions), 4),
+        hint="the extract stage did not write these battles; the resolution_rate gate "
+        "cannot count them (missing_data_log.battle_id is NOT NULL)",
+    )
 
 
 def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutcome | None:
@@ -659,7 +935,9 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
     counts.mentions = sum(len(g.mentions) for g in groups)
     counts.groups = len(groups)
 
-    source = _build_candidate_source(source_kind, groups, params, raw_root, ctx)
+    source = _build_candidate_source(
+        source_kind, groups, params, raw_root, ctx, threshold=threshold, margin=margin
+    )
     source.prefetch(groups)
 
     service = LazyService(
@@ -680,15 +958,19 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
 
     identities = _build_identities(groups, decisions)
     counts.identities = len(identities)
+    counts.non_person_mentions = len(_unresolved_mentions(groups, decisions, non_person=True))
 
     duplicates: list[DuplicateBattle] = []
+    homeless: list[Mention] = []
     if ctx.db_conn is not None and not ctx.dry_run:
-        duplicates = _write_database(ctx, groups, decisions, identities, counts, params)
+        duplicates, homeless = _write_database(ctx, groups, decisions, identities, counts, params)
+        _report_unplaced(homeless, counts)
     else:
         logger.info("resolve_database_write_skipped", dry_run=ctx.dry_run)
 
     _write_resolution_log(processed_root / _RESOLUTION_LOG, groups, decisions, identities)
     _write_jsonl(processed_root / _DUPLICATE_BATTLES, [pair.as_dict() for pair in duplicates])
+    _write_jsonl(processed_root / _UNPLACED_MENTIONS, [_unplaced_row(m) for m in homeless])
 
     outcome: StageOutcome | None = None
     if service.built is not None:

@@ -35,6 +35,7 @@ from pipeline.inspector.queries.crawl import (
     null_fraction_battles,
     troop_report_breakdown,
 )
+from pipeline.inspector.queries.model import pooled_runs, run_ranking
 from pipeline.inspector.queries.overview import (
     latest_model_runs,
     model_runs,
@@ -82,9 +83,11 @@ __all__ = [
     "model_runs",
     "null_fraction_battle_sides",
     "null_fraction_battles",
+    "pooled_runs",
     "reconcile_sides",
     "review_queue",
     "role_counts",
+    "run_ranking",
     "search_battles",
     "side_weight_sums",
     "skill_estimates",

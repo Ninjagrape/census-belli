@@ -20,6 +20,7 @@ would delete the evidence that stage exists to use.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Sequence
 from typing import Any, Final
 
@@ -388,6 +389,243 @@ def _merge_sides(sources: Sequence[SourceExtraction]) -> list[SideExtraction]:
     return list(merged.values())
 
 
+# Demonyms that no stem rule connects to the polity a side is labelled with.
+# Each value is a phrase that must appear, as whole tokens, in a side's label
+# or alias. The table is deliberately small: a demonym is only listed when the
+# corpus shows an infobox saying "X victory" beside a side labelled otherwise.
+_DEMONYM_PHRASES: Final[dict[str, tuple[str, ...]]] = {
+    "french": ("france",),
+    "british": ("united kingdom", "britain", "great britain", "england"),
+    "english": ("england", "united kingdom", "britain"),
+    "american": ("united states",),
+    "union": ("united states",),
+    "confederate": ("confederate states", "confederacy", "csa"),
+    "persian": ("persia", "achaemenid", "sasanian", "sassanid"),
+    "greek": ("greece", "hellenic"),
+    "roman": ("rome",),
+    "italian": ("italy",),
+    "dutch": ("netherlands", "dutch", "holland"),
+    "chinese": ("china",),
+    "turkish": ("ottoman", "turkey"),
+    "swiss": ("switzerland",),
+    "venetian": ("venice",),
+    "allied": ("allies",),
+    "muslim": ("caliphate", "muslim"),
+    "senatorial": ("senate",),
+}
+
+# What a demonym adds to a polity stem: Carthag(e) + inian, Macedon(ia) + ian.
+_DEMONYM_SUFFIXES: Final[frozenset[str]] = frozenset(
+    {
+        "",
+        "a",
+        "e",
+        "y",
+        "ia",
+        "n",
+        "an",
+        "ian",
+        "inian",
+        "ish",
+        "i",
+        "ite",
+        "ic",
+        "ine",
+        "ese",
+        "ans",
+        "ians",
+        "ns",
+        "s",
+        "ers",
+        "er",
+    }
+)
+_MIN_STEM_LENGTH: Final = 4
+
+# Words in a result string that grade or qualify the victory without naming
+# who won it.
+_VICTOR_NOISE: Final[frozenset[str]] = frozenset(
+    {
+        "victory",
+        "victories",
+        "decisive",
+        "pyrrhic",
+        "marginal",
+        "tactical",
+        "strategic",
+        "minor",
+        "major",
+        "narrow",
+        "clear",
+        "complete",
+        "total",
+        "overwhelming",
+        "partial",
+        "limited",
+        "the",
+        "a",
+        "an",
+        "for",
+        "of",
+        "see",
+    }
+)
+_COMPOUND_VICTOR_RE: Final = re.compile(r"\s*(?:-|\band\b|&|/)\s*", re.IGNORECASE)
+_MIN_COMMANDER_TOKEN: Final = 4
+
+
+def _stem_related(a: str, b: str) -> bool:
+    """Whether two tokens are a polity name and a demonym built from it.
+
+    The shorter token's final vowel is dropped and the remainder must be a
+    prefix of the longer one, with a known demonym ending left over. That
+    pairs Carthage and Carthaginian, Austria and Austrian, Germany and
+    German, but not Austria and Australia, which share five letters and
+    nothing else.
+
+    Args:
+        a: A normalised token.
+        b: A normalised token.
+
+    Returns:
+        True when one is the polity form and the other its demonym.
+    """
+    short, long_ = sorted((a, b), key=len)
+    root = short.rstrip("aeys")
+    if len(root) < _MIN_STEM_LENGTH or not long_.startswith(root):
+        return False
+    return long_[len(root) :] in _DEMONYM_SUFFIXES
+
+
+def _contains_phrase(tokens: list[str], phrase: str) -> bool:
+    """Whether a token list contains a phrase as consecutive whole tokens.
+
+    Args:
+        tokens: A normalised label split into tokens.
+        phrase: A normalised phrase.
+
+    Returns:
+        True if the phrase appears contiguously.
+    """
+    wanted = phrase.split()
+    size = len(wanted)
+    return any(tokens[i : i + size] == wanted for i in range(len(tokens) - size + 1))
+
+
+def _token_names_side(token: str, names: Sequence[str]) -> bool:
+    """Whether one victor token points at one side through any of its names.
+
+    Args:
+        token: A normalised victor token.
+        names: The side's label, aliases and polity.
+
+    Returns:
+        True on a shared token, a polity/demonym stem pair, or a listed
+        demonym phrase.
+    """
+    phrases = _DEMONYM_PHRASES.get(token, ())
+    for name in names:
+        full = normalise_label(name).split()
+        stripped = _side_key(name).split()
+        if token in stripped:
+            return True
+        if any(_stem_related(token, other) for other in stripped):
+            return True
+        if any(_contains_phrase(full, phrase) for phrase in phrases):
+            return True
+    return False
+
+
+def _commander_tokens(side: SideExtraction) -> list[str]:
+    """List the distinctive name tokens of a side's commanders.
+
+    Args:
+        side: A merged side.
+
+    Returns:
+        Normalised tokens long enough to identify a person, e.g. ``caesar``
+        from "Julius Caesar".
+    """
+    tokens: list[str] = []
+    for commander in side.commanders:
+        tokens.extend(
+            t for t in normalise_label(commander.name).split() if len(t) >= _MIN_COMMANDER_TOKEN
+        )
+    return tokens
+
+
+def _victor_groups(victor: str) -> list[list[str]]:
+    """Split a victor label into the groups that must each be matched.
+
+    "Russo-Austrian" names two polities, so a side that matches only one of
+    them did not win alone; every group must point at the same side. A plain
+    "Imperial French" is one group, any token of which may identify the side.
+
+    Args:
+        victor: The victor as the source wrote it.
+
+    Returns:
+        Groups of normalised content tokens, empty groups removed.
+    """
+    groups = []
+    for part in _COMPOUND_VICTOR_RE.split(victor):
+        tokens = [t for t in normalise_label(part).split() if t not in _VICTOR_NOISE]
+        if tokens:
+            groups.append(tokens)
+    return groups
+
+
+def _winning_sides(victor: str, sides: Sequence[SideExtraction]) -> list[SideExtraction]:
+    """Find the sides a victor label points at.
+
+    Labels and aliases are tried first. Only when none matches is the label
+    read as a commander's name ("Caesarian victory" and a side led by
+    Caesar), so a commander never overrides a polity match.
+
+    Args:
+        victor: The victor as the source wrote it.
+        sides: The merged sides.
+
+    Returns:
+        Every side the label matches.
+    """
+    groups = _victor_groups(victor)
+    if not groups:
+        return []
+
+    def matches(names_for: dict[int, list[str]]) -> list[SideExtraction]:
+        return [
+            side
+            for index, side in enumerate(sides)
+            if all(
+                any(_token_names_side(token, names_for[index]) for token in group)
+                for group in groups
+            )
+        ]
+
+    by_label = {
+        index: [side.label, *side.aliases, *([side.polity] if side.polity else [])]
+        for index, side in enumerate(sides)
+    }
+    winners = matches(by_label)
+    if winners:
+        return winners
+
+    by_commander = {index: _commander_tokens(side) for index, side in enumerate(sides)}
+    return [
+        side
+        for index, side in enumerate(sides)
+        if all(
+            any(
+                token == name or _stem_related(token, name)
+                for token in group
+                for name in by_commander[index]
+            )
+            for group in groups
+        )
+    ]
+
+
 def _assign_outcomes(sides: Sequence[SideExtraction], facts: BattleFacts) -> None:
     """Write a per-side outcome from the battle-level victor, where it is clear.
 
@@ -408,17 +646,7 @@ def _assign_outcomes(sides: Sequence[SideExtraction], facts: BattleFacts) -> Non
     if not victor:
         return
 
-    victor_key = _side_key(victor)
-    victor_tokens = set(victor_key.split())
-    if not victor_tokens:
-        return
-
-    winners = [
-        side
-        for side in sides
-        if victor_tokens & set(_side_key(side.label).split())
-        or any(victor_tokens & set(_side_key(a).split()) for a in side.aliases)
-    ]
+    winners = _winning_sides(victor, sides)
 
     # Exactly one side must match, or the label is ambiguous ("Allied
     # victory" in a battle with three allied contingents) and guessing which

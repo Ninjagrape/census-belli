@@ -84,8 +84,11 @@ replacement_percentile: 40
 # total_war (Arsht's choice, volume-weighted) or skill_mean (per-battle quality).
 rank_by: total_war
 
-# Inputs and outputs. The model reads only the regime-neutral rounds: the
-# published scale mixes inflation regimes and is a sensitivity run.
+# Inputs and outputs. neutral (primary) reads the regime-neutral rounds.
+# published mixes inflation regimes and is a sensitivity run: its model_runs
+# rows get a "_published" model_type suffix so the primary ranking, which
+# the gates and report select by MAX(run_id) over the plain type, is never
+# displaced. Set it with --set scale=published.
 scale: neutral
 imputed_root: data/imputed
 diagnostics_root: data/processed/model_diagnostics

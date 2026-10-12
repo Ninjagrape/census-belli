@@ -47,6 +47,47 @@ _DATE_LITERAL_RE: Final = re.compile(
     re.IGNORECASE,
 )
 
+# A year written as prose: "327 BC", "October 332 BC", "late 48 BC - early 47 BC",
+# "AD 79", "October 1805". Older extract output kept battle dates this way
+# rather than as a Postgres literal, and reading them as undated switched off
+# the lifespan gate for that battle -- or left a stray modern date as the
+# group's only year: Vercingetorix lost both his battles to Alesia's 2015
+# access date because Gergovia's "52 BC" was dropped. The first year named wins,
+# which is the battle's start. A bare number with no era marker or month is as
+# likely a day or a count as a year, so it stays undated.
+_MONTHS: Final = (
+    "january|february|march|april|may|june|july|august|september|october|november|december"
+)
+_YEAR_AFTER_ERA_RE: Final = re.compile(r"\b(?:AD|CE)\s*(?P<year>\d{1,4})\b", re.IGNORECASE)
+_YEAR_BEFORE_ERA_RE: Final = re.compile(
+    r"\b(?P<year>\d{1,4})\s*(?P<era>BCE?|BC|AD|CE)\b", re.IGNORECASE
+)
+_YEAR_AFTER_MONTH_RE: Final = re.compile(rf"\b(?:{_MONTHS})\s+(?P<year>\d{{3,4}})\b", re.IGNORECASE)
+
+
+def _prose_year(text: str) -> int | None:
+    """Read the first year a prose date names, as an astronomical year.
+
+    Args:
+        text: A date that is not a Postgres literal.
+
+    Returns:
+        The astronomical year, or None when no year with an era marker (or a
+        month in front of it) is present.
+    """
+    before = _YEAR_BEFORE_ERA_RE.search(text)
+    after = _YEAR_AFTER_ERA_RE.search(text)
+    # Whichever comes first in the text is the start of the date.
+    if before is not None and (after is None or before.start() < after.start()):
+        year = int(before.group("year"))
+        return -(year - 1) if before.group("era").upper().startswith("BC") else year
+    if after is not None:
+        return int(after.group("year"))
+    month = _YEAR_AFTER_MONTH_RE.search(text)
+    if month is not None:
+        return int(month.group("year"))
+    return None
+
 
 def astronomical_year(date_literal: str | None) -> int | None:
     """Read the astronomical year out of a stored date literal.
@@ -67,6 +108,9 @@ def astronomical_year(date_literal: str | None) -> int | None:
 
     match = _DATE_LITERAL_RE.match(str(date_literal))
     if match is None:
+        prose = _prose_year(str(date_literal))
+        if prose is not None:
+            return prose
         logger.debug("battle_date_literal_unparseable", value=str(date_literal)[:32])
         return None
 

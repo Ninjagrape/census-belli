@@ -28,7 +28,13 @@ from pipeline.extractors.records import (
     SideExtraction,
 )
 
-__all__ = ["ExtractWriteCounts", "source_id", "write_battle", "write_battle_isolated"]
+__all__ = [
+    "ExtractWriteCounts",
+    "reserve_battle_id",
+    "source_id",
+    "write_battle",
+    "write_battle_isolated",
+]
 
 logger = structlog.get_logger()
 
@@ -51,16 +57,26 @@ _INSERT_SOURCE = text(
 )
 
 _FIND_BATTLE_BY_QID = text("SELECT battle_id FROM battles WHERE wikidata_id = :wikidata_id")
-_FIND_BATTLE_BY_NAME = text("SELECT battle_id FROM battles WHERE name = :name LIMIT 1")
+_FIND_BATTLE_BY_SLUG = text("SELECT battle_id FROM battles WHERE source_slug = :slug")
+# Only a row that predates source_slug may be claimed by name. A row that
+# already has a slug belongs to a different article that happens to share
+# the display name.
+_FIND_LEGACY_BATTLE_BY_NAME = text(
+    "SELECT battle_id FROM battles WHERE name = :name AND source_slug IS NULL "
+    "ORDER BY battle_id LIMIT 1"
+)
+_RESERVE_BATTLE = text(
+    "INSERT INTO battles (name, source_slug) VALUES (:name, :slug) RETURNING battle_id"
+)
 
 _INSERT_BATTLE = text(
     """
     INSERT INTO battles (
-        name, wikidata_id, wikipedia_url, date_start, date_end, date_precision,
+        name, source_slug, wikidata_id, wikipedia_url, date_start, date_end, date_precision,
         latitude, longitude, location_name, battle_type, terrain, fortified,
         weather, n_sources, needs_review, review_notes
     ) VALUES (
-        :name, :wikidata_id, :wikipedia_url,
+        :name, :source_slug, :wikidata_id, :wikipedia_url,
         CAST(:date_start AS DATE), CAST(:date_end AS DATE), :date_precision,
         :latitude, :longitude, :location_name,
         CAST(COALESCE(:battle_type, 'unknown') AS battle_type), :terrain, :fortified,
@@ -74,6 +90,7 @@ _UPDATE_BATTLE = text(
     """
     UPDATE battles SET
         name = :name,
+        source_slug = COALESCE(source_slug, :source_slug),
         wikidata_id = COALESCE(:wikidata_id, wikidata_id),
         wikipedia_url = COALESCE(:wikipedia_url, wikipedia_url),
         date_start = COALESCE(CAST(:date_start AS DATE), date_start),
@@ -226,6 +243,7 @@ def _upsert_battle(conn: Any, battle: BattleExtraction) -> int:
     )
     params: dict[str, Any] = {
         "name": battle.name,
+        "source_slug": battle.slug or None,
         "wikidata_id": facts.wikidata_id,
         "wikipedia_url": facts.wikipedia_url,
         "date_start": date_start,
@@ -244,18 +262,68 @@ def _upsert_battle(conn: Any, battle: BattleExtraction) -> int:
     }
 
     existing = None
-    if facts.wikidata_id:
+    if battle.slug:
+        existing = conn.execute(_FIND_BATTLE_BY_SLUG, {"slug": battle.slug}).fetchone()
+    if existing is None and facts.wikidata_id:
         existing = conn.execute(_FIND_BATTLE_BY_QID, {"wikidata_id": facts.wikidata_id}).fetchone()
     if existing is None:
-        existing = conn.execute(_FIND_BATTLE_BY_NAME, {"name": battle.name}).fetchone()
+        existing = conn.execute(_FIND_LEGACY_BATTLE_BY_NAME, {"name": battle.name}).fetchone()
 
     if existing is None:
         row = conn.execute(_INSERT_BATTLE, params).fetchone()
         return int(row[0])
 
     battle_id = int(existing[0])
+    if facts.wikidata_id:
+        owner = conn.execute(_FIND_BATTLE_BY_QID, {"wikidata_id": facts.wikidata_id}).fetchone()
+        if owner is not None and int(owner[0]) != battle_id:
+            # Two articles resolving to one entity (a redirect, a merged
+            # page): the first keeps the QID, the unique constraint would
+            # otherwise reject this battle outright.
+            logger.warning(
+                "extract_wikidata_id_already_owned",
+                slug=battle.slug,
+                wikidata_id=facts.wikidata_id,
+                owner_battle_id=int(owner[0]),
+            )
+            params["wikidata_id"] = None
     conn.execute(_UPDATE_BATTLE, {**params, "battle_id": battle_id})
     return battle_id
+
+
+def reserve_battle_id(conn: Any, slug: str, name: str) -> int | None:
+    """Find or create the bare ``battles`` row for an article.
+
+    The LLM pass runs before the merged record exists, but the batch file it
+    writes carries ``battle_id`` in each request's metadata so that imported
+    ``llm_calls`` rows are attributed. That needs an id up front. The row is
+    completed later by :func:`write_battle`, which finds it by slug.
+
+    Args:
+        conn: An open database connection.
+        slug: The article's crawl-stage filename stem.
+        name: The battle's display name.
+
+    Returns:
+        The battle id, or None when the row could not be created. A failure
+        costs the attribution only, so the caller carries on without it.
+    """
+    try:
+        with conn.begin_nested():
+            row = conn.execute(_FIND_BATTLE_BY_SLUG, {"slug": slug}).fetchone()
+            if row is None:
+                row = conn.execute(_FIND_LEGACY_BATTLE_BY_NAME, {"name": name}).fetchone()
+                if row is not None:
+                    conn.execute(
+                        text("UPDATE battles SET source_slug = :slug WHERE battle_id = :id"),
+                        {"slug": slug, "id": row[0]},
+                    )
+            if row is None:
+                row = conn.execute(_RESERVE_BATTLE, {"name": name, "slug": slug}).fetchone()
+            return int(row[0])
+    except Exception as exc:
+        logger.warning("extract_battle_reserve_failed", slug=slug, error=str(exc)[:200])
+        return None
 
 
 def _upsert_side(conn: Any, battle_id: int, side: SideExtraction) -> int:

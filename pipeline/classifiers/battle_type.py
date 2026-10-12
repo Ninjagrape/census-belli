@@ -21,8 +21,10 @@ bothered to check".
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Sequence
 from typing import Final
+from urllib.parse import unquote
 
 from pipeline.classifiers.records import BattleTypeDecision
 
@@ -32,6 +34,8 @@ __all__ = [
 ]
 
 _CATEGORY_RE: Final = re.compile(r"\[\[\s*Category\s*:\s*([^\]|]+)", re.IGNORECASE)
+# Rendered HTML (what crawl stores) carries categories as links, not wikitext.
+_HTML_CATEGORY_RE: Final = re.compile(r'href="/wiki/Category:([^"#?]+)', re.IGNORECASE)
 
 _SIEGE_NAME_RE: Final = re.compile(r"^\s*siege of\b", re.IGNORECASE)
 _SIEGE_CATEGORY_RE: Final = re.compile(r"\bsieges?\b", re.IGNORECASE)
@@ -55,9 +59,37 @@ _AERIAL_CATEGORY_RE: Final = re.compile(
     r"\b(?:aerial|air) (?:battles?|operations?|engagements?)\b", re.IGNORECASE
 )
 
-_AMPHIBIOUS_RE: Final = re.compile(r"\bamphibious\b|\blandings?\b", re.IGNORECASE)
+# Bare "landing" is deliberately absent from the article-text rule: it fires
+# on "Harrison's Landing" (Malvern Hill) and on any land battle whose army
+# crossed a river by "landing" boats. "Amphibious" repeated through an
+# article is the signal; one passing use is not. The battle name and
+# categories may use either word.
+_AMPHIBIOUS_RE: Final = re.compile(r"\bamphibious\b", re.IGNORECASE)
+_AMPHIBIOUS_NAME_RE: Final = re.compile(r"\bamphibious\b|\blandings?\b", re.IGNORECASE)
+_AMPHIBIOUS_MIN_MENTIONS: Final[int] = 3
 
 _LAND_BRANCHES: Final[frozenset[str]] = frozenset({"infantry", "cavalry", "artillery", "armour"})
+
+
+def _ship_vocab_dominates(strength_strings: Sequence[str]) -> re.Match[str] | None:
+    """Return a ship-vocabulary match only when ship strings are at least half.
+
+    Marathon, Malvern Hill and the Yom Kippur War each carry one or two ship
+    or "naval vessel" strings among many ordinary troop counts. A passing
+    fleet is not a naval battle; a strength section that is mostly ships is.
+
+    Args:
+        strength_strings: Raw strength-field or troop-report text.
+
+    Returns:
+        The first ship-vocabulary match, or None when there is none or the
+        strings that do not mention ships outnumber those that do.
+    """
+    distinct = {s.strip() for s in strength_strings if s and s.strip()}
+    ship_strings = [s for s in distinct if _SHIP_VOCAB_RE.search(s)]
+    if not ship_strings or len(ship_strings) < len(distinct) - len(ship_strings):
+        return None
+    return _SHIP_VOCAB_RE.search(ship_strings[0])
 
 
 def extract_categories(wikitext: str) -> list[str]:
@@ -72,7 +104,11 @@ def extract_categories(wikitext: str) -> list[str]:
         "Foo"). Duplicates are kept, since callers only ever search this
         list rather than count it.
     """
-    return [m.group(1).strip() for m in _CATEGORY_RE.finditer(wikitext) if m.group(1).strip()]
+    names = [m.group(1).strip() for m in _CATEGORY_RE.finditer(wikitext)]
+    names += [
+        unquote(m.group(1)).replace("_", " ").strip() for m in _HTML_CATEGORY_RE.finditer(wikitext)
+    ]
+    return list(dict.fromkeys(n for n in names if n))
 
 
 def infer_battle_type(
@@ -97,18 +133,19 @@ def infer_battle_type(
        By convention, then, ``siege_offensive`` here means "this was a
        siege", and any per-side defender/attacker distinction is left
        unrecorded rather than guessed.
-    2. **Amphibious**, when there is strong evidence of both naval and land
-       forces *and* the text or a category actually says "amphibious" or
-       "landing" -- two branches of evidence alone is also what a combined
-       land-and-naval campaign looks like, and this function does not try
-       to tell those apart without the word that names one of them.
-    3. **Naval**, from a naval category, or ship vocabulary in a strength
-       string. A 'naval' troop branch alone is not enough: a land battle can
-       carry a single naval-branch report. It only raises confidence when
-       ship vocabulary is also present.
-    4. **Aerial**, from an air-battle category. Checked before the
-       ship-vocabulary match (but after a naval category), since air battles
-       use "squadrons" and "carriers" too.
+    2. **Amphibious**, when there is evidence of both naval and land
+       forces *and* the battle name says "amphibious"/"landing" or the
+       article says "amphibious" at least three times. A bare "landing" in
+       article text is not enough (Harrison's Landing, Malvern Hill), and a
+       category such as "Amphibious operations" is not either (Marathon).
+    3. **Naval**, from a naval category; or from ship vocabulary that
+       dominates the strength strings (at least as many distinct strings mention
+       ships as do not); or from a fleet-only report set (only 'naval'/'total'
+       branches) with any ship vocabulary. A passing fleet among many troop
+       counts (Marathon, Malvern Hill, the Yom Kippur War) is not enough.
+    4. **Aerial**, from an air-battle category, unless ground-force branches
+       are reported too. Checked before the ship-vocabulary match (but after
+       a naval category), since air battles use "squadrons" and "carriers" too.
     5. **Field**, but *only* when ``article_text`` is non-empty, i.e. an
        article was actually read and carried none of the above signals.
        Defaulting to 'field' when no article was read would recreate
@@ -160,18 +197,32 @@ def infer_battle_type(
     naval_category = next((c for c in categories if _NAVAL_CATEGORY_RE.search(c)), None)
     branches_lower = {b.strip().lower() for b in troop_branches}
     has_naval_branch = "naval" in branches_lower
-    ship_match = _SHIP_VOCAB_RE.search(" ".join(strength_strings))
+    ship_match = _ship_vocab_dominates(strength_strings)
+    branch_counts = Counter(b.strip().lower() for b in troop_branches)
+    n_naval = branch_counts["naval"]
+    n_land = sum(branch_counts[b] for b in _LAND_BRANCHES)
+    if ship_match is None and n_naval >= max(2, n_land):
+        # Ship strings are outnumbered by unsplit "total" counts, but at least
+        # as many reports are branch-labelled naval as land (Actium's ships1,
+        # ships2 against two infantry strengths).
+        ship_match = _SHIP_VOCAB_RE.search(" ".join(strength_strings))
+    any_ship_vocab = _SHIP_VOCAB_RE.search(" ".join(strength_strings)) is not None
     aerial_category = next((c for c in categories if _AERIAL_CATEGORY_RE.search(c)), None)
 
     has_land_branch = bool(branches_lower & _LAND_BRANCHES)
-    amphibious_mentioned = any(_AMPHIBIOUS_RE.search(c) for c in categories) or bool(
-        article_text and _AMPHIBIOUS_RE.search(article_text)
+    # Reports that are only ever 'naval' or an unsplit 'total' describe a
+    # fleet-only engagement (Okpo, Artemisium); a land branch alongside means
+    # the naval report may be one detachment of a land battle (Malvern Hill).
+    naval_only_forces = has_naval_branch and not (branches_lower - {"naval", "total"})
+    amphibious_mentioned = (
+        bool(_AMPHIBIOUS_NAME_RE.search(battle_name or ""))
+        or len(_AMPHIBIOUS_RE.findall(article_text or "")) >= _AMPHIBIOUS_MIN_MENTIONS
     )
 
     # A naval branch alone is weak evidence of a naval battle (a land battle
     # can carry one marine or naval-brigade report), but together with land
     # troops and an explicit "amphibious"/"landing" mention it is enough.
-    naval_for_amphibious = naval_category is not None or has_naval_branch or ship_match is not None
+    naval_for_amphibious = naval_category is not None or has_naval_branch or any_ship_vocab
     if naval_for_amphibious and has_land_branch and amphibious_mentioned:
         return BattleTypeDecision(
             battle_id=battle_id,
@@ -192,13 +243,24 @@ def infer_battle_type(
 
     # Before ship vocabulary: an air battle's strength text routinely says
     # "squadrons" or "aircraft carriers", which is not evidence of a naval one.
-    if aerial_category is not None:
+    # Campaign articles (Stalingrad, Bagration) carry an "Aerial operations"
+    # category too; with ground forces reported alongside, it is not an air battle.
+    if aerial_category is not None and not has_land_branch:
         return BattleTypeDecision(
             battle_id=battle_id,
             battle_type="aerial",
             fortified=None,
             evidence=f"category {aerial_category!r} names an air battle",
             confidence=0.85,
+        )
+
+    if naval_only_forces and any_ship_vocab:
+        return BattleTypeDecision(
+            battle_id=battle_id,
+            battle_type="naval",
+            fortified=None,
+            evidence="only naval/unsplit troop reports, with ship vocabulary in the strength text",
+            confidence=0.75,
         )
 
     if ship_match is not None:

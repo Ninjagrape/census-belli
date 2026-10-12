@@ -39,6 +39,7 @@ __all__ = [
     "is_placeholder",
     "is_title_free",
     "name_keys",
+    "non_person_reason",
 ]
 
 # Ranks, honorifics and offices that can stand in front of a personal name.
@@ -187,6 +188,13 @@ _FATE_WORDS_RE: Final = re.compile(
 _CONNECTIVE_RE: Final = re.compile(r"^\s*(?:and|&|with|under|plus)\b\s*", re.IGNORECASE)
 _WHITESPACE_RE: Final = re.compile(r"\s+")
 
+# "Overall: Gebhard Leberecht von Blücher", "Craonne: Mikhail Vorontsov". An
+# infobox groups commanders under a sub-heading and the parser flattens the
+# heading into the name. The heading is a place or a theatre, never part of the
+# name, and left in it the mention matches nobody on Wikidata. One colon only:
+# anything busier is not this pattern and is left alone.
+_LABEL_PREFIX_RE: Final = re.compile(r"^[^:\d]{1,40}:\s*(?=\S)")
+
 # A trailing segment short enough, and free enough of titles and digits, to be
 # a forename in an inverted "Surname, Forename" spelling.
 _INVERSION_STOPWORDS: Final[frozenset[str]] = frozenset(
@@ -218,6 +226,8 @@ def clean_surface(raw: str) -> str:
     text = _FATE_SYMBOL_RE.sub(" ", text)
     text = _CONNECTIVE_RE.sub("", text)
     text = _WHITESPACE_RE.sub(" ", text).strip()
+    if text.count(":") == 1:
+        text = _LABEL_PREFIX_RE.sub("", text, count=1)
     return text.strip(" ,;:-–—")
 
 
@@ -358,3 +368,78 @@ def name_keys(raw: str) -> tuple[str, ...]:
     add(fold(_uninvert(cleaned)))
 
     return tuple(keys)
+
+
+_MONTHS: Final[str] = (
+    "january|february|march|april|may|june|july|august|september|october|november|december"
+)
+
+# Unit nouns that end the name of a formation, never of a person. Matched on
+# the folded key and anchored at the end, with at most one trailing designator
+# ("army group b", "1st ukrainian front", "panzer group west"), so a rank that
+# merely contains the word ("Fleet Admiral Nimitz") is untouched.
+_FORMATION_NOUNS: Final[str] = (
+    "army group|army groups|armies|army|armee|front|corps|division|brigade|regiment|battalion|"
+    "fleet|flotilla|squadron|legion|navy|air force|air forces|naval force|naval forces|"
+    "high command|general staff|headquarters|panzer group|task force|expeditionary force"
+)
+_FORMATION_RE: Final = re.compile(
+    rf"(?:^|\s)(?:{_FORMATION_NOUNS})(?:\s+(?:[a-z]|\d+|centre|center|north|south|east|west|"
+    rf"don|reserve|central))?$"
+)
+# "Army of the Potomac", "Fleet of Cadiz": the noun leads and "of" follows.
+_FORMATION_OF_RE: Final = re.compile(
+    rf"^(?:{_FORMATION_NOUNS}|council|committee|government|party)\s+of\b"
+)
+_FORMATION_ACRONYMS: Final[frozenset[str]] = frozenset(
+    {
+        "luftwaffe",
+        "stavka",
+        "wehrmacht",
+        "kriegsmarine",
+        "waffen ss",
+        "okw",
+        "okh",
+        "okl",
+        "ob west",
+        "ob sud",
+        "shaef",
+        "nkvd",
+        "oberkommando",
+    }
+)
+# Fragments the infobox parser lifted from a table cell or a footnote.
+_JUNK_MENTIONS: Final[frozenset[str]] = frozenset(
+    {"reinforcement", "reinforcements", "detailed list", "see list", "see below", "list"}
+)
+_DATE_RE: Final = re.compile(rf"^(?:\d{{1,2}}\s+(?:{_MONTHS})|(?:{_MONTHS})\s+\d{{1,2}})$")
+
+
+def non_person_reason(raw: str) -> str | None:
+    """Say why a mention cannot be a person, judging by its name alone.
+
+    This is the deterministic half of the non-person filter; the other half
+    asks Wikidata whether an exact-label hit is a human. An infobox lists
+    "Luftwaffe", "Stavka" and "1st Ukrainian Front" under Commanders, and each
+    became a ``generals`` row that then took a skill estimate.
+
+    Args:
+        raw: The name as a source wrote it.
+
+    Returns:
+        A short reason, or None when nothing about the name rules out a
+        person. Conservative by construction: unit nouns count only at the end
+        of the name and a bare rank never matches.
+    """
+    folded = fold(raw)
+    if not folded:
+        return None
+    if folded in _FORMATION_ACRONYMS:
+        return "names a military or state organisation"
+    if folded in _JUNK_MENTIONS:
+        return "is a table fragment, not a name"
+    if _DATE_RE.match(folded):
+        return "is a date"
+    if _FORMATION_RE.search(folded) or _FORMATION_OF_RE.match(folded):
+        return "names a formation or organisation"
+    return None

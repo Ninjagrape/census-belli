@@ -184,13 +184,25 @@ quality_checks:
     description: "A battle has at least two sides; fewer means the infobox parse thinned it"
 
   - name: no_empty_extractions
+    # This gate used to read crawl_log.extraction_method / fields_extracted,
+    # which no stage writes, so it counted zero rows whatever extract did. It
+    # now measures what extract writes: a battle with neither a start date
+    # nor a single side is a record the parse produced nothing for. A few
+    # such articles are normal (a list page, a stub); a large share means the
+    # infobox parser, the article format or the database write broke. An
+    # empty battles table reads as 1.0 and fails.
     check: >
-      SELECT COUNT(*) FROM crawl_log cl
-      WHERE cl.extraction_method = 'llm_extraction'
-        AND cl.fields_extracted = 0
-        AND cl.http_status = 200
-    threshold: "< 100"
+      SELECT COALESCE(
+        COUNT(*) FILTER (
+          WHERE b.date_start IS NULL
+            AND NOT EXISTS (SELECT 1 FROM battle_sides s WHERE s.battle_id = b.battle_id)
+        )::float / NULLIF(COUNT(*), 0),
+        1.0
+      )
+      FROM battles b
+    threshold: "< 0.05"
     severity: warning
+    description: "Share of battles with no date and no sides; the pilot corpus measured 0.0065"
 
 retry_policy:
   max_stage_retries: 3

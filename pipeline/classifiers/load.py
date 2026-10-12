@@ -22,12 +22,14 @@ have left actually exists (``.wikitext`` preferred over rendered HTML, matching
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Final
 
 import structlog
 from sqlalchemy import text
 
+from pipeline.classifiers.defender import SideLabel
 from pipeline.classifiers.missingness import IMPUTE_FIELDS, MissingnessInput
 from pipeline.classifiers.records import CommanderRow, SideGroup
 from pipeline.crawlers.wikipedia import article_filename
@@ -36,11 +38,13 @@ __all__ = [
     "ARTICLE_SUFFIXES",
     "HTML_SUFFIXES",
     "find_article_path",
+    "load_battle_source_slugs",
     "find_unclassified_battle_type_log_ids",
     "load_battle_wikipedia_urls",
     "load_battles_needing_type",
     "load_missingness_inputs",
     "load_side_groups",
+    "load_siege_sides",
     "load_troop_evidence",
     "read_article_text",
 ]
@@ -53,6 +57,7 @@ ARTICLE_SUFFIXES: Final[tuple[str, ...]] = (".wikitext", ".wiki", ".txt", ".html
 HTML_SUFFIXES: Final[frozenset[str]] = frozenset({".html", ".htm"})
 
 _ARTICLE_DIRNAME: Final[str] = "battles_html"
+_DIGEST_SUFFIX_RE: Final = re.compile(r"-[0-9a-f]{10}$")
 
 _WINNER_OUTCOMES: Final[frozenset[str]] = frozenset(
     {"decisive_victory", "victory", "pyrrhic_victory"}
@@ -170,8 +175,10 @@ def load_side_groups(conn: Any) -> list[SideGroup]:
 
 _LOAD_BATTLE_URLS = text("SELECT battle_id, wikipedia_url FROM battles")
 
+_LOAD_BATTLE_SLUGS = text("SELECT battle_id, source_slug FROM battles")
+
 _LOAD_BATTLES_NEEDING_TYPE = text(
-    "SELECT battle_id, name, wikipedia_url FROM battles WHERE battle_type = 'unknown'"
+    "SELECT battle_id, name, wikipedia_url, source_slug FROM battles WHERE battle_type = 'unknown'"
 )
 
 _LOAD_TROOP_EVIDENCE = text(
@@ -197,6 +204,19 @@ def load_battle_wikipedia_urls(conn: Any) -> dict[int, str | None]:
     return {int(bid): url for bid, url in conn.execute(_LOAD_BATTLE_URLS).fetchall()}
 
 
+def load_battle_source_slugs(conn: Any) -> dict[int, str | None]:
+    """Read every battle's crawl ``source_slug`` in one query.
+
+    Args:
+        conn: An open database connection.
+
+    Returns:
+        Battle id to slug (or None for a row predating the column), for
+        :func:`find_article_path`, which prefers it over the URL.
+    """
+    return {int(bid): slug for bid, slug in conn.execute(_LOAD_BATTLE_SLUGS).fetchall()}
+
+
 def load_battles_needing_type(conn: Any) -> list[dict[str, Any]]:
     """List battles whose ``battle_type`` is still 'unknown'.
 
@@ -204,13 +224,13 @@ def load_battles_needing_type(conn: Any) -> list[dict[str, Any]]:
         conn: An open database connection.
 
     Returns:
-        One mapping per battle with ``battle_id``, ``name`` and
-        ``wikipedia_url``, the inputs :func:`pipeline.classifiers.battle_type
+        One mapping per battle with ``battle_id``, ``name``,
+        ``wikipedia_url`` and ``source_slug``, the inputs :func:`pipeline.classifiers.battle_type
         .infer_battle_type` and this module's own file lookup need.
     """
     return [
-        {"battle_id": int(bid), "name": str(name), "wikipedia_url": url}
-        for bid, name, url in conn.execute(_LOAD_BATTLES_NEEDING_TYPE).fetchall()
+        {"battle_id": int(bid), "name": str(name), "wikipedia_url": url, "source_slug": slug}
+        for bid, name, url, slug in conn.execute(_LOAD_BATTLES_NEEDING_TYPE).fetchall()
     ]
 
 
@@ -235,8 +255,10 @@ def load_troop_evidence(conn: Any, battle_id: int) -> tuple[list[str], list[str]
     return branches, strengths
 
 
-def find_article_path(raw_root: Path, wikipedia_url: str | None) -> Path | None:
-    """Map a battle's stored Wikipedia URL onto its raw article file.
+def find_article_path(
+    raw_root: Path, wikipedia_url: str | None, source_slug: str | None = None
+) -> Path | None:
+    """Map a battle onto its raw article file.
 
     Args:
         raw_root: The ``data/raw`` directory (or a test fixture root standing
@@ -244,21 +266,44 @@ def find_article_path(raw_root: Path, wikipedia_url: str | None) -> Path | None:
         wikipedia_url: ``battles.wikipedia_url``, or None/empty when the
             battle carries none -- a battle predating extract's write of the
             column, or one added by hand.
+        source_slug: ``battles.source_slug``, which is the crawl file's stem.
+            Preferred when present, because it needs no URL-spelling guesses.
 
     Returns:
         The path crawl (or a fixture) left for this article, preferring a
         wikitext sibling over rendered HTML per :data:`ARTICLE_SUFFIXES`, or
         None when no URL is recorded or no matching file exists on disk.
     """
+    directory = raw_root / _ARTICLE_DIRNAME
+    if source_slug:
+        for suffix in ARTICLE_SUFFIXES:
+            candidate = directory / f"{source_slug}{suffix}"
+            if candidate.is_file():
+                return candidate
     if not wikipedia_url:
         return None
 
     stem = Path(article_filename(wikipedia_url)).stem
-    directory = raw_root / _ARTICLE_DIRNAME
     for suffix in ARTICLE_SUFFIXES:
         candidate = directory / f"{stem}{suffix}"
         if candidate.is_file():
             return candidate
+
+    # The digest in the filename is a hash of the URL string crawl fetched
+    # (https, percent-encoded), while battles.wikipedia_url comes from
+    # Wikidata or DBpedia (often http, decoded), so the exact stem misses
+    # nearly every article. The sanitised title in front of the digest does
+    # not depend on the URL spelling, so match on that and accept only an
+    # unambiguous hit.
+    title_part = _DIGEST_SUFFIX_RE.sub("", stem)
+    for suffix in ARTICLE_SUFFIXES:
+        matches = [
+            p
+            for p in directory.glob(f"{title_part}-*{suffix}")
+            if _DIGEST_SUFFIX_RE.sub("", p.stem) == title_part
+        ]
+        if len(matches) == 1:
+            return matches[0]
     return None
 
 
@@ -315,9 +360,7 @@ def find_unclassified_battle_type_log_ids(conn: Any, battle_ids: set[int]) -> se
     """
     if not battle_ids:
         return set()
-    rows = conn.execute(
-        _FIND_BATTLE_TYPE_LOG_IDS, {"battle_ids": sorted(battle_ids)}
-    ).fetchall()
+    rows = conn.execute(_FIND_BATTLE_TYPE_LOG_IDS, {"battle_ids": sorted(battle_ids)}).fetchall()
     return {int(row[0]) for row in rows}
 
 
@@ -332,18 +375,20 @@ _LOAD_UNCLASSIFIED_ROWS = text(
     """
 )
 
+# Reconcile's verdict, not the raw reports: a side whose reports were all
+# excluded (implausible figures, non-personnel counts, branch-only) has
+# troop_reports rows but no estimate, and reconcile logs it unfillable. Those
+# sides have no usable troop number, so impute's mnar_delta has to reach them.
 _LOAD_TROOP_SIDES = text(
     """
-    SELECT DISTINCT tr.side_id
-    FROM troop_reports tr
-    JOIN battle_sides bs ON bs.side_id = tr.side_id
-    WHERE bs.battle_id = :battle_id
+    SELECT side_id
+    FROM battle_sides
+    WHERE battle_id = :battle_id
+      AND est_troops_total IS NOT NULL
     """
 )
 
-_LOAD_SIDE_OUTCOMES = text(
-    "SELECT side_id, outcome FROM battle_sides WHERE battle_id = :battle_id"
-)
+_LOAD_SIDE_OUTCOMES = text("SELECT side_id, outcome FROM battle_sides WHERE battle_id = :battle_id")
 
 
 def _side_outcome_label(outcome: str | None) -> str | None:
@@ -378,13 +423,10 @@ def load_missingness_inputs(conn: Any) -> list[MissingnessInput]:
         stage's field are never read here, matching
         ``classify_missingness``'s own scope guard.
 
-        Troop presence is read from ``troop_reports`` rather than
-        ``battle_sides.est_troops_total``: the reconcile stage, which writes
-        the latter, has not necessarily run to completion by the time
-        classify does, and a raw report's mere existence is the same signal
-        the extract stage's own ``missing_fields()`` uses to decide whether
-        ``troop_total`` was missing in the first place (see
-        ``pipeline.extractors.merger.missing_fields``).
+        Troop presence is read from ``battle_sides.est_troops_total``, the
+        reconcile stage's result, which runs before classify. Reading the raw
+        ``troop_reports`` instead made a side reconcile had marked unfillable
+        look as though it had troops, so no missingness heuristic fired for it.
     """
     rows = conn.execute(_LOAD_UNCLASSIFIED_ROWS, {"fields": sorted(IMPUTE_FIELDS)}).fetchall()
     if not rows:
@@ -434,3 +476,34 @@ def load_missingness_inputs(conn: Any) -> list[MissingnessInput]:
         )
 
     return inputs
+
+
+# ─── Defender step ───────────────────────────────────────────────────────────
+
+_LOAD_SIEGE_SIDES = text(
+    """
+    SELECT b.battle_id, b.name, bs.side_id, bs.side_label, bs.polity
+    FROM battles b
+    JOIN battle_sides bs ON bs.battle_id = b.battle_id
+    WHERE b.battle_type = 'siege_offensive'
+      AND bs.is_defender IS NULL
+    ORDER BY b.battle_id, bs.side_id
+    """
+)
+
+
+def load_siege_sides(conn: Any) -> dict[int, tuple[str, list[SideLabel]]]:
+    """Read the sides of every siege that still has an unset defender flag.
+
+    Args:
+        conn: An open database connection.
+
+    Returns:
+        Battle id to ``(battle name, sides)`` for sieges with at least one
+        side whose ``is_defender`` is NULL.
+    """
+    sieges: dict[int, tuple[str, list[SideLabel]]] = {}
+    for battle_id, name, side_id, label, polity in conn.execute(_LOAD_SIEGE_SIDES).fetchall():
+        entry = sieges.setdefault(int(battle_id), (str(name), []))
+        entry[1].append(SideLabel(int(side_id), str(label), str(polity) if polity else None))
+    return sieges

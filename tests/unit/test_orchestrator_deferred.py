@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from pipeline import orchestrator
-from pipeline.quality import StageResult
+from pipeline.quality import QualityCheckResult, Severity, StageResult
 from pipeline.stages.base import StageOutcome
 
 
@@ -84,3 +84,55 @@ def test_a_failed_result_without_deferral_does_not_look_awaiting() -> None:
 
     assert result.awaiting_llm is False
     assert result.halts_pipeline is True
+
+
+def test_continue_on_deferred_runs_the_next_stage(patched: dict[str, Any]) -> None:
+    patched["outcomes"]["extract"] = StageOutcome(2, Path("b.jsonl"))
+
+    results = orchestrator.run_pipeline(
+        ["crawl", "extract", "resolve"], stop_on_error=True, continue_on_deferred=True
+    )
+
+    assert [r.stage for r in results] == ["crawl", "extract", "resolve"]
+    assert [r.awaiting_llm for r in results] == [False, True, False]
+    assert patched["gates_run"] == 2  # extract's gates stay skipped
+
+
+def test_all_skips_unbuilt_stages(patched: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(orchestrator, "_stage_is_built", lambda s: s not in {"evaluate", "report"})
+
+    results = orchestrator.run_pipeline(["all"])
+
+    assert [r.stage for r in results] == orchestrator.STAGE_ORDER[:7]
+
+
+def test_naming_an_unbuilt_stage_fails_before_running_anything(
+    patched: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(orchestrator, "_stage_is_built", lambda s: s != "evaluate")
+
+    with pytest.raises(SystemExit) as exc:
+        orchestrator.run_pipeline(["crawl", "evaluate"])
+
+    assert exc.value.code == 1
+    assert patched["ran"] == []
+
+
+def test_gate_failure_retries_only_when_the_policy_says_so(
+    patched: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bad = [QualityCheckResult(name="g", passed=False, severity=Severity.ERROR)]
+    monkeypatch.setattr(orchestrator, "run_quality_checks", lambda spec, db_conn: bad)
+
+    def spec_with(policy: dict[str, Any]) -> Any:
+        return lambda stage, overrides=None: {"stage": stage, "retry_policy": policy}
+
+    monkeypatch.setattr(orchestrator, "load_agent_spec", spec_with({"max_stage_retries": 2}))
+    assert orchestrator.run_stage("model").retries_used == 0
+
+    monkeypatch.setattr(
+        orchestrator,
+        "load_agent_spec",
+        spec_with({"max_stage_retries": 2, "retry_on_gate_failure": True}),
+    )
+    assert orchestrator.run_stage("model").retries_used == 2

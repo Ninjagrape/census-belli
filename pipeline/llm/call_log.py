@@ -164,15 +164,60 @@ def log_call(
     }
 
     try:
-        row = conn.execute(_to_statement(_INSERT_SQL), params).fetchone()
+        row = _insert(conn, params)
     except Exception as e:
-        logger.error(
-            "llm_call_logging_failed",
-            stage=stage,
-            model=response.model,
-            status=response.status.value,
-            error=str(e),
-        )
-        return None
+        if params["battle_id"] is not None:
+            # A battle id carried in a batch file can outlive its row (the
+            # database was rebuilt, the writing transaction rolled back). The
+            # attribution is lost, not the answer.
+            logger.warning(
+                "llm_call_battle_id_dropped", battle_id=params["battle_id"], error=str(e)
+            )
+            try:
+                row = _insert(conn, {**params, "battle_id": None})
+            except Exception as retry_error:
+                _log_failure(stage, response, retry_error)
+                return None
+        else:
+            _log_failure(stage, response, e)
+            return None
 
     return int(row[0]) if row else None
+
+
+def _insert(conn: Any, params: dict[str, Any]) -> Any:
+    """Insert one ``llm_calls`` row inside a savepoint.
+
+    The savepoint keeps a rejected row (a stale ``battle_id``) from aborting
+    the surrounding PostgreSQL transaction, which would fail every later
+    statement as well.
+
+    Args:
+        conn: An open database connection.
+        params: The insert's bound parameters.
+
+    Returns:
+        The ``RETURNING`` row.
+    """
+    nested = getattr(conn, "begin_nested", None)
+    if nested is None:
+        return conn.execute(_to_statement(_INSERT_SQL), params).fetchone()
+    with nested():
+        return conn.execute(_to_statement(_INSERT_SQL), params).fetchone()
+
+
+def _log_failure(stage: str, response: LLMResponse, error: Exception) -> None:
+    """Report an audit row that could not be written.
+
+    Args:
+        stage: Pipeline stage that issued the call.
+        response: The outcome that went unrecorded.
+        error: Why the insert failed.
+    """
+    logger.error(
+        "llm_call_logging_failed",
+        stage=stage,
+        model=response.model,
+        status=response.status.value,
+        error=str(error),
+    )

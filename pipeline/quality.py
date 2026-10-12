@@ -116,6 +116,40 @@ class ThresholdParseError(ValueError):
     """Raised when a threshold string cannot be interpreted."""
 
 
+class ThresholdParamError(ValueError):
+    """Raised when a threshold names a ``{params.x}`` the spec does not define."""
+
+
+_PARAM_PLACEHOLDER_RE = re.compile(r"\{params\.([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def resolve_threshold_params(raw: str, params: dict[str, Any]) -> str:
+    """Substitute ``{params.<name>}`` placeholders in a threshold string.
+
+    Args:
+        raw: The threshold as written in the spec.
+        params: The stage spec's ``params`` after overrides.
+
+    Returns:
+        The threshold with every placeholder replaced.
+
+    Raises:
+        ThresholdParamError: If a placeholder names a missing or null param, so
+            the check fails instead of comparing against nothing.
+    """
+
+    def substitute(match: re.Match[str]) -> str:
+        key = match.group(1)
+        value = params.get(key)
+        if value is None:
+            raise ThresholdParamError(
+                f"Threshold {raw!r} references params.{key}, which the stage spec does not define"
+            )
+        return str(value)
+
+    return _PARAM_PLACEHOLDER_RE.sub(substitute, raw)
+
+
 @dataclass(frozen=True)
 class Threshold:
     """A parsed comparison, e.g. ``>=`` against ``3000.0``."""
@@ -757,6 +791,12 @@ METHOD_HANDLERS: dict[str, MethodHandler] = {
     "model_gate": _check_model_gate,
 }
 
+# Handler param -> stage spec param it must follow. A method listed here reads
+# its input from where the run wrote it, which the run's params decide.
+_SPEC_PARAM_BINDINGS: dict[str, dict[str, str]] = {
+    "imputation_gate": {"scale": "scale", "root": "imputed_root"},
+}
+
 # Why each `method:` without a handler cannot run yet. Every method named in
 # any agents/*.yaml must appear here (tests/unit/test_quality.py asserts it),
 # including the ones METHOD_HANDLERS implements: this is the reason table the
@@ -788,14 +828,18 @@ UNIMPLEMENTED_METHODS: dict[str, str] = {
 class QualityRunner:
     """Executes the quality checks declared in an agent spec."""
 
-    def __init__(self, conn: Connection | None) -> None:
+    def __init__(self, conn: Connection | None, spec_params: dict[str, Any] | None = None) -> None:
         """
         Args:
             conn: An open database connection, or None if unavailable. With no
                 connection every SQL check fails with an explanatory message
                 rather than passing vacuously.
+            spec_params: The stage spec's ``params`` after overrides. Used to
+                resolve ``{params.<name>}`` in thresholds and to point method
+                handlers at the output the run actually wrote.
         """
         self._conn = conn
+        self._spec_params = spec_params or {}
 
     def run_all(self, checks: list[dict[str, Any]]) -> list[QualityCheckResult]:
         """Run every check in a spec's ``quality_checks`` list.
@@ -850,6 +894,18 @@ class QualityRunner:
                 severity=check.get("severity"),
             )
 
+        try:
+            threshold_raw = resolve_threshold_params(threshold_raw, self._spec_params)
+        except ThresholdParamError as exc:
+            return QualityCheckResult(
+                name=name,
+                passed=False,
+                severity=severity,
+                threshold=threshold_raw,
+                message=str(exc),
+            )
+        check = {**check, "threshold": threshold_raw}
+
         method = check.get("method")
         if method is not None:
             return self._run_method_check(name, check, severity, threshold_raw)
@@ -884,7 +940,7 @@ class QualityRunner:
 
         handler = METHOD_HANDLERS.get(method)
         if handler is not None:
-            return handler(name, check, severity, self._conn)
+            return handler(name, self._bind_spec_params(method, check), severity, self._conn)
 
         reason = UNIMPLEMENTED_METHODS.get(method)
         detail = reason or f"Unknown check method: {method!r}"
@@ -895,6 +951,30 @@ class QualityRunner:
             threshold=threshold_raw,
             message=f"Check method {method!r} is not implemented. {detail}",
         )
+
+    def _bind_spec_params(self, method: str, check: dict[str, Any]) -> dict[str, Any]:
+        """Overlay the run's spec params onto a method check's own ``params``.
+
+        The check's literal ``params`` in the YAML are static defaults; the run
+        may have been started with ``--set scale=published``. Without this the
+        handler reads the default scale's report instead of the one written.
+
+        Args:
+            method: The check's ``method`` name.
+            check: The raw check dict.
+
+        Returns:
+            A copy of the check with the bound params, or the check unchanged.
+        """
+        bindings = _SPEC_PARAM_BINDINGS.get(method)
+        if not bindings:
+            return check
+        raw = check.get("params")
+        params: dict[str, Any] = dict(raw) if isinstance(raw, dict) else {}
+        for check_key, spec_key in bindings.items():
+            if self._spec_params.get(spec_key) is not None:
+                params[check_key] = self._spec_params[spec_key]
+        return {**check, "params": params}
 
     def _run_sql_check(
         self,

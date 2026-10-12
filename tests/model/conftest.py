@@ -180,9 +180,7 @@ def _draw_noise(rng: np.random.Generator, sigma: float, *, df: float = 6.0) -> f
     return float(rng.standard_t(df) * sigma)
 
 
-def _observe(
-    rng: np.random.Generator, eta: float, bound: str
-) -> tuple[float, bool, bool]:
+def _observe(rng: np.random.Generator, eta: float, bound: str) -> tuple[float, bool, bool]:
     """Turn a latent log value into a reported value and its bound flags.
 
     Args:
@@ -303,7 +301,14 @@ def simulate_corpus(
                 report_id += 1
             side_id += 1
 
-    era_mean = float(np.mean([row["ancient_flag"] for row in pending])) if pending else 0.0
+    # Centre over dated unlabelled rows only, as build_design does: the era term
+    # applies to no other regime, so including them would shift the truth.
+    era_flags = [
+        row["ancient_flag"]
+        for row in pending
+        if row["regime"] == "unlabelled" and row["year"] is not None
+    ]
+    era_mean = float(np.mean(era_flags)) if era_flags else 0.0
 
     # Pass 2: now that era_mean is known, compute each row's eta and observe it.
     reports: list[Report] = []
@@ -439,9 +444,7 @@ def add_lineage_test_sides(
             )
             report_id += 1
 
-    side_ids_by_report_count = {
-        k: list(v) for k, v in corpus.side_ids_by_report_count.items()
-    }
+    side_ids_by_report_count = {k: list(v) for k, v in corpus.side_ids_by_report_count.items()}
     side_ids_by_report_count.setdefault(5, []).extend([independent_side_id, repeated_side_id])
 
     return SimulatedCorpus(

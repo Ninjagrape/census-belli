@@ -30,6 +30,8 @@ import structlog
 from bs4 import Tag
 from bs4.element import NavigableString
 
+from pipeline.extractors.textnorm import tidy_spacing
+
 __all__ = ["HTML_ROW_LABELS", "find_infobox_table", "html_infobox_fields"]
 
 logger = structlog.get_logger()
@@ -100,7 +102,8 @@ def _cell_text(cell: Tag) -> str:
     text = cell.get_text(" ")
     text = re.sub(rf"\s*{_CELL_BREAK}\s*", "\n", text)
     text = re.sub(r"[ \t ]+", " ", text)
-    return "\n".join(line.strip() for line in text.splitlines() if line.strip()).strip()
+    lines = "\n".join(line.strip() for line in text.splitlines() if line.strip()).strip()
+    return tidy_spacing(lines)
 
 
 def _label_stem(label: str) -> str | None:

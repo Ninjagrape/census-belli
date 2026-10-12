@@ -22,7 +22,7 @@ __all__ = ["DEFAULT_CONFIG_PATH", "GateParams", "ModelParams", "load_model_param
 
 DEFAULT_CONFIG_PATH: Final[Path] = Path("config/model_default.yaml")
 RANK_BY_CHOICES: Final[tuple[str, ...]] = ("total_war", "skill_mean")
-SCALE_CHOICES: Final[tuple[str, ...]] = ("neutral",)
+SCALE_CHOICES: Final[tuple[str, ...]] = ("neutral", "published")
 CONFIG_KEY: Final[str] = "model_config"
 
 
@@ -78,7 +78,8 @@ class ModelParams:
         max_divergences: Write threshold per round.
         replacement_percentile: Replacement-level percentile.
         rank_by: ``total_war`` or ``skill_mean``.
-        scale: Imputed scale to read (only ``neutral``).
+        scale: Imputed scale to read: ``neutral`` (primary) or ``published``
+            (sensitivity; its runs get a ``_published`` model_type suffix).
         imputed_root: Root of the impute stage's output.
         diagnostics_root: Where per-run files go.
         draws_kept_per_round: Draws kept per round for pooling.

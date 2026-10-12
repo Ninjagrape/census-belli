@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import inspect
 import sys
 import time
@@ -108,7 +109,8 @@ def run_quality_checks(spec: dict[str, Any], db_conn: Any) -> list[QualityCheckR
     Returns:
         A list of results. Any ERROR-severity failure blocks the pipeline.
     """
-    runner = QualityRunner(db_conn)
+    params = spec.get("params")
+    runner = QualityRunner(db_conn, params if isinstance(params, dict) else None)
     return runner.run_all(spec.get("quality_checks", []) or [])
 
 
@@ -202,12 +204,17 @@ def run_stage(
         The stage's result, including every quality check that ran.
     """
     spec = load_agent_spec(stage)
-    retry_policy = spec.get("retry_policy", {}) or {}
-    max_retries = retry_policy.get("max_stage_retries", 1)
-    on_failure = retry_policy.get("on_failure", "pause_and_alert")
 
     if config_overrides:
         spec = merge_overrides(spec, config_overrides)
+
+    retry_policy = spec.get("retry_policy", {}) or {}
+    max_retries = retry_policy.get("max_stage_retries", 1)
+    on_failure = retry_policy.get("on_failure", "pause_and_alert")
+    # Off by default: reconcile, impute and model sample with a fixed seed, so
+    # re-running after a gate failure reproduces it and doubles the runtime.
+    # Only a stage that resumes from saved state (crawl) makes progress on retry.
+    retry_on_gate_failure = bool(retry_policy.get("retry_on_gate_failure", False))
 
     for attempt in range(max_retries + 1):
         logger.info("stage_start", stage=stage, attempt=attempt + 1)
@@ -270,7 +277,7 @@ def run_stage(
 
             has_error = has_blocking_failure(checks)
 
-            if has_error and attempt < max_retries:
+            if has_error and retry_on_gate_failure and attempt < max_retries:
                 logger.warning("stage_quality_failed_retrying", stage=stage, attempt=attempt + 1)
                 continue
 
@@ -321,21 +328,67 @@ def run_stage(
 EXIT_AWAITING_LLM = 3
 
 
-def _announce_deferred(result: StageResult) -> None:
+def _announce_deferred(result: StageResult, *, continuing: bool = False) -> None:
     """Tell the user which batch file to process and what to run next.
 
     Args:
         result: The result of a stage that deferred LLM requests.
+        continuing: True if the pipeline carries on past this stage.
     """
     logger.warning(
-        "pipeline_stopped_awaiting_offline_llm",
+        "stage_deferred_continuing" if continuing else "pipeline_stopped_awaiting_offline_llm",
         stage=result.stage,
         deferred_requests=result.deferred_requests,
         batch_file=result.batch_file,
-        reason="later stages would run on incomplete data",
+        reason=(
+            "later stages run on deterministic data only; the result is provisional"
+            if continuing
+            else "later stages would run on incomplete data"
+        ),
         next_step=(
             f"run /process-llm-batch {result.batch_file} in Claude Code, then re-run: "
             f"python -m pipeline.orchestrator --stages {result.stage}"
+        ),
+    )
+
+
+def _stage_is_built(stage: str) -> bool:
+    """Report whether ``pipeline.stages.<stage>`` exists.
+
+    Args:
+        stage: The stage name.
+
+    Returns:
+        True if an importable module exists for the stage.
+    """
+    module_name = f"pipeline.stages.{stage}"
+    if module_name in sys.modules:
+        return True
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _log_deferred_summary(results: list[StageResult]) -> None:
+    """Log every stage that deferred LLM work, with its batch file.
+
+    Args:
+        results: The results of the whole run.
+    """
+    deferred = [r for r in results if r.awaiting_llm]
+    if not deferred:
+        return
+    logger.warning(
+        "pipeline_deferred_summary",
+        provisional=True,
+        stages=[
+            {"stage": r.stage, "deferred_requests": r.deferred_requests, "batch_file": r.batch_file}
+            for r in deferred
+        ],
+        next_step=(
+            "run /process-llm-batch on each batch file, then re-run the listed stages "
+            "and everything after them"
         ),
     )
 
@@ -345,6 +398,7 @@ def run_pipeline(
     config_overrides: dict[str, Any] | None = None,
     stop_on_error: bool = True,
     db_conn: Any = None,
+    continue_on_deferred: bool = False,
 ) -> list[StageResult]:
     """
     Run a sequence of pipeline stages in order.
@@ -354,17 +408,27 @@ def run_pipeline(
         config_overrides: dict of param overrides passed to every stage.
         stop_on_error: if True, halt the pipeline on the first ERROR-severity failure.
         db_conn: an open database connection used to run each stage's quality gate.
+        continue_on_deferred: if True, a stage that deferred offline LLM work
+            does not halt the pipeline. Later stages then run on deterministic
+            data only, so the result is provisional.
 
     Returns:
         List of StageResult for each stage that ran.
     """
     if stages == ["all"]:
-        stages = STAGE_ORDER
+        stages = [s for s in STAGE_ORDER if _stage_is_built(s)]
+        skipped = [s for s in STAGE_ORDER if s not in stages]
+        if skipped:
+            logger.warning("unbuilt_stages_skipped", stages=skipped)
 
-    # Validate stage names
+    # Validate before running anything, so a typo or an unbuilt stage does not
+    # surface only after the upstream stages have done hours of work.
     for s in stages:
         if s not in STAGE_ORDER:
             logger.error("unknown_stage", stage=s, valid=STAGE_ORDER)
+            sys.exit(1)
+        if not _stage_is_built(s):
+            logger.error("stage_not_built", stage=s, reason=f"no module pipeline/stages/{s}.py")
             sys.exit(1)
 
     results = []
@@ -381,7 +445,9 @@ def run_pipeline(
         )
 
         if result.awaiting_llm:
-            _announce_deferred(result)
+            _announce_deferred(result, continuing=continue_on_deferred)
+            if continue_on_deferred:
+                continue
             break
 
         if not result.success:
@@ -395,6 +461,8 @@ def run_pipeline(
                 failed_stage=stage,
                 on_failure=result.on_failure,
             )
+
+    _log_deferred_summary(results)
 
     # Summary
     total_duration = sum(r.duration_seconds for r in results)
@@ -448,6 +516,17 @@ def main() -> None:
         help="Continue running stages even if one fails quality checks",
     )
     parser.add_argument(
+        "--continue-past-deferred",
+        action="store_true",
+        help=(
+            "Carry on to the next stage when a stage defers offline LLM work "
+            "instead of halting. Later stages then run on deterministic data "
+            "only (unresolved LLM groups stay unresolved, multi-commander "
+            "sides keep default_split), so the result is provisional. Exit "
+            "code 3 if anything deferred and nothing failed."
+        ),
+    )
+    parser.add_argument(
         "--no-db",
         action="store_true",
         help=(
@@ -485,6 +564,7 @@ def main() -> None:
             config_overrides=config_overrides or None,
             stop_on_error=not args.no_stop_on_error,
             db_conn=db_conn,
+            continue_on_deferred=args.continue_past_deferred,
         )
 
     if args.no_db:

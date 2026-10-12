@@ -34,6 +34,14 @@ params:
   candidate_source: sparql
   sparql_batch_size: 25        # names per query; the endpoint times out on large ones
   max_names_per_group: 3       # surface forms of one person to ask about
+  # Fallback for names the exact lookup could not place: a ranked search that
+  # finds "Emmanuel de Grouchy, Marquis de Grouchy" for "Emmanuel de Grouchy".
+  # Hits are candidates only; threshold, date gate and margin still decide.
+  search_names_per_group: 2
+  search_batch_size: 10
+  # Era bins for generals.era, shared with the impute stage so a general's era
+  # and a battle's era mean the same thing.
+  imputation_priors: config/imputation_priors.yaml
   rate_limit_sparql: 2.0       # seconds between queries; stricter than the article API
   respect_robots: true
 
@@ -141,7 +149,16 @@ quality_checks:
     # that table divides written rows by written rows and reports 1.0 however
     # many mentions the stage lost. The real denominator is written rows plus
     # the mentions resolve could not place, which it records in
-    # missing_data_log under commander_general_id.
+    # missing_data_log under commander_general_id: groups left unresolved, and
+    # mentions of resolved people whose side is not in the database. Refused
+    # non-persons (field commander_non_person) are outside it on purpose.
+    #
+    # Two known blind spots. A mention whose battle row is absent cannot be
+    # logged there (battle_id is NOT NULL); resolve warns and writes it to
+    # data/processed/unplaced_mentions.jsonl. And the extract stage deletes
+    # every un-imputed missing_data_log row of a battle it rewrites, so an
+    # extract re-run after resolve empties the denominator and this reads 1.0
+    # until resolve is run again.
     check: >
       SELECT (SELECT COUNT(*) FROM battle_commanders)::float
            / NULLIF(
@@ -153,16 +170,61 @@ quality_checks:
     description: "At least 90% of commander mentions should reach battle_commanders"
 
   - name: no_duplicate_generals
+    # generals.wikidata_id is UNIQUE, so counting duplicate Q-ids can never
+    # fail; the gate that was here measured the schema, not the stage. The real
+    # duplicate is a corpus-local general (no Q-id) that is the same person as
+    # another row: the same name once folded for case, accents and punctuation,
+    # with battle years that overlap (or no years to compare), where at least
+    # one of the pair has no Wikidata id. A pair where both carry different
+    # Q-ids is two people Wikidata already told apart.
     check: >
-      SELECT COUNT(*) FROM (
-        SELECT wikidata_id, COUNT(*) as n
-        FROM generals
-        WHERE wikidata_id IS NOT NULL
-        GROUP BY wikidata_id
-        HAVING COUNT(*) > 1
-      ) t
+      SELECT COUNT(*) FROM generals a
+      JOIN generals b ON a.general_id < b.general_id
+       AND regexp_replace(translate(lower(a.canonical_name),
+             'àáâãäåçèéêëìíîïñòóôõöùúûüýÿšžłø', 'aaaaaaceeeeiiiinooooouuuuyyszlo'),
+             '[^a-z0-9]+', '', 'g')
+         = regexp_replace(translate(lower(b.canonical_name),
+             'àáâãäåçèéêëìíîïñòóôõöùúûüýÿšžłø', 'aaaaaaceeeeiiiinooooouuuuyyszlo'),
+             '[^a-z0-9]+', '', 'g')
+      WHERE (a.wikidata_id IS NULL OR b.wikidata_id IS NULL)
+        AND (a.years_active IS NULL OR b.years_active IS NULL
+             OR a.years_active && b.years_active)
     threshold: "= 0"
     severity: error
+    description: "No two generals with the same name, overlapping years and a missing Wikidata id"
+
+  - name: probable_duplicate_generals
+    # The looser sibling of no_duplicate_generals: the same first and last name
+    # token once folded, overlapping years, at least one side with no Q-id. It
+    # catches one man split across spellings ("Karl von Wrede" and "Karl Philipp
+    # von Wrede", "Gebhard von Blucher" and "Gebhard Leberecht von Blucher").
+    # A warning, because two Romans can share both ends of a three-part name.
+    # On the 2026-10 pilot it found five real splits and one non-person pair.
+    check: >
+      WITH n AS (
+        SELECT general_id, wikidata_id, years_active,
+               regexp_replace(
+                 regexp_replace(translate(lower(canonical_name),
+                   'àáâãäåçèéêëìíîïñòóôõöùúûüýÿšžłø', 'aaaaaaceeeeiiiinooooouuuuyyszlo'),
+                   '[^a-z0-9 ]+', '', 'g'),
+                 ' +', ' ', 'g') AS nm
+        FROM generals
+      ), k AS (
+        SELECT *, split_part(nm, ' ', 1) AS first_tok,
+               (regexp_split_to_array(nm, ' '))[
+                 array_length(regexp_split_to_array(nm, ' '), 1)] AS last_tok
+        FROM n
+      )
+      SELECT COUNT(*) FROM k a
+      JOIN k b ON a.general_id < b.general_id
+       AND a.first_tok = b.first_tok AND a.last_tok = b.last_tok
+       AND a.first_tok <> a.last_tok
+      WHERE (a.wikidata_id IS NULL OR b.wikidata_id IS NULL)
+        AND (a.years_active IS NULL OR b.years_active IS NULL
+             OR a.years_active && b.years_active)
+    threshold: "= 0"
+    severity: warning
+    description: "Few generals should look like one person split across spellings"
 
   - name: wikidata_link_rate
     # The honest measure of "backed by a Wikidata entity where possible".

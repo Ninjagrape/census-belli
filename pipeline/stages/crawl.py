@@ -8,7 +8,9 @@ Order of work, and why:
 2. Each battle article is fetched once, written to ``data/raw/battles_html``,
    and mined for citations. Allowed citation domains are fetched; the rest
    are recorded as skipped so the trail stays complete.
-3. Wikidata SPARQL queries run last. They are slow and independent, so a
+3. Each fetched article's own Wikidata item is fetched (the Q-id is read out of
+   the article HTML, so a curated corpus gets Wikidata facts without a query).
+4. Wikidata SPARQL queries run last. They are slow and independent, so a
    crawl interrupted before them still leaves the Wikipedia corpus usable.
 
 Every fetch attempt, including failures and robots refusals, becomes a
@@ -36,8 +38,14 @@ from pipeline.crawlers.fetcher import (
     Fetcher,
     FetchResult,
     RateLimiter,
+    utc_now,
 )
-from pipeline.crawlers.log import CrawlLogWriter, SqlCrawlLog, entry_from_result
+from pipeline.crawlers.log import (
+    CrawlLogEntry,
+    CrawlLogWriter,
+    SqlCrawlLog,
+    entry_from_result,
+)
 from pipeline.crawlers.seeds import DEFAULT_SEED_PATH, Seeds, load_seeds
 from pipeline.crawlers.state import DEFAULT_STATE_PATH, CrawlState, load_state, save_state
 from pipeline.db import get_connection
@@ -74,6 +82,18 @@ _STATE_SAVE_EVERY = 25
 # 50k result set of a seed query would take days. The cap keeps the stage
 # finite; raise it with --set max_wikidata_entities=N.
 _DEFAULT_MAX_WIKIDATA_ENTITIES = 2000
+
+# A list-page crawl must find thousands of battles or the lists failed to
+# parse; a named corpus has no such floor (see _record_plan).
+_DEFAULT_MIN_BATTLE_ARTICLES = 3000
+
+# Marker rows in crawl_log that carry the run's own accounting for the quality
+# gates. The gates are plain SQL and cannot read crawl_state.json, and
+# crawl_log has no column for "how many battles were targeted". The counts
+# ride in the query string so no real column is misused; http_status 0 keeps
+# the row out of the error-rate numerator. agents/crawl.yaml parses this URL
+# shape, so change both together.
+PLAN_URL_PREFIX = "crawl-plan://battle-articles"
 
 
 class CrawlConfigError(ValueError):
@@ -143,7 +163,13 @@ class CrawlParams:
         citation_allow_domains: Domains whose citations may be fetched.
         citation_depth: Hops from a battle article. 0 disables citations.
         fetch_dbpedia: Whether to fetch the DBpedia twin of each article.
-        max_wikidata_entities: Cap on per-entity Wikidata fetches.
+        fetch_battle_entities: Whether to fetch each article's own Wikidata
+            item.
+        max_wikidata_entities: Cap on Wikidata entities fetched because a
+            SPARQL seed query named them. Entities of fetched articles are
+            not capped.
+        min_battle_articles: Fewest battle articles a list-page crawl must
+            fetch to pass its gate. Ignored for a named corpus.
         seed_path: Path to the seed config.
         paths: Where output is written.
     """
@@ -157,7 +183,9 @@ class CrawlParams:
     citation_allow_domains: tuple[str, ...]
     citation_depth: int
     fetch_dbpedia: bool
+    fetch_battle_entities: bool
     max_wikidata_entities: int
+    min_battle_articles: int
     seed_path: Path
     paths: CrawlPaths
 
@@ -178,8 +206,7 @@ class CrawlParams:
         params = spec.get("params")
         if not isinstance(params, dict):
             raise CrawlConfigError(
-                "agents/crawl.yaml must define a params mapping; got "
-                f"{type(params).__name__}"
+                f"agents/crawl.yaml must define a params mapping; got {type(params).__name__}"
             )
 
         missing = [key for key in _REQUIRED_PARAMS if params.get(key) is None]
@@ -209,8 +236,12 @@ class CrawlParams:
             citation_allow_domains=tuple(allow_domains),
             citation_depth=int(params.get("citation_depth", 1)),
             fetch_dbpedia=bool(params.get("fetch_dbpedia", True)),
+            fetch_battle_entities=bool(params.get("fetch_battle_entities", True)),
             max_wikidata_entities=int(
                 params.get("max_wikidata_entities", _DEFAULT_MAX_WIKIDATA_ENTITIES)
+            ),
+            min_battle_articles=int(
+                params.get("min_battle_articles", _DEFAULT_MIN_BATTLE_ARTICLES)
             ),
             seed_path=Path(params.get("seed_path", DEFAULT_SEED_PATH)),
             paths=CrawlPaths.under(root, state_file),
@@ -284,6 +315,8 @@ class CrawlSummary:
         dbpedia_fetched: DBpedia resources fetched.
         wikidata_queries: SPARQL queries that returned results.
         wikidata_entities: Wikidata entity documents fetched.
+        battle_entities: Battle articles whose own Wikidata item is on disk
+            after this run, fetched now or earlier.
         failures: Fetch attempts that yielded no usable body.
     """
 
@@ -295,6 +328,7 @@ class CrawlSummary:
     dbpedia_fetched: int = 0
     wikidata_queries: int = 0
     wikidata_entities: int = 0
+    battle_entities: int = 0
     failures: int = 0
     failed_urls: list[str] = field(default_factory=list)
 
@@ -313,6 +347,7 @@ class CrawlSummary:
             "dbpedia_fetched": self.dbpedia_fetched,
             "wikidata_queries": self.wikidata_queries,
             "wikidata_entities": self.wikidata_entities,
+            "battle_entities": self.battle_entities,
             "failures": self.failures,
         }
 
@@ -490,9 +525,7 @@ async def _crawl_battles(
         summary.battles_fetched += 1
 
         if params.citation_depth > 0:
-            await _crawl_citations(
-                fetcher, params, battle_url, result.text, state, writer, summary
-            )
+            await _crawl_citations(fetcher, params, battle_url, result.text, state, writer, summary)
 
         if params.fetch_dbpedia:
             dbpedia_result = await dbpedia_mod.fetch_resource(fetcher, battle_url)
@@ -508,6 +541,94 @@ async def _crawl_battles(
             save_state(state, params.paths.state_file)
             writer.flush()
             logger.info("crawl_progress", done=index, of=len(pending), **summary.as_log_fields())
+
+
+async def _crawl_battle_entities(
+    fetcher: Fetcher,
+    params: CrawlParams,
+    state: CrawlState,
+    writer: CrawlLogWriter,
+    summary: CrawlSummary,
+    limit: int | None,
+) -> None:
+    """Fetch the Wikidata item of every fetched battle article.
+
+    A named corpus runs no SPARQL query, so without this pass it would have no
+    Wikidata facts at all. The Q-id is read from the article HTML on disk, not
+    from the response in hand, so the pass also back-fills articles fetched by
+    an earlier run; resume is by ``state.fetched`` like every other fetch.
+
+    Args:
+        fetcher: The configured fetcher.
+        params: Validated stage params.
+        state: Resume state, updated in place.
+        writer: The crawl_log sink.
+        summary: Counters for this run; ``battle_entities`` is set. The SPARQL
+            entity budget is not charged, so a named corpus cannot starve it.
+        limit: Fetch at most this many entities this run.
+    """
+    fetched_now = 0
+    covered = 0
+    for battle_url in state.battle_urls:
+        if not state.is_fetched(battle_url):
+            continue
+        html = wikipedia_mod.read_article(params.paths.battles_html, battle_url)
+        qid = wikidata_mod.qid_from_article_html(html) if html else None
+        if qid is None:
+            logger.debug("battle_without_wikidata_item", url=battle_url)
+            continue
+
+        if state.is_fetched(wikidata_mod.entity_data_url(qid)):
+            covered += 1
+            continue
+        if limit is not None and fetched_now >= limit:
+            continue
+
+        result = await wikidata_mod.fetch_entity(fetcher, qid)
+        if _record(writer, state, summary, result) and result.text is not None:
+            _write_json(params.paths.wikidata, f"{qid}.json", result.text)
+            fetched_now += 1
+            covered += 1
+            if fetched_now % _STATE_SAVE_EVERY == 0:
+                save_state(state, params.paths.state_file)
+
+    summary.battle_entities = covered
+    logger.info("battle_entities_done", fetched=fetched_now, covered=covered)
+
+
+def _record_plan(
+    writer: CrawlLogWriter, params: CrawlParams, seeds: Seeds, state: CrawlState, covered: int
+) -> None:
+    """Write the run's accounting row for the quality gates.
+
+    ``targets`` and ``fetched`` count battle articles, not URLs of any kind, so
+    the gate cannot be satisfied by citations or list pages (the old gate
+    counted all 200s and reported 1986 "battles" for a 211-battle corpus).
+    ``floor`` is the absolute minimum: a list-page crawl must still find
+    thousands of battles, because a ratio alone would pass a run whose list
+    pages all failed to parse (targets=40, fetched=40). A named corpus is its
+    own target, so its floor is 0.
+
+    Args:
+        writer: The crawl_log sink.
+        params: Validated stage params.
+        seeds: Seed config.
+        state: Resume state after the run.
+        covered: Fetched battle articles whose Wikidata item is on disk.
+    """
+    targets = len(state.battle_urls)
+    fetched = sum(1 for url in state.battle_urls if state.is_fetched(url))
+    floor = params.min_battle_articles if seeds.battle_lists else 0
+    writer.record(
+        CrawlLogEntry(
+            url=(
+                f"{PLAN_URL_PREFIX}?targets={targets}&fetched={fetched}"
+                f"&entities={covered}&floor={floor}"
+            ),
+            fetched_at=utc_now(),
+            http_status=0,
+        )
+    )
 
 
 async def _crawl_wikidata(
@@ -632,8 +753,13 @@ async def crawl(
         await _crawl_battles(fetcher, params, state, writer, summary, limit)
         save_state(state, params.paths.state_file)
 
+        if params.fetch_battle_entities:
+            await _crawl_battle_entities(fetcher, params, state, writer, summary, limit)
+            save_state(state, params.paths.state_file)
+
         await _crawl_wikidata(fetcher, params, seeds, state, writer, summary)
     finally:
+        _record_plan(writer, params, seeds, state, summary.battle_entities)
         save_state(state, params.paths.state_file)
         writer.flush()
         if owned:

@@ -61,14 +61,19 @@ from pipeline.classifiers import (
     find_article_path,
     find_unclassified_battle_type_log_ids,
     infer_battle_type,
+    infer_siege_defenders,
+    load_battle_source_slugs,
     load_battle_wikipedia_urls,
     load_battles_needing_type,
     load_missingness_inputs,
     load_side_groups,
+    load_siege_sides,
     load_troop_evidence,
+    log_unlogged_troop_totals,
     read_article_text,
     select_excerpt,
     write_battle_type_decisions,
+    write_defender_flags,
     write_missingness_decisions,
     write_role_decisions,
 )
@@ -169,19 +174,22 @@ def _deterministic_roles(
     return decisions, pending
 
 
-def _load_article(raw_root: Path, wikipedia_url: str | None) -> tuple[str, list[str]]:
+def _load_article(
+    raw_root: Path, wikipedia_url: str | None, source_slug: str | None = None
+) -> tuple[str, list[str]]:
     """Read and clean a battle's raw article, if one exists on disk.
 
     Args:
         raw_root: The ``data/raw`` directory, or a test fixture root.
         wikipedia_url: The battle's stored URL, or None.
+        source_slug: The battle's crawl slug, or None.
 
     Returns:
         ``(cleaned text, categories)``, both empty when no article file was
         found or it could not be read -- a legitimate "no evidence" outcome
         for both the role excerpt and the battle-type inference that read it.
     """
-    path = find_article_path(raw_root, wikipedia_url)
+    path = find_article_path(raw_root, wikipedia_url, source_slug)
     if path is None:
         return "", []
     raw = read_article_text(path)
@@ -216,6 +224,7 @@ def _build_request_pairs(
     raw_root: Path,
     spec: dict[str, Any],
     excerpt_max_chars: int,
+    battle_slugs: dict[int, str | None] | None = None,
 ) -> list[tuple[SideGroup, LLMRequest]]:
     """Build one command-role request per already-identified pending side.
 
@@ -226,6 +235,8 @@ def _build_request_pairs(
         raw_root: The ``data/raw`` directory, or a test fixture root.
         spec: The loaded ``agents/classify.yaml``.
         excerpt_max_chars: The spec's ``params.excerpt_max_chars``.
+        battle_slugs: Every battle's crawl slug, keyed by battle id; preferred
+            over the URL when locating the article.
 
     Returns:
         One ``(side, request)`` pair per pending side, in the same order.
@@ -236,7 +247,11 @@ def _build_request_pairs(
     for side in pending:
         article_text = article_cache.get(side.battle_id)
         if article_text is None:
-            article_text, _categories = _load_article(raw_root, battle_urls.get(side.battle_id))
+            article_text, _categories = _load_article(
+                raw_root,
+                battle_urls.get(side.battle_id),
+                (battle_slugs or {}).get(side.battle_id),
+            )
             article_cache[side.battle_id] = article_text
 
         excerpt = _build_excerpt(article_text, [c.name for c in side.commanders], excerpt_max_chars)
@@ -276,7 +291,14 @@ def build_pending_role_requests(
         return []
 
     battle_urls = load_battle_wikipedia_urls(conn)
-    return _build_request_pairs(pending, battle_urls, raw_root, spec, excerpt_max_chars)
+    return _build_request_pairs(
+        pending,
+        battle_urls,
+        raw_root,
+        spec,
+        excerpt_max_chars,
+        load_battle_source_slugs(conn),
+    )
 
 
 def _tally_role_method(decision: RoleDecision, counts: ClassifyCounts) -> None:
@@ -409,7 +431,9 @@ def _infer_battle_types(
     decisions: list[BattleTypeDecision] = []
     for battle in load_battles_needing_type(conn):
         battle_id = battle["battle_id"]
-        article_text, categories = _load_article(raw_root, battle["wikipedia_url"])
+        article_text, categories = _load_article(
+            raw_root, battle["wikipedia_url"], battle.get("source_slug")
+        )
         branches, strengths = load_troop_evidence(conn, battle_id)
         decision = infer_battle_type(
             battle_id, battle["name"], article_text or None, categories, branches, strengths
@@ -418,6 +442,23 @@ def _infer_battle_types(
         counts.battles_typed += 1
         _tally_battle_type(decision, counts)
     return decisions
+
+
+def _siege_defender_flags(conn: Any) -> dict[int, bool]:
+    """Work out ``is_defender`` for every siege whose title names the besieged side.
+
+    Args:
+        conn: An open database connection. Read after the battle-type write,
+            so a siege typed in this same run is included.
+
+    Returns:
+        ``side_id`` to flag; sides the title does not settle are absent and
+        stay NULL.
+    """
+    flags: dict[int, bool] = {}
+    for name, sides in load_siege_sides(conn).values():
+        flags.update(infer_siege_defenders(name, sides))
+    return flags
 
 
 def _classify_missingness_rows(
@@ -497,7 +538,14 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
     decisions_by_side, pending = _deterministic_roles(groups)
 
     battle_urls = load_battle_wikipedia_urls(conn)
-    pairs = _build_request_pairs(pending, battle_urls, raw_root, spec, excerpt_max_chars)
+    pairs = _build_request_pairs(
+        pending,
+        battle_urls,
+        raw_root,
+        spec,
+        excerpt_max_chars,
+        load_battle_source_slugs(conn),
+    )
 
     service = LazyService(
         None
@@ -526,6 +574,10 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
     battle_type_decisions = _infer_battle_types(conn, raw_root, counts)
     observed_battle_ids = {d.battle_id for d in battle_type_decisions if d.battle_type != "unknown"}
     exclude_log_ids = find_unclassified_battle_type_log_ids(conn, observed_battle_ids)
+    if not ctx.dry_run:
+        # Before the missingness read, so a newly logged gap is classified in
+        # this same run rather than waiting for the next.
+        counts.troop_gaps_logged = log_unlogged_troop_totals(conn)
     missingness_decisions = _classify_missingness_rows(
         conn, counts, exclude_log_ids=exclude_log_ids
     )
@@ -537,6 +589,7 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
     write_role_decisions(conn, all_role_decisions)
     write_battle_type_decisions(conn, battle_type_decisions)
     write_missingness_decisions(conn, missingness_decisions)
+    counts.defenders_set = write_defender_flags(conn, _siege_defender_flags(conn))
 
     if service.built is not None:
         service.built.log_summary()
@@ -545,8 +598,9 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
     if offline is not None and offline.pending:
         pending_count = offline.pending
         batch_file = offline.flush("classify")
-        logger.info("llm_requests_deferred", stage="classify", count=pending_count,
-                    path=str(batch_file))
+        logger.info(
+            "llm_requests_deferred", stage="classify", count=pending_count, path=str(batch_file)
+        )
         outcome = StageOutcome(deferred_requests=pending_count, batch_file=batch_file)
 
     logger.info("classify_complete", **counts.as_dict())

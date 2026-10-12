@@ -57,6 +57,7 @@ __all__ = [
     "candidate_keys",
     "collect_query_names",
     "fetch_candidates",
+    "fetch_non_person_kinds",
     "person_candidates",
     "query_names",
 ]
@@ -114,14 +115,13 @@ _SPARQL_ESCAPES: Final[tuple[tuple[str, str], ...]] = (
 # the endpoint which name matched rather than working it out again afterwards
 # from the label alone, which silently discarded every alias-matched entity:
 # Wellington and Nelson both, until 2026-09-19.
-_LABEL_QUERY: Final[str] = """
+_PERSON_QUERY: Final[str] = """
 SELECT ?name ?person ?personLabel ?personDescription ?birth ?death
        (GROUP_CONCAT(DISTINCT ?countryLabel; separator=", ") AS ?countries)
        (GROUP_CONCAT(DISTINCT ?occupationLabel; separator=", ") AS ?occupations)
        (SAMPLE(?articleUrl) AS ?article) WHERE {{
   VALUES ?name {{ {names} }}
-  VALUES ?labelProp {{ rdfs:label skos:altLabel }}
-  ?person ?labelProp ?name .
+  {match}
   ?person wdt:P31 wd:Q5 .
   OPTIONAL {{ ?person wdt:P569 ?birth . }}
   OPTIONAL {{ ?person wdt:P570 ?death . }}
@@ -142,6 +142,47 @@ SELECT ?name ?person ?personLabel ?personDescription ?birth ?death
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{languages}" . }}
 }}
 GROUP BY ?name ?person ?personLabel ?personDescription ?birth ?death
+LIMIT {limit}
+"""
+
+# Exact: the entity's label or an alias IS the requested literal.
+_MATCH_BY_LABEL: Final[str] = (
+    "VALUES ?labelProp { rdfs:label skos:altLabel } ?person ?labelProp ?name ."
+)
+
+# Search: the entity is among the top hits for the name. This is the
+# fallback for a commander whose Wikidata label is longer than the name an
+# infobox writes, which an exact match cannot reach and which the 2026-10
+# pilot lost wholesale: Grouchy is "Emmanuel de Grouchy, Marquis de Grouchy",
+# Macdonald is "Etienne Jacques Joseph Alexandre Macdonald", Platov is
+# "Matvey Ivanovich Platov", Amr ibn al-As is "'Amr ibn al-'As", and
+# Schwarzenberg is "Karl Philipp, Prince of Schwarzenberg". The search is
+# ranked and wide, so a hit is only a *candidate*: the matcher's fuzzy
+# threshold, date gate and margin still decide whether it is linked.
+_SEARCH_LIMIT: Final[int] = 8
+_MATCH_BY_SEARCH: Final[str] = (
+    "SERVICE wikibase:mwapi { "
+    'bd:serviceParam wikibase:endpoint "www.wikidata.org" ; '
+    'wikibase:api "EntitySearch" ; '
+    "mwapi:search ?name ; "
+    'mwapi:language "en" ; '
+    f'mwapi:limit "{_SEARCH_LIMIT}" . '
+    "?person wikibase:apiOutputItem mwapi:item . }"
+)
+
+# Items sharing a label or alias with a mention, that are not people. One row
+# per name (GROUPed), so a common word cannot flood the result.
+_NON_PERSON_QUERY: Final[str] = """
+SELECT ?name (GROUP_CONCAT(DISTINCT ?kindLabel; separator="; ") AS ?kinds) WHERE {{
+  VALUES ?name {{ {names} }}
+  VALUES ?labelProp {{ rdfs:label skos:altLabel }}
+  ?item ?labelProp ?name .
+  FILTER NOT EXISTS {{ ?item wdt:P31 wd:Q5 }}
+  ?item wdt:P31 ?class .
+  ?class rdfs:label ?kindLabel .
+  FILTER(LANG(?kindLabel) = "en")
+}}
+GROUP BY ?name
 LIMIT {limit}
 """
 
@@ -218,6 +259,19 @@ class CandidateSource(Protocol):
         """
         ...
 
+    def non_person_kind(self, group: MentionGroup) -> str | None:
+        """Say what a group's name is, when Wikidata knows it as a non-person.
+
+        Args:
+            group: The mention group to look up.
+
+        Returns:
+            A short description such as ``"army group"`` when an item whose
+            label or alias is the mention exists and is not a human, otherwise
+            None. Only meaningful for a group that found no human candidate.
+        """
+        ...
+
 
 class NullCandidateSource:
     """A source that knows nothing, for dry runs and deterministic tests."""
@@ -240,6 +294,17 @@ class NullCandidateSource:
             An empty list, so every named group resolves to a new entity.
         """
         return []
+
+    def non_person_kind(self, group: MentionGroup) -> str | None:
+        """Know nothing about what a name is.
+
+        Args:
+            group: Ignored.
+
+        Returns:
+            None.
+        """
+        return None
 
 
 def _entities(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -483,6 +548,17 @@ class LocalCandidateSource:
                 found.setdefault(candidate.qid, candidate)
         return list(found.values())
 
+    def non_person_kind(self, group: MentionGroup) -> str | None:
+        """Report nothing; the local index holds only humans.
+
+        Args:
+            group: Ignored.
+
+        Returns:
+            None.
+        """
+        return None
+
 
 def _escape_sparql(value: str) -> str:
     """Escape a name for use inside a SPARQL string literal.
@@ -602,7 +678,9 @@ def _preferred_name(label: str, names: set[str], qid: str) -> str:
     return qid
 
 
-def _merge_rows(rows: Iterable[dict[str, str]]) -> list[tuple[Candidate, set[str]]]:
+def _merge_rows(
+    rows: Iterable[dict[str, str]], *, names_are_aliases: bool = True
+) -> list[tuple[Candidate, set[str]]]:
     """Fold SPARQL result rows into one candidate per person.
 
     One person yields a row per country-occupation combination, so the rows
@@ -610,6 +688,12 @@ def _merge_rows(rows: Iterable[dict[str, str]]) -> list[tuple[Candidate, set[str
 
     Args:
         rows: Flattened bindings from :func:`parse_sparql_bindings`.
+        names_are_aliases: Whether the requested names that hit an entity are
+            recorded as its aliases. True for an exact label or alias lookup,
+            where the name genuinely is one of the entity's own. False for a
+            ranked search, where the name merely resembles it: recording it as
+            an alias would hand the matcher an exact-match key and turn a
+            fuzzy hit into a 0.95-confidence link.
 
     Returns:
         One (candidate, matched names) pair per distinct person, in first-seen
@@ -673,7 +757,9 @@ def _merge_rows(rows: Iterable[dict[str, str]]) -> list[tuple[Candidate, set[str
                     qid=qid,
                     label=label,
                     description=str(entry["description"]),
-                    aliases=tuple(sorted(n for n in names if n != label)),
+                    aliases=(
+                        tuple(sorted(n for n in names if n != label)) if names_are_aliases else ()
+                    ),
                     birth_year=entry["birth"],
                     death_year=entry["death"],
                     country=", ".join(entry["countries"]),
@@ -735,6 +821,7 @@ async def fetch_candidates(
     names: Sequence[str],
     *,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    search: bool = False,
 ) -> dict[str, list[Candidate]]:
     """Ask the query service about many names, in batches.
 
@@ -750,6 +837,11 @@ async def fetch_candidates(
             the article API, not laxer.
         names: The surface forms to ask about.
         batch_size: Names per query.
+        search: Ask for the entities a ranked name search returns instead of
+            those whose label or alias equals the name. The fallback for names
+            the exact lookup could not place; see :data:`_MATCH_BY_SEARCH`.
+            A search-wide failure degrades to "no extra candidates" rather
+            than raising, because the exact lookup has already run.
 
     Returns:
         Each requested name mapped to its candidates. A name that was asked
@@ -784,8 +876,13 @@ async def fetch_candidates(
         for name in batch:
             by_name.setdefault(name, [])
 
-        query = _LABEL_QUERY.format(
-            names=" ".join(literal for name in batch for literal in _sparql_literals(name)),
+        if search:
+            literals = [f'"{_escape_sparql(name)}"' for name in batch]
+        else:
+            literals = [literal for name in batch for literal in _sparql_literals(name)]
+        query = _PERSON_QUERY.format(
+            names=" ".join(literals),
+            match=_MATCH_BY_SEARCH if search else _MATCH_BY_LABEL,
             languages=",".join(_NAME_LANGUAGE_TAGS),
             limit=_QUERY_ROW_LIMIT,
         )
@@ -814,7 +911,7 @@ async def fetch_candidates(
                 limit=_QUERY_ROW_LIMIT,
             )
 
-        candidates = _merge_rows(rows)
+        candidates = _merge_rows(rows, names_are_aliases=not search)
         indexed = 0
         requested = {fold(name): name for name in batch}
         for candidate, matched_names in candidates:
@@ -826,10 +923,8 @@ async def fetch_candidates(
                 for folded in (fold(n) for n in matched_names)
                 if folded in requested
             }
-            if not targets:
-                targets = {
-                    name for name in batch if fold(name) in set(candidate_keys(candidate))
-                }
+            if not targets and not search:
+                targets = {name for name in batch if fold(name) in set(candidate_keys(candidate))}
             for name in targets:
                 by_name[name].append(candidate)
                 indexed += 1
@@ -841,7 +936,9 @@ async def fetch_candidates(
             indexed=indexed,
         )
 
-    if batches and failed == batches:
+    if batches and failed == batches and search:
+        logger.warning("sparql_search_lookup_failed", batches=batches, error=last_error)
+    elif batches and failed == batches:
         logger.error(
             "sparql_candidate_lookup_total_failure",
             batches=batches,
@@ -864,6 +961,69 @@ async def fetch_candidates(
     return by_name
 
 
+# Wikidata classes that are about the *name*, not about a thing the name denotes.
+_NAME_LIKE_CLASS: Final[re.Pattern[str]] = re.compile(
+    r"name|nomen|disambiguation|taxon|asteroid|article|deity|demigod|mytholog|fictional",
+    re.IGNORECASE,
+)
+
+
+async def fetch_non_person_kinds(
+    fetcher: Fetcher,
+    names: Sequence[str],
+    *,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> dict[str, str]:
+    """Find which names are the label or alias of something that is not a human.
+
+    This is the Wikidata half of the non-person filter (instance of something
+    other than Q5). "Stavka", "Jena" and "Liechtenstein" are all exact labels
+    of items, and none of those items is a man.
+
+    Args:
+        fetcher: A configured fetcher, supplying rate limiting and retries.
+        names: Surface forms that found no human candidate.
+        batch_size: Names per query.
+
+    Returns:
+        Each name that matched a non-human item, mapped to up to three of that
+        item's classes ("army group; military formation"). A name matching
+        nothing is absent. A failed batch is logged and skipped: the cost of
+        missing one is a mention staying a general, which is what happened
+        before this filter existed.
+    """
+    kinds: dict[str, str] = {}
+    size = max(1, batch_size)
+
+    for start in range(0, len(names), size):
+        batch = list(names[start : start + size])
+        query = _NON_PERSON_QUERY.format(
+            names=" ".join(literal for name in batch for literal in _sparql_literals(name)),
+            limit=_QUERY_ROW_LIMIT,
+        )
+        result = await run_query(fetcher, query)
+        if not result.ok or not result.text:
+            logger.warning("sparql_non_person_batch_failed", names=len(batch), error=result.error)
+            continue
+
+        requested = {fold(name): name for name in batch}
+        for row in parse_sparql_bindings(result.text):
+            name = requested.get(fold(row.get("name", "")))
+            if name is None or name in kinds:
+                continue
+            classes = [part.strip() for part in row.get("kinds", "").split(";") if part.strip()]
+            # A name that is also a disambiguation page, a family name, a Roman
+            # nomen or a myth is how most real people appear here ("Servilius
+            # Geminus", "Alexey Yermolov"), and says nothing against them.
+            # Only a class that is not name-like counts as evidence.
+            real = sorted({c for c in classes if not _NAME_LIKE_CLASS.search(c)})
+            if real:
+                kinds[name] = "; ".join(real[:3])
+
+    logger.info("sparql_non_person_complete", names=len(names), non_person=len(kinds))
+    return kinds
+
+
 class PrefetchedCandidateSource:
     """Candidates already fetched, served by name.
 
@@ -878,6 +1038,7 @@ class PrefetchedCandidateSource:
         by_name: dict[str, list[Candidate]],
         *,
         max_names_per_group: int = DEFAULT_MAX_NAMES_PER_GROUP,
+        non_person: dict[str, str] | None = None,
     ) -> None:
         """Wrap a prefetched mapping as a candidate source.
 
@@ -887,9 +1048,50 @@ class PrefetchedCandidateSource:
             max_names_per_group: Must match what the prefetch used, or a
                 group's later forms will be looked up under keys that were
                 never fetched.
+            non_person: Surface form to the class of non-human item it names,
+                from :func:`fetch_non_person_kinds`.
         """
         self._by_name = by_name
         self._limit = max(1, max_names_per_group)
+        self._non_person = non_person or {}
+
+    def extend(self, extra: dict[str, list[Candidate]]) -> None:
+        """Add candidates from a second lookup, keeping the first one's order.
+
+        Args:
+            extra: Surface form to candidates, e.g. from a ranked search. An
+                entity a name already has is not added again.
+        """
+        for name, found in extra.items():
+            present = self._by_name.setdefault(name, [])
+            known = {candidate.qid for candidate in present}
+            for candidate in found:
+                if candidate.qid not in known:
+                    present.append(candidate)
+                    known.add(candidate.qid)
+
+    def set_non_person(self, kinds: dict[str, str]) -> None:
+        """Record which names are the label of a non-human item.
+
+        Args:
+            kinds: From :func:`fetch_non_person_kinds`.
+        """
+        self._non_person.update(kinds)
+
+    def non_person_kind(self, group: MentionGroup) -> str | None:
+        """Say what a group's name is when Wikidata knows it as a non-person.
+
+        Args:
+            group: The mention group.
+
+        Returns:
+            The class of the non-human item a queried name matched, or None.
+        """
+        for name in query_names(group, self._limit):
+            kind = self._non_person.get(name)
+            if kind:
+                return kind
+        return None
 
     def prefetch(self, groups: Sequence[MentionGroup]) -> None:
         """Do nothing; the fetching already happened.

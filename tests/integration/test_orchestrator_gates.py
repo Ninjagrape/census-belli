@@ -94,9 +94,7 @@ def test_error_severity_failure_fails_the_stage(stub_stage) -> None:
       missing_data_all_logged    "= 0"    error   <- violated below
     """
     stub_stage("classify")
-    # max_stage_retries is 2, so the gate runs three times; the data is still
-    # bad on every attempt.
-    conn = ScriptedConnection([10, 2, 47] * 3)  # 47 sides missing a log entry
+    conn = ScriptedConnection([10, 2, 47])  # 47 sides missing a log entry
 
     result = orchestrator.run_stage("classify", db_conn=conn)
 
@@ -144,16 +142,29 @@ def test_no_connection_fails_rather_than_passes(stub_stage) -> None:
 # ─── Retry behaviour ─────────────────────────────────────────────────────────
 
 
-def test_failing_gate_consumes_retries(stub_stage) -> None:
-    """classify.yaml sets max_stage_retries: 2, so the gate runs three times."""
+def test_failing_gate_does_not_retry_by_default(stub_stage) -> None:
+    """classify.yaml leaves retry_on_gate_failure unset, so a gate failure is final."""
     stub_stage("classify")
     conn = ScriptedConnection([10, 2, 47] * 3)
 
     result = orchestrator.run_stage("classify", db_conn=conn)
 
     assert result.success is False
+    assert result.retries_used == 0
+    assert conn.calls == 3  # 3 checks x 1 attempt
+
+
+def test_failing_gate_retries_when_policy_opts_in(stub_stage) -> None:
+    """crawl.yaml sets retry_on_gate_failure: true and max_stage_retries: 2."""
+    stub_stage("crawl")
+    # min_battles_crawled, battle_articles_fetched_ratio (fails), error rate, wikidata coverage.
+    conn = ScriptedConnection([5, 0.01, 0.0, 1.0] * 3)
+
+    result = orchestrator.run_stage("crawl", db_conn=conn)
+
+    assert result.success is False
     assert result.retries_used == 2
-    assert conn.calls == 9  # 3 checks x 3 attempts
+    assert conn.calls == 12  # 4 checks x 3 attempts
 
 
 # ─── on_failure is honoured ──────────────────────────────────────────────────
@@ -167,7 +178,7 @@ def test_continue_with_logging_does_not_halt_pipeline(stub_stage) -> None:
     """
     stub_stage("classify")
     stub_stage("impute")
-    conn = ScriptedConnection([10, 2, 47] * 3)  # classify fails all attempts
+    conn = ScriptedConnection([10, 2, 47])  # classify fails its one attempt
 
     results = orchestrator.run_pipeline(
         ["classify", "impute"],
@@ -186,13 +197,14 @@ def test_pause_and_alert_halts_pipeline(stub_stage) -> None:
     """crawl.yaml sets on_failure: pause_and_alert, so a failure stops the run.
 
     crawl.yaml's checks in order:
-      min_battles_crawled        ">= 3000"  error   <- violated below
-      error_rate_below_threshold "< 0.10"   warning
-      wikidata_coverage          ">= 1000"  warning
+      min_battles_crawled           ">= 0"    error   <- violated below
+      battle_articles_fetched_ratio ">= 0.95" error
+      error_rate_below_threshold    "< 0.10"  warning
+      wikidata_coverage             ">= 0.9"  warning
     """
     stub_stage("crawl")
     stub_stage("extract")
-    conn = ScriptedConnection([5, 0.01, 2000] * 3)  # only 5 battles crawled
+    conn = ScriptedConnection([-2995, 0.01, 0.5, 0.0] * 3)  # 5 battles against a 3000 floor
 
     results = orchestrator.run_pipeline(
         ["crawl", "extract"],
@@ -208,7 +220,7 @@ def test_pause_and_alert_halts_pipeline(stub_stage) -> None:
 def test_no_stop_on_error_runs_everything(stub_stage) -> None:
     stub_stage("crawl")
     stub_stage("extract")
-    conn = ScriptedConnection([5, 0.01, 2000] * 3 + [0.9, 2.5, 10])
+    conn = ScriptedConnection([-2995, 0.01, 0.5, 0.0] * 3 + [0.9, 2.5, 10])
 
     results = orchestrator.run_pipeline(
         ["crawl", "extract"],

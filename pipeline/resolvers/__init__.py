@@ -34,6 +34,7 @@ from pipeline.resolvers.candidates import (
     candidate_keys,
     collect_query_names,
     fetch_candidates,
+    fetch_non_person_kinds,
     person_candidates,
     query_names,
 )
@@ -58,6 +59,7 @@ from pipeline.resolvers.names import (
     is_placeholder,
     is_title_free,
     name_keys,
+    non_person_reason,
 )
 from pipeline.resolvers.records import (
     METHODS,
@@ -71,6 +73,7 @@ from pipeline.resolvers.records import (
     to_jsonable,
 )
 from pipeline.resolvers.store import (
+    NON_PERSON_FIELD,
     UNRESOLVED_FIELD,
     load_battle_index,
     load_side_index,
@@ -81,6 +84,7 @@ from pipeline.resolvers.store import (
 __all__ = [
     "AMBIGUITY_MARGIN",
     "METHODS",
+    "NON_PERSON_FIELD",
     "UNRESOLVED_FIELD",
     "BattleContext",
     "Candidate",
@@ -102,6 +106,7 @@ __all__ = [
     "collect_query_names",
     "disambiguate",
     "fetch_candidates",
+    "fetch_non_person_kinds",
     "find_duplicate_battles",
     "fold",
     "format_candidates",
@@ -117,6 +122,7 @@ __all__ = [
     "match_against_identities",
     "match_group",
     "name_keys",
+    "non_person_reason",
     "person_candidates",
     "prompt_parts",
     "query_names",

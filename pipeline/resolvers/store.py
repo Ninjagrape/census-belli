@@ -36,10 +36,12 @@ from pipeline.extractors.store import source_id
 from pipeline.resolvers.records import Identity, Mention, ResolveCounts
 
 __all__ = [
+    "NON_PERSON_FIELD",
     "UNRESOLVED_FIELD",
     "load_battle_index",
     "load_side_index",
     "log_unresolved",
+    "year_to_date_literal",
     "write_identity",
 ]
 
@@ -53,7 +55,14 @@ _QID_SHAPE: Final[re.Pattern[str]] = re.compile(r"Q\d+")
 # every row carrying it before writing, so nothing else may use it.
 UNRESOLVED_FIELD: Final[str] = "commander_general_id"
 
-_LOAD_BATTLES = text("SELECT battle_id, name FROM battles")
+# Mentions that name an organisation or a place rather than a person. Logged so
+# the filter is auditable, but under a field of their own: they are not
+# commander mentions the stage failed on, so counting them in the
+# ``resolution_rate`` denominator would charge the stage for refusing to invent
+# a general. Resolve clears this field too before writing.
+NON_PERSON_FIELD: Final[str] = "commander_non_person"
+
+_LOAD_BATTLES = text("SELECT battle_id, name, source_slug FROM battles")
 _LOAD_SIDES = text("SELECT side_id, battle_id, side_label FROM battle_sides")
 
 _FIND_GENERAL_BY_QID = text("SELECT general_id FROM generals WHERE wikidata_id = :wikidata_id")
@@ -67,12 +76,14 @@ _FIND_GENERAL_BY_NAME = text(
 _INSERT_GENERAL = text(
     """
     INSERT INTO generals (
-        canonical_name, wikidata_id, wikipedia_url, nationality, years_active, notes
+        canonical_name, wikidata_id, wikipedia_url, nationality, years_active, notes,
+        born, died, era
     ) VALUES (
         :canonical_name, :wikidata_id, :wikipedia_url, :nationality,
         CASE WHEN CAST(:year_lo AS INT) IS NULL THEN NULL
              ELSE int4range(CAST(:year_lo AS INT), CAST(:year_hi AS INT)) END,
-        :notes
+        :notes,
+        CAST(:born AS DATE), CAST(:died AS DATE), :era
     )
     RETURNING general_id
     """
@@ -94,6 +105,11 @@ _UPDATE_GENERAL = text(
                          CAST(:year_hi AS INT))
             )
         END,
+        -- COALESCE, like wikidata_id: a re-run that linked nothing new must not
+        -- blank a biography an earlier run took from Wikidata.
+        born       = COALESCE(CAST(:born AS DATE), born),
+        died       = COALESCE(CAST(:died AS DATE), died),
+        era        = COALESCE(:era, era),
         notes      = :notes,
         updated_at = now()
     WHERE general_id = :general_id
@@ -109,8 +125,7 @@ _FIND_ALIASES = text("SELECT alias_name FROM general_aliases WHERE general_id = 
 # old primary row would survive beside the new one and the general would have
 # two. Clear the flag before writing rather than discover it in the data.
 _CLEAR_PRIMARY_ALIAS = text(
-    "UPDATE general_aliases SET is_primary = FALSE "
-    "WHERE general_id = :general_id AND is_primary"
+    "UPDATE general_aliases SET is_primary = FALSE WHERE general_id = :general_id AND is_primary"
 )
 _INSERT_ALIAS = text(
     "INSERT INTO general_aliases (general_id, alias_name, source_id, is_primary) "
@@ -150,7 +165,7 @@ _UPSERT_COMMANDER = text(
     """
 )
 
-_CLEAR_UNRESOLVED = text(
+_CLEAR_LOGGED = text(
     "DELETE FROM missing_data_log WHERE field_name = :field_name AND was_imputed = FALSE"
 )
 _INSERT_UNRESOLVED = text(
@@ -162,7 +177,7 @@ _INSERT_UNRESOLVED = text(
 
 
 def load_battle_index(conn: Any) -> dict[str, int]:
-    """Map battle names onto their ids.
+    """Map battle slugs, and unambiguous battle names, onto their ids.
 
     One query rather than a lookup per mention: a corpus produces far more
     commander mentions than battles, and the index is read once per row.
@@ -171,14 +186,23 @@ def load_battle_index(conn: Any) -> dict[str, int]:
         conn: An open database connection.
 
     Returns:
-        Battle name to id. A duplicated name keeps the lowest id, matching
-        the ``LIMIT 1`` the extract writer resolves such a collision with.
+        Every battle's ``source_slug`` to its id, which is unique per
+        article. A display name is added as a second key only when exactly
+        one battle carries it, because two articles can share a name (two
+        battles called "Battle of Luetzen") and picking one would attach a
+        commander to the wrong battle. A caller holding a mention should
+        try its ``battle_slug`` first; the name key serves rows that
+        predate the slug column.
     """
     index: dict[str, int] = {}
-    for battle_id, name in conn.execute(_LOAD_BATTLES).fetchall():
-        key = str(name)
-        if key not in index or int(battle_id) < index[key]:
-            index[key] = int(battle_id)
+    by_name: dict[str, list[int]] = {}
+    for battle_id, name, slug in conn.execute(_LOAD_BATTLES).fetchall():
+        by_name.setdefault(str(name), []).append(int(battle_id))
+        if slug:
+            index[str(slug)] = int(battle_id)
+    for name, ids in by_name.items():
+        if len(ids) == 1:
+            index.setdefault(name, ids[0])
     return index
 
 
@@ -215,6 +239,29 @@ def _years_active(identity: Identity) -> tuple[int | None, int | None]:
     return min(years), max(years) + 1
 
 
+def year_to_date_literal(year: int | None) -> str | None:
+    """Render an astronomical year as a PostgreSQL date literal.
+
+    ``generals.born`` and ``died`` are DATEs, and Wikidata candidates reach this
+    stage as years only, so the date written is 1 January of that year. The
+    precision is the year's: nothing reads the month, and the generated
+    ``born_year_astronomical`` / ``died_year_astronomical`` columns are the
+    ones to use, because ``datetime.date`` cannot hold a BC value.
+
+    Args:
+        year: An astronomical year (1 BC is 0), or None.
+
+    Returns:
+        ``"1769-01-01"`` or, for 44 BC (astronomical -43), ``"0044-01-01 BC"``.
+        None when the year is unknown.
+    """
+    if year is None:
+        return None
+    if year >= 1:
+        return f"{year:04d}-01-01"
+    return f"{1 - year:04d}-01-01 BC"
+
+
 def _general_params(identity: Identity) -> dict[str, Any]:
     """Build the parameters shared by the insert and the update.
 
@@ -232,6 +279,9 @@ def _general_params(identity: Identity) -> dict[str, Any]:
         "nationality": identity.nationality or None,
         "year_lo": year_lo,
         "year_hi": year_hi,
+        "born": year_to_date_literal(identity.birth_year),
+        "died": year_to_date_literal(identity.death_year),
+        "era": identity.era,
         "notes": f"resolved by {identity.method} (confidence {identity.confidence:.2f})",
     }
 
@@ -336,9 +386,7 @@ def _write_aliases(conn: Any, identity: Identity, general_id: int, source: int |
             continue
         if alias in known:
             if alias == primary:
-                conn.execute(
-                    _SET_PRIMARY_ALIAS, {"general_id": general_id, "alias_name": alias}
-                )
+                conn.execute(_SET_PRIMARY_ALIAS, {"general_id": general_id, "alias_name": alias})
             continue
         conn.execute(
             _INSERT_ALIAS,
@@ -380,16 +428,21 @@ def write_identity(
     sides: dict[tuple[int, str], int],
     counts: ResolveCounts,
     source_cache: dict[tuple[str, str], int],
+    unplaced: list[Mention] | None = None,
 ) -> int | None:
     """Persist one resolved person and every battle they commanded in.
 
     Args:
         conn: An open database connection.
         identity: The resolved person, with all their mentions.
-        battles: Battle name to id, from :func:`load_battle_index`.
+        battles: Battle slug and unambiguous name to id, from :func:`load_battle_index`.
         sides: Side id by (battle id, label), from :func:`load_side_index`.
         counts: Counters to accumulate into.
         source_cache: Per-run memo of source ids.
+        unplaced: Receives every mention whose battle or side is not in the
+            database, so the caller can log it. Without this the mention was
+            counted and then forgotten, and the ``resolution_rate`` gate never
+            saw it.
 
     Returns:
         The general id, or None when the identity had no mention that could
@@ -404,10 +457,13 @@ def write_identity(
     placements: list[tuple[Mention, int, int, float]] = []
     for group in identity.groups:
         for mention in group.mentions:
-            battle_id = battles.get(mention.battle_name)
+            # Slug first: it is unique per article, whereas two battles can share a name.
+            battle_id = battles.get(mention.battle_slug) or battles.get(mention.battle_name)
             if battle_id is None:
                 counts.battles_not_in_db += 1
                 logger.debug("resolve_battle_not_in_database", battle=mention.battle_name)
+                if unplaced is not None:
+                    unplaced.append(mention)
                 continue
             side_id = sides.get((battle_id, mention.side_label))
             if side_id is None:
@@ -417,6 +473,8 @@ def write_identity(
                     battle=mention.battle_name,
                     side=mention.side_label,
                 )
+                if unplaced is not None:
+                    unplaced.append(mention)
                 continue
             placements.append((mention, battle_id, side_id, group.confidence))
 
@@ -460,6 +518,55 @@ def write_identity(
     return general_id
 
 
+def _log_mentions(
+    conn: Any,
+    mentions: list[Mention],
+    battles: dict[str, int],
+    sides: dict[tuple[int, str], int],
+    counts: ResolveCounts,
+    *,
+    field_name: str,
+    missingness: str,
+    note: str,
+) -> list[Mention]:
+    """Insert one ``missing_data_log`` row per mention that has a battle.
+
+    Args:
+        conn: An open database connection.
+        mentions: The mentions to record.
+        battles: Battle name to id.
+        sides: Side id by (battle id, label).
+        counts: Counters to accumulate into.
+        field_name: The ``missing_data_log.field_name`` to write under.
+        missingness: A ``missingness_class`` member.
+        note: Text put in front of the commander's name in ``notes``.
+
+    Returns:
+        The mentions whose battle is not in the database. ``battle_id`` is
+        NOT NULL with a foreign key, so there is nowhere in that table to put
+        them; the caller writes them to a file instead.
+    """
+    homeless: list[Mention] = []
+    for mention in mentions:
+        battle_id = battles.get(mention.battle_name)
+        if battle_id is None:
+            homeless.append(mention)
+            continue
+
+        conn.execute(
+            _INSERT_UNRESOLVED,
+            {
+                "battle_id": battle_id,
+                "side_id": sides.get((battle_id, mention.side_label)),
+                "field_name": field_name,
+                "missingness": missingness,
+                "notes": f"{note}: {mention.name[:200]}",
+            },
+        )
+        counts.missing_rows += 1
+    return homeless
+
+
 def log_unresolved(
     conn: Any,
     mentions: list[Mention],
@@ -468,8 +575,22 @@ def log_unresolved(
     counts: ResolveCounts,
     *,
     clear_first: bool = True,
-) -> None:
-    """Record the mentions this run could not turn into a general.
+    unplaced: list[Mention] | None = None,
+    non_person: list[Mention] | None = None,
+) -> list[Mention]:
+    """Record every commander mention this run did not turn into a row.
+
+    Three kinds, all of which the ``resolution_rate`` gate has to see or it
+    reads high:
+
+    - ``mentions``: groups the matcher left unresolved (``UNRESOLVED_FIELD``,
+      MNAR: they go unresolved because of how obscure the person is).
+    - ``unplaced``: mentions that did resolve to a general but whose side is
+      not in the database, so no ``battle_commanders`` row could be written
+      (``UNRESOLVED_FIELD``, unclassified: a pipeline fault, not obscurity).
+    - ``non_person``: mentions naming an organisation or place
+      (``NON_PERSON_FIELD``), logged for audit and deliberately outside the
+      gate's denominator.
 
     Args:
         conn: An open database connection.
@@ -480,33 +601,64 @@ def log_unresolved(
         clear_first: Whether to delete this stage's previous rows. True on a
             normal run, so the log reflects this run rather than the union of
             every run.
+        unplaced: Mentions of resolved people that could not be attached.
+        non_person: Mentions the non-person filter refused.
+
+    Returns:
+        The mentions that could not be logged because their battle is not in
+        the database, for the caller to write to a file.
 
     Note:
         The extract stage clears *all* un-imputed ``missing_data_log`` rows
-        for a battle it rewrites, so re-running extract after resolve drops
-        these. Running resolve again restores them, and the pipeline runs the
-        stages in that order anyway.
+        for a battle it rewrites (``_CLEAR_MISSING`` in
+        :mod:`pipeline.extractors.store` has no field filter), so re-running
+        extract after resolve drops these rows while leaving
+        ``battle_commanders`` intact. The gate then divides by a denominator
+        that has quietly lost its misses. Running resolve again restores
+        them.
     """
     if clear_first:
-        conn.execute(_CLEAR_UNRESOLVED, {"field_name": UNRESOLVED_FIELD})
+        conn.execute(_CLEAR_LOGGED, {"field_name": UNRESOLVED_FIELD})
+        conn.execute(_CLEAR_LOGGED, {"field_name": NON_PERSON_FIELD})
 
+    homeless: list[Mention] = []
     for mention in mentions:
-        battle_id = battles.get(mention.battle_name)
-        if battle_id is None:
+        if mention.battle_name not in battles:
             counts.battles_not_in_db += 1
-            continue
 
-        conn.execute(
-            _INSERT_UNRESOLVED,
-            {
-                "battle_id": battle_id,
-                "side_id": sides.get((battle_id, mention.side_label)),
-                "field_name": UNRESOLVED_FIELD,
-                # Not random: a mention goes unresolved because of what it
-                # says and how obscure its subject is, and obscurity relates
-                # to the commander's own record.
-                "missingness": "mnar",
-                "notes": f"unresolved commander mention: {mention.name[:200]}",
-            },
+    homeless.extend(
+        _log_mentions(
+            conn,
+            mentions,
+            battles,
+            sides,
+            counts,
+            field_name=UNRESOLVED_FIELD,
+            missingness="mnar",
+            note="unresolved commander mention",
         )
-        counts.missing_rows += 1
+    )
+    homeless.extend(
+        _log_mentions(
+            conn,
+            unplaced or [],
+            battles,
+            sides,
+            counts,
+            field_name=UNRESOLVED_FIELD,
+            missingness="unclassified",
+            note="resolved commander mention with no battle or side row",
+        )
+    )
+    _log_mentions(
+        conn,
+        non_person or [],
+        battles,
+        sides,
+        counts,
+        field_name=NON_PERSON_FIELD,
+        missingness="unclassified",
+        note="non-person commander mention",
+    )
+    counts.unplaced_rows += len(homeless)
+    return homeless

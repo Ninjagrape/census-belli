@@ -34,6 +34,11 @@ params:
   user_agent: "GeneralWAR/0.1 (academic research; contact@example.com)"
   # crawl depth: how many citation hops from a battle article
   citation_depth: 1
+  # Fewest battle articles a list-page crawl must fetch (min_battles_crawled).
+  # Not applied to a named corpus (wikipedia_battle_articles with no lists).
+  min_battle_articles: 3000
+  # Fetch each fetched article's own Wikidata item (Q-id read from the HTML).
+  fetch_battle_entities: true
   # only fetch citations from these domains (others are logged but skipped)
   citation_allow_domains:
     - jstor.org
@@ -47,16 +52,48 @@ params:
 prompt: null  # crawl stage is deterministic, no LLM needed
 
 quality_checks:
+  # The first, second and fourth checks read the accounting row that the stage
+  # writes at the end of every run (pipeline/stages/crawl.py::_record_plan):
+  #   crawl-plan://battle-articles?targets=T&fetched=F&entities=E&floor=N
+  # T is the battle articles the run was asked for (named corpus, or discovered
+  # from list pages), F how many of them are fetched, E how many of those have
+  # their Wikidata item on disk, N the absolute floor (min_battle_articles for a
+  # list-page crawl, 0 for a named corpus). The latest row wins, so a re-run
+  # that completes the corpus supersedes an earlier partial one. These cannot be
+  # derived from per-URL crawl_log rows: a resumed run does not re-log what an
+  # earlier run (or an earlier database) already fetched, and citations, list
+  # pages and Wikidata payloads all log 200s too (1986 citation rows on the
+  # 211-battle pilot satisfied the old "COUNT(DISTINCT url) >= 3000" shape).
   - name: min_battles_crawled
-    # Counts distinct successfully fetched URLs, not battle_id. battle_id is a
-    # FK to battles, and battles has no rows until the extract stage runs, so
-    # every crawl_log row written by this stage necessarily has battle_id NULL.
-    # COUNT(DISTINCT battle_id) is therefore always 0 and this ERROR gate could
-    # never pass, halting the pipeline after every crawl.
-    # The handful of seed list pages are counted too, which is immaterial
-    # against a threshold of 3000.
-    check: "SELECT COUNT(DISTINCT url) FROM crawl_log WHERE http_status = 200"
-    threshold: ">= 3000"
+    # Slack above the floor: fetched articles minus the absolute minimum. A
+    # list-page crawl needs thousands of battles (floor = params.min_battle_articles)
+    # or the lists failed to parse; a named corpus has floor 0 and is judged by
+    # the ratio check below.
+    check: >
+      WITH plan AS (
+        SELECT url FROM crawl_log
+        WHERE url LIKE 'crawl-plan://battle-articles?%'
+        ORDER BY fetched_at DESC, crawl_id DESC LIMIT 1
+      )
+      SELECT (regexp_match(url, 'fetched=([0-9]+)'))[1]::int
+           - (regexp_match(url, 'floor=([0-9]+)'))[1]::int
+      FROM plan
+    threshold: ">= 0"
+    severity: error
+
+  - name: battle_articles_fetched_ratio
+    # Passes on a complete named corpus (211/211 = 1.0) and fails when more than
+    # 5% of the targeted articles were not fetched, whatever the corpus size.
+    check: >
+      WITH plan AS (
+        SELECT url FROM crawl_log
+        WHERE url LIKE 'crawl-plan://battle-articles?%'
+        ORDER BY fetched_at DESC, crawl_id DESC LIMIT 1
+      )
+      SELECT (regexp_match(url, 'fetched=([0-9]+)'))[1]::float
+           / NULLIF((regexp_match(url, 'targets=([0-9]+)'))[1]::float, 0)
+      FROM plan
+    threshold: ">= 0.95"
     severity: error
 
   - name: error_rate_below_threshold
@@ -64,14 +101,26 @@ quality_checks:
       SELECT COUNT(*) FILTER (WHERE http_status >= 400 OR http_status IS NULL)::float
            / NULLIF(COUNT(*), 0)
       FROM crawl_log
+      WHERE url NOT LIKE 'crawl-plan://%'
     threshold: "< 0.10"
     severity: warning
 
   - name: wikidata_coverage
-    check: "SELECT COUNT(*) FROM crawl_log WHERE url LIKE '%wikidata%' AND http_status = 200"
-    threshold: ">= 1000"
+    # Fraction of fetched battle articles whose own Wikidata item is on disk,
+    # so the bar scales with the corpus instead of the old absolute 1000.
+    check: >
+      WITH plan AS (
+        SELECT url FROM crawl_log
+        WHERE url LIKE 'crawl-plan://battle-articles?%'
+        ORDER BY fetched_at DESC, crawl_id DESC LIMIT 1
+      )
+      SELECT (regexp_match(url, 'entities=([0-9]+)'))[1]::float
+           / NULLIF((regexp_match(url, 'fetched=([0-9]+)'))[1]::float, 0)
+      FROM plan
+    threshold: ">= 0.9"
     severity: warning
 
 retry_policy:
   max_stage_retries: 2
+  retry_on_gate_failure: true       # resumes from crawl_state.json, so a retry makes progress
   on_failure: pause_and_alert

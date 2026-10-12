@@ -124,8 +124,9 @@ def _candidate(qid: str, label: str, born: int | None, died: int | None, **kw: A
 class _StubSource:
     """A candidate source returning a fixed list for every group."""
 
-    def __init__(self, candidates: list[Candidate]) -> None:
+    def __init__(self, candidates: list[Candidate], non_person: str | None = None) -> None:
         self.candidates = candidates
+        self.non_person = non_person
         self.prefetched = 0
 
     def prefetch(self, groups: Any) -> None:
@@ -133,6 +134,9 @@ class _StubSource:
 
     def search(self, group: MentionGroup) -> list[Candidate]:
         return list(self.candidates)
+
+    def non_person_kind(self, group: MentionGroup) -> str | None:
+        return self.non_person
 
 
 class _StubService:

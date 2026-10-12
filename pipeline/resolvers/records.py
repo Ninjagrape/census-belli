@@ -39,6 +39,7 @@ METHODS: Final[tuple[str, ...]] = (
     "llm_disambiguation",  # the deterministic steps left it ambiguous
     "new_entity",  # no viable candidate; a corpus-local identity
     "placeholder",  # the mention names nobody ("Unknown", "various")
+    "non_person",  # the mention names an organisation, formation or place, not a person
     "llm_failed",  # the disambiguation call did not return usable data
     "llm_deferred",  # the disambiguation request awaits offline processing
 )
@@ -231,6 +232,11 @@ class Identity:
     aliases: list[str] = field(default_factory=list)
     groups: list[MentionGroup] = field(default_factory=list)
     general_id: int | None = None
+    # Biography from the linked Wikidata candidate, as astronomical years.
+    # None for a corpus-local identity: nothing in this corpus dates a person.
+    birth_year: int | None = None
+    death_year: int | None = None
+    era: str | None = None
 
     @property
     def mentions(self) -> list[Mention]:
@@ -260,6 +266,8 @@ class ResolveCounts:
         self.missing_rows = 0
         self.battles_not_in_db = 0
         self.sides_not_in_db = 0
+        self.unplaced_rows = 0
+        self.non_person_mentions = 0
         self.duplicate_battles = 0
         self.failed_identities = 0
 
@@ -283,6 +291,8 @@ class ResolveCounts:
             "missing_rows": self.missing_rows,
             "battles_not_in_db": self.battles_not_in_db,
             "sides_not_in_db": self.sides_not_in_db,
+            "unplaced_rows": self.unplaced_rows,
+            "non_person_mentions": self.non_person_mentions,
             "duplicate_battles": self.duplicate_battles,
             "failed_identities": self.failed_identities,
         }

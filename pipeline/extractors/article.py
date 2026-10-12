@@ -20,8 +20,8 @@ what the model is asked and the request hash stays stable across runs.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Iterator, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Iterator, MutableSet, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Any, Final, TypeVar
 
 import structlog
@@ -48,6 +48,7 @@ __all__ = [
     "Passage",
     "build_passages",
     "clean_article_text",
+    "drop_repeated_passages",
     "extract_from_passages",
     "iter_batches",
     "payload_to_extraction",
@@ -74,8 +75,23 @@ _SKIP_SECTIONS: Final[frozenset[str]] = frozenset(
         "bibliography",
         "sources",
         "footnotes",
+        # Rendered pages carry the table of contents as a section of its own.
+        "contents",
+        "explanatory notes",
+        "endnotes",
+        "works cited",
+        "notes and references",
+        "references and notes",
+        "sources and references",
     }
 )
+
+# A fetched PDF or image decoded as text comes out as control characters and
+# U+FFFD; no model can read a figure out of it.
+_GARBLED_RE: Final = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffd]")
+_GARBLED_FRACTION: Final[float] = 0.02
+_BACKREF_LINE_RE: Final = re.compile(r"^\s*[↑^]")
+_WHITESPACE_RE: Final = re.compile(r"\s+")
 
 _HTML_HINT_RE: Final = re.compile(r"<(?:html|body|div|p|table)\b", re.IGNORECASE)
 _HEADING_RE: Final = re.compile(r"^\s*(={2,6})\s*(.+?)\s*\1\s*$", re.MULTILINE)
@@ -240,6 +256,61 @@ def _pack(body: str, max_chars: int) -> list[str]:
     return chunks
 
 
+def is_boilerplate(text: str, *, min_chars: int = 0) -> bool:
+    """Say whether a passage can carry no battle fact at all.
+
+    Only passages that are structurally empty of prose are caught: a table
+    of contents, a block of footnote back-references, undecodable binary, or
+    something shorter than ``min_chars``. A passage that merely looks
+    uninteresting is left for the model, which can say "nothing here" for
+    the price of one request.
+
+    Args:
+        text: A passage's text.
+        min_chars: Passages shorter than this, once stripped, are dropped.
+
+    Returns:
+        True when the passage should not be sent.
+    """
+    stripped = text.strip()
+    if not stripped or len(stripped) < min_chars:
+        return True
+    if stripped.startswith("(Top)"):
+        return True
+    lines = [line for line in stripped.splitlines() if line.strip()]
+    if lines and all(_BACKREF_LINE_RE.match(line) for line in lines):
+        return True
+    return len(_GARBLED_RE.findall(stripped)) > _GARBLED_FRACTION * len(stripped)
+
+
+def drop_repeated_passages(passages: Sequence[Passage], seen: MutableSet[str]) -> list[Passage]:
+    """Remove passages whose text a battle has already been asked about.
+
+    The same page is often cited many times, and web archives serve one body
+    under many URLs. Two passages that differ only in whitespace give the
+    model the same words and would be answered identically, so only the
+    first is sent. ``seen`` is shared across a battle's documents, and
+    passages are renumbered so ``index`` and ``total`` still describe what is
+    actually sent.
+
+    Args:
+        passages: One document's passages.
+        seen: Whitespace-normalised texts already kept for this battle.
+            Updated in place.
+
+    Returns:
+        The passages not seen before, in order.
+    """
+    kept: list[Passage] = []
+    for passage in passages:
+        key = _WHITESPACE_RE.sub(" ", passage.text).strip()
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(passage)
+    return [replace(p, index=i, total=len(kept)) for i, p in enumerate(kept)]
+
+
 def build_passages(
     battle_name: str,
     raw: str,
@@ -248,6 +319,7 @@ def build_passages(
     source_title: str = "",
     max_chars: int = DEFAULT_MAX_PASSAGE_CHARS,
     is_html: bool | None = None,
+    min_chars: int = 0,
 ) -> list[Passage]:
     """Turn one raw article into the passages the LLM will be asked about.
 
@@ -258,6 +330,7 @@ def build_passages(
         source_title: Human-readable title of the document.
         max_chars: Maximum characters per passage.
         is_html: Force the input format; None sniffs it.
+        min_chars: Drop passages shorter than this; see :func:`is_boilerplate`.
 
     Returns:
         Passages in document order. An article with no usable prose yields
@@ -269,7 +342,11 @@ def build_passages(
 
     pending: list[tuple[str, str]] = []
     for section, body in split_sections(text):
-        pending.extend((section, chunk) for chunk in _pack(body, max_chars))
+        pending.extend(
+            (section, chunk)
+            for chunk in _pack(body, max_chars)
+            if not is_boilerplate(chunk, min_chars=min_chars)
+        )
 
     total = len(pending)
     return [
@@ -478,8 +555,11 @@ def payload_to_extraction(
     outcome_map = outcome if isinstance(outcome, dict) else {}
 
     terrain_raw = payload.get("terrain")
-    terrain = [str(t).strip() for t in terrain_raw if str(t).strip()] \
-        if isinstance(terrain_raw, list) else []
+    terrain = (
+        [str(t).strip() for t in terrain_raw if str(t).strip()]
+        if isinstance(terrain_raw, list)
+        else []
+    )
 
     facts = BattleFacts(
         name=str(payload.get("battle_name") or passage.battle_name) or None,

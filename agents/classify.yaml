@@ -15,7 +15,9 @@ inputs:
 
 outputs:
   - db: battle_commanders (command_role, hierarchy_rank, reports_to_bc_id, attribution_weight updated)
-  - db: missing_data_log
+  - db: battles (battle_type, fortified)
+  - db: battle_sides (is_defender, only where a siege title names the besieged side)
+  - db: missing_data_log (classes; also adds a troop_total row for any side with no estimate and no row)
 
 tools:
   - llm_classify
