@@ -12,11 +12,13 @@ here.
 2026-10-10. Code comments cite its section numbers ("handover-log §16.1").
 Do not read it by default; open the cited section when a comment points there.
 
-Last updated: 2026-10-12. Everything through the model stage is committed,
-including the pilot fixes P1-P4 and the 2026-10-12 sweep of pilot and gap
-review findings (§12). **A CLI run on the real corpus now passes crawl,
-extract and resolve and halts at reconcile on a model question awaiting the
-user's decision** (§7 step 0). Evaluate and report are unbuilt.
+Last updated: 2026-10-13. Committed through a54e239. **Uncommitted, verified
+locally, awaiting the user's commit:** the reconcile over-shrinkage fix (range
+pairs merged), per-side MCSE write gate with widened intervals, impute draws
+fingerprint, impute and model sampler settings, and the CI heavy-tail test fix
+(§7 step 0). With it, the real corpus passes crawl through model on the CLI
+(model on 59 of 210 battles until classify's LLM slice runs).
+Evaluate and report are unbuilt.
 
 ---
 
@@ -27,17 +29,19 @@ user's decision** (§7 step 0). Evaluate and report are unbuilt.
 | crawl | yes | **yes**, plus live against Wikipedia | **passes all gates**; 211/211 articles, Wikidata coverage 1.0 |
 | extract | yes | **yes** (deterministic path; LLM path fixture-only) | **passes**; 236 battles, 272/420 side outcomes; 14,944 LLM requests deferred |
 | resolve | yes | **yes**, incl. live Wikidata | **passes**; 678 linked, 189 unresolved, 146 LLM requests deferred |
-| reconcile | yes, incl. the regime-neutral fit | on fixtures | **halts**: over-shrinkage (§7 step 0); neutral ESS 313 (fixed by draws, not re-run) |
-| classify | first slice | on fixtures; LLM path offline/cache only | not reached; offline sweep: 131 field, 10 naval, 11 siege, 2 unknown |
-| impute | yes | on fixtures | not reached |
-| model | yes | on fixtures | not reached |
+| reconcile | yes, incl. the regime-neutral fit | **yes** (integration suite) | **passes all error gates** (run 7): infobox sigma 0.52, spread_ratio 0.60, singleton_slope 0.54, 6 low-precision sides widened; only `calibration_set_is_not_empty` warns |
+| classify | first slice | on fixtures; LLM path offline/cache only | **passes**, 254 LLM requests deferred (exit 3) |
+| impute | yes | **yes** (integration suite) | **passes** at 2000 draws / 1500 tune (max rhat 1.0092 vs 1.01: thin margin) |
+| model | yes | on fixtures | **passes** at 3000 draws (run 54: rhat 1.004, ESS 1445); 59 of 210 battles included; 4 warning gates (§7 step 1) |
 | evaluate | **no** | — | — |
 | report | **no** | — | — |
 
-Counts after the 2026-10-12 sweep: see the commit message of the sweep commit
-and §7; the expected full-suite count is whatever the last green run printed
-(~1353 passed, 0 skipped). Model suite: reconcile subset 22 passed, 1 xfailed;
-the rest of `-m model` was not re-run this session.
+Counts on 2026-10-13 (uncommitted tree): non-model suite 1392 passed, 0
+skipped (before the last small fixes; unit 1182, reconcile+impute integration
+38 re-run after them). Model suite per file: impute_recovery 5, model_recovery
+6, reconcile_contamination 3, reconcile_neutral 5, reconcile_recovery 17 + 1
+xfailed (~11 min alone). Run the model files one per command; a single
+`tests/model` run exceeds a 10-minute tool timeout.
 
 **Verify before trusting this file:**
 
@@ -45,7 +49,7 @@ the rest of `-m model` was not re-run this session.
 export DATABASE_URL="postgresql+psycopg://general_war:general_war@127.0.0.1:5432/general_war"
 ruff check pipeline/ tests/ scripts/ alembic/   # expect: All checks passed
 python -m mypy pipeline/                         # expect: Success, 116 source files (strict)
-python -m pytest tests/ -q -m "not live and not model"   # expect: 0 failed, 0 skipped (~1353 passed)
+python -m pytest tests/ -q -m "not live and not model"   # expect: 0 failed, 0 skipped (~1395 passed)
 PYTHONIOENCODING=utf-8 alembic heads             # expect: one head, a7b8c9d0e1f2
 python -m pytest tests/model -m model            # recovery suites; slow (~15 min)
 ```
@@ -205,6 +209,15 @@ floor. Recurring classes, with the log section that records each:
 - Workers: tell them to format only files they own (one ran `ruff format`
   across the tree). A worker cut off by a usage limit may have finished more or
   less than its last line says; check `git status` and the brief's items.
+- **Run model fits in the foreground.** A backgrounded PyMC run stalled on
+  Windows; a foreground command over 10 minutes is moved to the background by
+  the tool, so run `tests/model` one file per command.
+- **Workers editing `agents/*.yaml` during a test run break that run**: stages
+  read their spec at runtime. Never overlap a code-editing worker with a
+  verification run on the same tree.
+- Auto-mode's permission classifier may block a subagent from connecting to
+  `general_war_corpus2`; ask the user rather than routing the work through
+  another agent.
 - `claude-haiku-5-5` thinks unless told not to (handled by the
   `thinking_on_by_default` trait) and cannot take temperature 0.
 
@@ -221,25 +234,25 @@ floor. Recurring classes, with the log section that records each:
 
 ## 7. Next steps, in order
 
-0. **Reconcile over-shrinkage: a model decision for the user.** The CLI corpus
-   run (`general_war_corpus2`, run_id 1) fails `estimates_not_collapsed`
-   (0.214 < 0.25). It is real, not a gate bug: on 244 sides with point total
-   reports, sigma_type(wikipedia_infobox) 0.909 against side sd s0 0.38, and
-   212 of the 244 have one report, so a singleton keeps ~15% of its distance
-   from the corpus level (est sd 0.285 vs report sd 1.31; corr with max report
-   0.76; "300" becomes 30,919 and "3.8M" becomes 48,116). The likely cause is
-   that the symmetric Student-t treats scope-different reports on multi-report
-   sides (engaged vs total, different days) as noise, inflating sigma. Options
-   put to the user: (A) informative prior on infobox sigma from the reconcile
-   gold set; (B) the one-sided contamination component in
-   `docs/todo/04-reconcile.md`; (C) a `bayesian-model-reviewer` opinion first.
-   **Do not lower `min_spread_ratio`.** Ask which option before building.
-1. **Re-run reconcile onward via the CLI** once 0 is settled:
-   `python -m pipeline.orchestrator --stages reconcile,classify,impute,model --continue-past-deferred`
-   with `DATABASE_URL` on `general_war_corpus2` (crawl, extract, resolve are
-   already there). `mcmc_samples` is now 5000 for the neutral fit's ESS 313;
-   that is untested on the corpus. Expect classify, impute and model to surface
-   their own real-data problems; read the gate lines, not just the exit code.
+0. **Commit the 2026-10-13 change, push, and check CI.** It fixes the CI
+   failure on a54e239 (heavy-tail coverage test asserted 0.45 absolute
+   coverage; measured over 5 seeds the Student-t side prior is only marginally
+   better than Normal, 0.52 vs 0.48, so the test now asserts non-inferiority
+   pooled over 3 seeds at 3000 draws). The CI model job grows by ~5-7 min.
+   What the change is and why: §9.6, last five bullets. History in brief: the
+   first diagnosis (scope outliers inflating sigma; contamination mixture) was
+   wrong and made the corpus worse (spread 0.10); ablation fits found the range
+   pairs. **Do not lower `min_spread_ratio`.**
+1. **Model stage on the corpus passes its error gates** (2026-10-13, 3000
+   draws in `config/model_default.yaml`, was 1500: ESS 660 < 800). Warnings to
+   work through: `circularity_check` (joint latent beta_force gap 0.276 vs
+   limit 0.224; skill Spearman 1.000, top-50 overlap 46), `top_generals_cross_component`
+   (46 of the top 50 outside the largest component, so their level rests on
+   the shared prior), `exclusion_concentration`, `exclusions_reported`.
+   The corpus model includes only 59 of 210 battles: 77 have no
+   creditable side (every multi-commander side is `default_split` until
+   classify's LLM slice runs) and 74 no outcome. Treat any corpus ranking as a
+   mechanics check, not a result, until step 2 is done.
 2. **Answer the deferred LLM batches** (`data/llm_requests/extract_20261012T095006Z.jsonl`,
    14,944 requests; `resolve_20261012T095357Z.jsonl`, 146) with
    `/process-llm-batch`, starting with resolve (small, and it unblocks Hannibal,
@@ -250,6 +263,19 @@ floor. Recurring classes, with the log section that records each:
    `default_split` and credits nobody).
 3. **Reconcile and impute open items** (`docs/todo/04-reconcile.md`,
    `06-impute.md`), above all propagating the shared reconcile error into impute.
+   From 2026-10-13: the 6 low-precision troop sides (59, 176, 287, 371, 373,
+   411) are the implausible figures ("2.3M", "3.8M", "754", "300", campaign
+   totals), so the MCSE flag is acting as a scope-error detector; audit them
+   with side 419 (battle 236, four ranges and three points of different scopes)
+   and sides 217, 274, 420 (campaign totals above 1M) at extract. Six-Day War,
+   Yom Kippur War and the 1982 Lebanon War are wars in the battle corpus.
+   Casualties: re-measure pi_contam under `contaminated` now that ranges merge
+   (0.41 before) before reading it as killed/wounded/captured scope variety;
+   a one-sided scope component and a casualty-scope design column are the
+   candidates. Singletons now follow their own report (slope 0.54), so scope
+   errors on the 87% singleton sides are not detectable by the model. Impute
+   passes rhat 1.0092 against 1.01 on hierarchical scales `tau_p`, `tau_c`;
+   another corpus may need more draws.
 4. **Evaluate and report.** Fix the two BLOCKING report items first
    (`docs/todo/09-report.md`).
 5. Full-pipeline integration test on fixtures (crawl through model).
@@ -420,6 +446,31 @@ is in the log section cited.
 - One-sided-bound sides are labelled `bound_only`. Pure censoring is too weak
   for them (the recovery ablation is an xfail); `pm.ExGaussian` is the
   principled replacement.
+- **A stated range is one point, not two bounds** (2026-10-13). Loading
+  "A–B" as a lower and an upper censored row let sigma grow for free (each
+  censored probability tends to 0.5 as sigma grows, with no -log sigma term)
+  and collapsed every singleton on the corpus. `merge_range_pairs` (claims.py)
+  runs **after** lineage collapse (before it, a Wikidata copy of B survived as
+  an independent point) and merges bounds sharing side, source key, quantity,
+  branch, casualty type, scope and context into one row at sqrt(A·B) with
+  `range_var = (log(B/A)/4)^2` added to its variance (the range read as a
+  central 95% interval; a uniform reading would be /sqrt(12)). A == B becomes
+  a plain point. Lone bounds stay censored.
+- **Default likelihood is `student_t`.** The `contaminated` family (two-Normal
+  mixture, pi ~ Beta(1, 9), sd 2.0) is kept as an ablation only: on the corpus
+  pi_contam was 0.02 for troops and student_t gave the better singleton slope.
+- **Write gate**: global variables need rhat <= 1.05, bulk ESS >= 400, 0
+  divergences, and side variables rhat <= 1.05; failing any of those withholds
+  the whole fit. Side quantiles are also checked for quantile MCSE (<= 5% of
+  CI width and <= 0.05 log at the median); a side failing only that is
+  **written with each bound widened by 2 x its MCSE**, listed in diagnostics
+  `mcse_failed_side_ids`, and capped by the error gate `sides_low_precision`
+  (5%). Never withhold such a side: impute would fill it from the era prior
+  (MNAR on exactly the extreme singletons), discarding the report.
+- **Neutral draws carry a database fingerprint** (`current_database()` and the
+  run's `started_at`); impute loads `neutral_draws_run{latest written run}.npz`
+  and refuses a file from another database. Run ids are per database and the
+  test and corpus databases share `data/processed/reconcile/`.
 
 ### 9.7 Classify
 

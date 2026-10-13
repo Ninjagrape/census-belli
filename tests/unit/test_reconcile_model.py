@@ -7,6 +7,8 @@ minutes. Anything that can be caught at build time belongs here, not in
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from pipeline.reconcilers.design import build_design
@@ -112,3 +114,103 @@ def test_the_neutral_option_is_refused_for_casualties() -> None:
     design = build_design(_reports("casualties"), quantity="casualties", ancient_cutoff_year=500)
     with pytest.raises(ValueError, match="troops only"):
         build_model(design, priors=ModelPriors(), inflation=InflationPrior(), neutral=True)
+
+
+def _free_names(model: object) -> set[str]:
+    return {rv.name for rv in model.free_RVs}  # type: ignore[attr-defined]
+
+
+def _troop_design() -> object:
+    return build_design(_reports("troops"), quantity="troops", ancient_cutoff_year=500)
+
+
+def test_the_default_family_is_student_t_with_nu_and_no_mixing_weight() -> None:
+    model = build_model(_troop_design(), priors=ModelPriors(), inflation=InflationPrior())
+
+    free = _free_names(model)
+    assert "nu_raw" in free
+    assert "pi_contam" not in free
+
+
+def test_the_contaminated_family_builds_with_a_mixing_weight_and_no_nu() -> None:
+    priors = ModelPriors(likelihood_family="contaminated")
+
+    model = build_model(_troop_design(), priors=priors, inflation=InflationPrior())
+
+    free = _free_names(model)
+    assert "pi_contam" in free
+    assert not {"nu", "nu_raw"} & free
+    assert "obs_point" in model.named_vars
+
+
+def test_the_student_t_family_still_builds_with_nu_and_no_mixing_weight() -> None:
+    priors = ModelPriors(likelihood_family="student_t")
+
+    model = build_model(_troop_design(), priors=priors, inflation=InflationPrior())
+
+    assert "nu_raw" in _free_names(model)
+    assert "pi_contam" not in _free_names(model)
+
+
+def test_the_normal_family_builds_without_either() -> None:
+    priors = ModelPriors(likelihood_family="normal")
+
+    model = build_model(_troop_design(), priors=priors, inflation=InflationPrior())
+
+    assert not {"nu_raw", "pi_contam"} & _free_names(model)
+
+
+def test_contamination_settings_are_read_from_the_spec_params() -> None:
+    priors = ModelPriors.from_params(
+        {"contamination_pi_alpha": 2.0, "contamination_pi_beta": 5.0, "contamination_sd": 3.0},
+        quantity="troops",
+    )
+
+    assert (priors.contamination_pi_alpha, priors.contamination_pi_beta) == (2.0, 5.0)
+    assert priors.contamination_sd == 3.0
+    assert ModelPriors.from_params({}, quantity="troops").likelihood_family == "student_t"
+
+
+def test_summarises_row_location_and_scale_match_the_compiled_model_at_a_test_point() -> None:
+    import numpy as np
+    import pytensor
+
+    from pipeline.reconcilers.summarise import _row_eta_and_var
+
+    reports = [
+        replace(r, is_estimate=i % 3 == 0, roundness=0.2 * (i % 4), range_var=0.05 * (i % 2))
+        for i, r in enumerate(_reports("troops"))
+    ]
+    design = build_design(reports, quantity="troops", ancient_cutoff_year=500)
+    model = build_model(design, priors=ModelPriors(), inflation=InflationPrior())
+
+    rng = np.random.default_rng(1)
+    point = {
+        name: value + rng.normal(0.3, 0.5, size=np.shape(value))
+        for name, value in model.initial_point().items()
+    }
+    names = [
+        n
+        for n in (
+            "mu_side",
+            "beta_source",
+            "g_regime",
+            "delta_level",
+            "a_era",
+            "sigma_source",
+            "sigma_estimate",
+            "sigma_round",
+            "sigma_unknown",
+        )
+        if n in model.named_vars
+    ]
+    assert {"sigma_unknown", "sigma_estimate", "sigma_round"} <= set(names)
+    graphs = model.replace_rvs_by_values([model[n] for n in names] + [model.row_eta, model.row_sd])
+    compiled = pytensor.function(model.value_vars, graphs, on_unused_input="ignore")
+    outputs = compiled(*[point[v.name] for v in model.value_vars])
+    values = {n: np.asarray(v)[None] for n, v in zip(names, outputs[: len(names)], strict=True)}
+
+    eta, var = _row_eta_and_var(lambda n: values[n], design, np.arange(design.n_obs))
+
+    np.testing.assert_allclose(eta[0], outputs[-2], rtol=0, atol=1e-10)
+    np.testing.assert_allclose(np.sqrt(var[0]), outputs[-1], rtol=0, atol=1e-10)

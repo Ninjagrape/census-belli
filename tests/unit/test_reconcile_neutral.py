@@ -77,7 +77,16 @@ def test_the_diagnostics_block_carries_worst_and_the_hyperparameter_means() -> N
     _, _, summary = _summary()
     block = summary.diagnostics
 
-    assert set(block["worst"]) == {"max_rhat", "min_ess_bulk", "divergences"}
+    assert set(block["worst"]) == {
+        "max_rhat",
+        "min_ess_bulk",
+        "min_ess_bulk_side",
+        "divergences",
+        "n_sides_mcse_fail",
+        "mcse_failed_side_ids",
+        "mcse_failed_limits",
+        "worst_side",
+    }
     assert math.isclose(block["m0"]["mean"], 9.0, abs_tol=0.05)
     assert math.isclose(block["s0"]["mean"], 1.2, abs_tol=0.02)
 
@@ -95,13 +104,30 @@ def test_draws_are_thinned_to_the_cap_and_aligned_with_side_ids() -> None:
 def test_the_npz_has_the_documented_arrays_and_dtypes(tmp_path: Path) -> None:
     _, _, summary = _summary()
 
-    path = write_neutral_draws(summary, processed_root=tmp_path, run_id=7)
+    path = write_neutral_draws(
+        summary,
+        processed_root=tmp_path,
+        run_id=7,
+        database="db_a",
+        started_at="2026-01-01T00:00:00+00:00",
+    )
 
     assert path == neutral_draws_path(tmp_path, 7)
     assert path.name == "neutral_draws_run7.npz"
     with np.load(path) as data:
-        assert set(data.files) == {"run_id", "side_id", "battle_id", "draws", "m0_mean", "s0_mean"}
+        assert set(data.files) == {
+            "run_id",
+            "database",
+            "started_at",
+            "side_id",
+            "battle_id",
+            "draws",
+            "m0_mean",
+            "s0_mean",
+        }
         assert int(data["run_id"]) == 7
+        assert str(data["database"]) == "db_a"
+        assert str(data["started_at"]) == "2026-01-01T00:00:00+00:00"
         assert data["side_id"].dtype == np.int64
         assert data["battle_id"].dtype == np.int64
         assert data["draws"].dtype == np.float64
@@ -135,8 +161,15 @@ def test_neutral_estimates_are_stamped_with_their_own_run_id() -> None:
     # The published write must not touch the neutral family, so a run where
     # only one of the two passes its thresholds leaves independent provenance.
     published = SideEstimate(
-        side_id=10, quantity="troops", value=1.0, lo=0.5, hi=2.0, run_id=9,
-        n_reports=1, n_sources=1, method="single_report_debiased",
+        side_id=10,
+        quantity="troops",
+        value=1.0,
+        lo=0.5,
+        hi=2.0,
+        run_id=9,
+        n_reports=1,
+        n_sources=1,
+        method="single_report_debiased",
         updated_at=datetime(2026, 10, 6, tzinfo=UTC),
     )
     other = _Conn()

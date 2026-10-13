@@ -21,7 +21,6 @@ diagonal.
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -37,7 +36,6 @@ __all__ = [
     "LikelihoodStats",
     "NeutralDraws",
     "divide_prior",
-    "find_latest_draws",
     "likelihoods_from_draws",
     "likelihoods_from_published",
     "load_neutral_draws",
@@ -50,7 +48,6 @@ _VARIANCE_FLOOR = 1e-9
 # The 95% interval on the log scale spans 2 * 1.96 sd.
 _INTERVAL_TO_SD = 3.92
 _MIN_PUBLISHED_SD = 0.05
-_DRAWS_FILE = re.compile(r"neutral_draws_run(\d+)\.npz$")
 
 
 @dataclass(frozen=True)
@@ -81,6 +78,8 @@ class NeutralDraws:
     draws: np.ndarray
     m0_mean: float
     s0_mean: float
+    database: str | None = None
+    started_at: str | None = None
 
 
 @dataclass
@@ -214,25 +213,6 @@ def divide_prior(
     return DivisionResult(tuple(int(i) for i in keep), m_lik, precision, "joint")
 
 
-def find_latest_draws(root: Path) -> Path | None:
-    """Find the draws file with the highest reconcile run id.
-
-    Args:
-        root: Directory holding ``neutral_draws_run{run_id}.npz`` files.
-
-    Returns:
-        The newest file, or None if there is none.
-    """
-    best: tuple[int, Path] | None = None
-    if not root.is_dir():
-        return None
-    for path in root.iterdir():
-        match = _DRAWS_FILE.search(path.name)
-        if match and (best is None or int(match.group(1)) > best[0]):
-            best = (int(match.group(1)), path)
-    return None if best is None else best[1]
-
-
 def load_neutral_draws(path: Path) -> NeutralDraws:
     """Read reconcile's neutral draws file and validate its shapes.
 
@@ -252,6 +232,8 @@ def load_neutral_draws(path: Path) -> NeutralDraws:
         draws = np.asarray(data["draws"], dtype=np.float64)
         m0 = float(data["m0_mean"])
         s0 = float(data["s0_mean"])
+        database = str(data["database"]) if "database" in data.files else None
+        started_at = str(data["started_at"]) if "started_at" in data.files else None
     if draws.ndim != 2 or draws.shape[1] != len(side_id) or len(battle_id) != len(side_id):
         raise ValueError(
             f"{path}: draws {draws.shape} does not match {len(side_id)} sides / "
@@ -261,7 +243,7 @@ def load_neutral_draws(path: Path) -> NeutralDraws:
         raise ValueError(f"{path}: draws contain non-finite values")
     if not s0 > 0:
         raise ValueError(f"{path}: s0_mean must be positive, got {s0}")
-    return NeutralDraws(run_id, side_id, battle_id, draws, m0, s0)
+    return NeutralDraws(run_id, side_id, battle_id, draws, m0, s0, database, started_at)
 
 
 def likelihoods_from_draws(
@@ -280,6 +262,10 @@ def likelihoods_from_draws(
 
     Returns:
         The likelihoods, and counts of stale, weak and diagonal-fallback cases.
+
+    A battle with only some sides' columns builds a block from those present;
+    the absent side gets only the prior, though shared battle and regime
+    parameters still carry some of its information.
     """
     stats = LikelihoodStats()
     columns_by_battle: dict[int, list[int]] = defaultdict(list)

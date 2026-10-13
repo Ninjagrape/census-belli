@@ -328,7 +328,7 @@ def test_the_partitions_are_disjoint_and_cover_every_row() -> None:
     reports = [
         _report(1),
         _report(2, is_upper_bound=True),
-        _report(3, is_lower_bound=True),
+        _report(3, is_lower_bound=True, url="https://example/b"),
         _report(4, is_upper_bound=True, is_lower_bound=True),
     ]
     design = _design(reports)

@@ -8,11 +8,13 @@ see handover-log §19-§21. Estimates are written only after convergence.
       ci_width_reasonable returns NULL
 - [x] fixed 2026-10-12: (pilot) ci_width_reasonable still returns NULL on the corpus after the P4
       fix (run 12); calibration_set_is_not_empty 0 (warning)
-- [ ] (pilot review) one-sided contamination component per row (component rows
-      sit below the side total; a symmetric t inflates the shared sigma), e.g.
-      pm.Mixture of the t and a downward-shifted component, pi ~ Beta(1, 9)
-- [ ] (pilot review) a range "X–Y" enters as two independent half-line censorings;
-      use one interval-censored row. 60 sides (23%) have only censored rows
+- [x] tried 2026-10-13: (pilot review) contamination component per row. Built as a symmetric
+      two-Normal mixture (`likelihood_family: contaminated`), kept as an ablation only: on the
+      corpus troops pi_contam was 0.02 and it did not fix the collapse. A one-sided component
+      may still suit casualties (re-measure first, handover §7 step 3)
+- [x] fixed 2026-10-13: (pilot review) a range "X–Y" entered as two half-line censorings and,
+      on the corpus, drove infobox sigma to 1.4 and the collapse. Merged into one point row at
+      sqrt(A·B) with range_var added (`merge_range_pairs`, handover §9.6)
 - [ ] (pilot review S3) a key's own effect should require co-reporting (other keys
       on the same sides in >= k battles), not k battles alone. Latent today
 - [ ] (pilot review S4) in a type mixing qualifying and pooled keys the zero-sum
@@ -25,11 +27,13 @@ see handover-log §19-§21. Estimates are written only after convergence.
 - [ ] Width gates on the identified scale; n_identifying_sides (handover-log §20.10)
 - [ ] ExGaussian bound likelihood (handover-log §20.10)
 - [ ] Prior predictive check; per-side casualty ratio; InverseGamma(2,1) on variance
-- [ ] Run on a real corpus (needs crawl/extract/resolve on config/sources_seed_arsht.yaml first)
+- [x] done 2026-10-13: Run on a real corpus (general_war_corpus2, CLI)
 - [x] fixed 2026-10-12: (gap review A11) data_era is centred over all dated rows but applied only to
       unlabelled rows (design.py / model.py); centre within the unlabelled rows
 - [x] fixed 2026-10-12: (gap review A12) a fit failing write thresholds leaves sides NULL with no
       missing_data_log row
 - [x] fixed 2026-10-12: (gap review) dead spec params: bias_prior_mu, regime_deviation_prior_sd
-- [ ] **(corpus run 2026-10-12) over-shrinkage, blocks the CLI run**: sigma_type(infobox) 0.909 vs s0 0.38; estimates_not_collapsed 0.214. User decision pending (handover §7 step 0); do not lower the gate
-- [ ] mcmc_samples raised to 5000 for neutral ESS (313 at 2000); confirm on the corpus
+- [x] fixed 2026-10-13: (corpus run 2026-10-12) over-shrinkage: caused by range pairs (above);
+      corpus run 7 spread_ratio 0.60, infobox sigma 0.52
+- [x] confirmed 2026-10-13: neutral fit converges on the corpus (neutral_fit_converged passes)
+- [ ] Audit the 6 low-precision sides and the scope-error candidates at extract (handover §7 step 3)

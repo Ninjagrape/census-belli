@@ -250,6 +250,9 @@ class ModelPriors:
     precision_prior_alpha: float = 2.0
     precision_prior_beta: float = 1.0
     likelihood_family: str = "student_t"
+    contamination_pi_alpha: float = 1.0
+    contamination_pi_beta: float = 9.0
+    contamination_sd: float = 2.0
 
     @classmethod
     def from_params(cls, params: dict[str, Any], *, quantity: str) -> ModelPriors:
@@ -282,6 +285,9 @@ class ModelPriors:
             precision_prior_alpha=float(params.get("precision_prior_alpha", 2.0)),
             precision_prior_beta=float(params.get("precision_prior_beta", 1.0)),
             likelihood_family=str(params.get("likelihood_family", "student_t")),
+            contamination_pi_alpha=float(params.get("contamination_pi_alpha", 1.0)),
+            contamination_pi_beta=float(params.get("contamination_pi_beta", 9.0)),
+            contamination_sd=float(params.get("contamination_sd", 2.0)),
         )
 
 
@@ -534,6 +540,8 @@ def build_model(
             sigma_source[source_ix] ** 2
             + sigma_estimate**2 * _data(pm, "data_is_estimate", design.is_estimate.astype(float))
             + sigma_round**2 * _data(pm, "data_roundness", design.roundness)
+            # A stated range is one point row whose width is the extra spread.
+            + _data(pm, "data_range_var", design.range_var)
         )
         unknown_mask = _unknown_level_mask(design)
         if unknown_mask.any():
@@ -542,7 +550,12 @@ def build_model(
         sd = pm.math.sqrt(var)
 
         log_y = _data(pm, "data_log_y", design.log_y)
-        _attach_likelihood(pm, design, eta, sd, log_y, priors.likelihood_family)
+        _attach_likelihood(pm, pt, design, eta, sd, log_y, priors)
+        # Not registered as variables (n_obs-long deterministics would be
+        # sampled and diagnosed for nothing); kept so a test can compile the
+        # model's own per-row location and scale against summarise's rebuild.
+        model.row_eta = eta
+        model.row_sd = sd
 
     logger.info(
         "reconcile_model_built",
@@ -771,7 +784,13 @@ def _unlabelled_mask(design: Design) -> np.ndarray:
 
 
 def _attach_likelihood(
-    pm_module: Any, design: Design, eta: Any, sd: Any, log_y: Any, family: str
+    pm_module: Any,
+    pt_module: Any,
+    design: Design,
+    eta: Any,
+    sd: Any,
+    log_y: Any,
+    priors: ModelPriors,
 ) -> None:
     """Attach the point and censored likelihood terms.
 
@@ -787,13 +806,21 @@ def _attach_likelihood(
         eta: The linear predictor.
         sd: The per-observation scale.
         log_y: The observed log values, as model data.
-        family: ``"student_t"`` or ``"normal"``.
+        pt_module: The imported pytensor.tensor module.
+        priors: The hierarchy scales; ``likelihood_family`` is ``"contaminated"``
+            (a two-component Normal mixture on point rows, so a scope or
+            extraction error goes to a wide component instead of inflating
+            sigma), ``"student_t"`` or ``"normal"``. Censored and bound rows are
+            Normal in the contaminated family.
 
     Raises:
         ValueError: If the family is not recognised.
     """
-    if family not in ("student_t", "normal"):
-        raise ValueError(f"Unknown likelihood_family {family!r}; expected student_t or normal")
+    family = priors.likelihood_family
+    if family not in ("contaminated", "student_t", "normal"):
+        raise ValueError(
+            f"Unknown likelihood_family {family!r}; expected contaminated, student_t or normal"
+        )
 
     nu = None
     if family == "student_t":
@@ -806,7 +833,7 @@ def _attach_likelihood(
         nu = pm_module.Deterministic("nu", pm_module.Gamma("nu_raw", alpha=2.0, beta=0.5) + 2.0)
 
     def dist(rows: Any) -> Any:
-        if family == "normal":
+        if family != "student_t":
             return pm_module.Normal.dist(mu=eta[rows], sigma=sd[rows])
         return pm_module.StudentT.dist(nu=nu, mu=eta[rows], sigma=sd[rows])
 
@@ -816,7 +843,21 @@ def _attach_likelihood(
 
     if design.point_rows.size:
         rows = rows_data("point", design.point_rows)
-        if family == "normal":
+        if family == "contaminated":
+            pi = pm_module.Beta(
+                "pi_contam", alpha=priors.contamination_pi_alpha, beta=priors.contamination_pi_beta
+            )
+            wide_sd = pt_module.sqrt(sd[rows] ** 2 + priors.contamination_sd**2)
+            pm_module.Mixture(
+                "obs_point",
+                w=pt_module.stack([1.0 - pi, pi]),
+                comp_dists=[
+                    pm_module.Normal.dist(mu=eta[rows], sigma=sd[rows]),
+                    pm_module.Normal.dist(mu=eta[rows], sigma=wide_sd),
+                ],
+                observed=log_y[rows],
+            )
+        elif family == "normal":
             pm_module.Normal("obs_point", mu=eta[rows], sigma=sd[rows], observed=log_y[rows])
         else:
             pm_module.StudentT(

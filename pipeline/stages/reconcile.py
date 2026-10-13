@@ -121,7 +121,11 @@ from pipeline.reconcilers.model import (
 from pipeline.reconcilers.neutral import summarise_neutral, write_neutral_draws
 from pipeline.reconcilers.records import Quantity, ReconcileCounts, Report
 from pipeline.reconcilers.report import build_report, write_report
-from pipeline.reconcilers.summarise import summarise_fit
+from pipeline.reconcilers.summarise import (
+    DEFAULT_MAX_MEDIAN_MCSE_LOG,
+    DEFAULT_MAX_QUANTILE_MCSE_FRAC,
+    summarise_fit,
+)
 from pipeline.stages.base import StageContext
 
 __all__ = ["run"]
@@ -139,7 +143,7 @@ PROCESSED_ROOT: Final[Path] = Path("data/processed")
 _QUANTITIES: Final[tuple[str, ...]] = ("troops", "casualties")
 
 
-def _combined_worst(per_quantity: dict[str, dict[str, Any]]) -> dict[str, float | int | None]:
+def _combined_worst(per_quantity: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """Roll up the worst rhat, worst ESS and total divergences across quantities.
 
     Each quantity's own diagnostics dict (from
@@ -154,13 +158,16 @@ def _combined_worst(per_quantity: dict[str, dict[str, Any]]) -> dict[str, float 
             quantity. Only quantities that were actually fit appear here.
 
     Returns:
-        ``{"max_rhat": ..., "min_ess_bulk": ..., "divergences": ...}``, with
+        ``{"max_rhat": ..., "min_ess_bulk": ..., "divergences": ...,
+        "n_sides_mcse_fail": ..., "worst_side": ...}``, with
         ``None`` for a metric no quantity's payload carried a finite value
         for at all (e.g. a single-chain fit, where rhat is undefined).
     """
     max_rhats: list[float] = []
     min_esses: list[float] = []
     divergence_counts: list[int] = []
+    mcse_fail_counts: list[int] = []
+    worst_sides: list[dict[str, Any]] = []
     for diagnostics in per_quantity.values():
         worst = diagnostics.get("worst") or {}
         if worst.get("max_rhat") is not None:
@@ -169,11 +176,19 @@ def _combined_worst(per_quantity: dict[str, dict[str, Any]]) -> dict[str, float 
             min_esses.append(float(worst["min_ess_bulk"]))
         if worst.get("divergences") is not None:
             divergence_counts.append(int(worst["divergences"]))
+        if worst.get("n_sides_mcse_fail") is not None:
+            mcse_fail_counts.append(int(worst["n_sides_mcse_fail"]))
+        if worst.get("worst_side") is not None:
+            worst_sides.append({**worst["worst_side"], "quantity": diagnostics.get("quantity")})
 
     return {
         "max_rhat": max(max_rhats) if max_rhats else None,
         "min_ess_bulk": min(min_esses) if min_esses else None,
         "divergences": sum(divergence_counts) if divergence_counts else None,
+        "n_sides_mcse_fail": sum(mcse_fail_counts) if mcse_fail_counts else None,
+        "worst_side": max(worst_sides, key=lambda w: w.get("mcse_frac") or 0.0)
+        if worst_sides
+        else None,
     }
 
 
@@ -184,27 +199,57 @@ def _write_thresholds(params: dict[str, Any]) -> dict[str, float]:
         params: The spec's ``params`` mapping.
 
     Returns:
-        ``max_rhat``, ``min_ess_bulk`` and ``max_divergences``. Recorded in the
-        run's config so ``neutral_fit_converged`` judges by what the run used.
+        ``max_rhat``, ``min_ess_bulk``, ``max_divergences`` and
+        ``max_quantile_mcse_frac``. Recorded in the run's config so
+        ``neutral_fit_converged`` judges by what the run used.
     """
     return {
         "max_rhat": float(params.get("write_max_rhat", 1.05)),
         "min_ess_bulk": float(params.get("write_min_ess_bulk", 400)),
         "max_divergences": float(params.get("write_max_divergences", 0)),
+        "max_quantile_mcse_frac": _max_quantile_mcse_frac(params),
+        "max_median_mcse_log": _max_median_mcse_log(params),
     }
 
 
-def _passes_write_thresholds(worst: dict[str, Any], params: dict[str, Any]) -> bool:
-    """Whether a fit's worst diagnostics clear the thresholds for writing.
+def _max_quantile_mcse_frac(params: dict[str, Any]) -> float:
+    """Read the limit on a side's quantile MCSE as a share of its interval width."""
+    return float(params.get("write_max_quantile_mcse_frac", DEFAULT_MAX_QUANTILE_MCSE_FRAC))
+
+
+def _max_median_mcse_log(params: dict[str, Any]) -> float:
+    """Read the absolute limit on a side's median MCSE, in log units."""
+    return float(params.get("write_max_median_mcse_log", DEFAULT_MAX_MEDIAN_MCSE_LOG))
+
+
+def _passes_global_thresholds(worst: dict[str, Any], params: dict[str, Any]) -> bool:
+    """Whether a fit clears the global gate that decides whether any side is written.
 
     Args:
         worst: A diagnostics payload's ``"worst"`` object.
         params: The spec's ``params`` mapping, for the ``write_*`` thresholds.
 
     Returns:
-        True when rhat, bulk ESS and divergences are all acceptable.
+        True when rhat (every variable, side variables included), bulk ESS of
+        the global variables and divergences are all acceptable. Per-side MCSE
+        failures are not part of it: those sides are written with a widened interval.
     """
-    return not _failed_thresholds(worst, params)
+    return not _global_failures(worst, params)
+
+
+def _mcse_failed_limits(worst: dict[str, Any]) -> dict[int, str]:
+    """The sides whose quantile MCSE breaks a limit, with the limit each breaks.
+
+    Args:
+        worst: A diagnostics payload's ``"worst"`` object.
+
+    Returns:
+        Side id to ``"relative"`` or ``"absolute"``; empty when none failed or the
+        payload predates the field.
+    """
+    limits = worst.get("mcse_failed_limits") or {}
+    ids = worst.get("mcse_failed_side_ids") or []
+    return {int(side_id): str(limits.get(str(side_id), "relative")) for side_id in ids}
 
 
 def _failed_thresholds(worst: dict[str, Any], params: dict[str, Any]) -> list[str]:
@@ -218,6 +263,13 @@ def _failed_thresholds(worst: dict[str, Any], params: dict[str, Any]) -> list[st
         Short descriptions such as ``"max_rhat 1.2 > 1.05"``; empty when the fit
         clears every threshold.
     """
+    failed = _global_failures(worst, params)
+    failed.extend(_mcse_failures(worst, params))
+    return failed
+
+
+def _global_failures(worst: dict[str, Any], params: dict[str, Any]) -> list[str]:
+    """Name each global write threshold (rhat, global ESS, divergences) a fit breaches."""
     limits = _write_thresholds(params)
     max_rhat, min_ess, max_div = (
         limits["max_rhat"],
@@ -237,6 +289,44 @@ def _failed_thresholds(worst: dict[str, Any], params: dict[str, Any]) -> list[st
     if divergences > max_div:
         failed.append(f"divergences {divergences} > {max_div}")
     return failed
+
+
+def _mcse_failures(worst: dict[str, Any], params: dict[str, Any]) -> list[str]:
+    """Describe the per-side MCSE breach, if any, as one line."""
+    limits = _write_thresholds(params)
+    n_mcse_fail = int(worst.get("n_sides_mcse_fail") or 0)
+    failed: list[str] = []
+    if n_mcse_fail:
+        side = worst.get("worst_side") or {}
+        failed.append(
+            f"{n_mcse_fail} sides with a quantile MCSE above "
+            f"{limits['max_quantile_mcse_frac']:g} of their interval width or a median "
+            f"MCSE above {limits['max_median_mcse_log']:g} in log units "
+            f"(worst side {side.get('side')}, {side.get('limit')} limit, "
+            f"mcse_frac {side.get('mcse_frac')}, mcse {side.get('mcse')})"
+        )
+    return failed
+
+
+def _warn_low_precision(quantity: str, worst: dict[str, Any], run_id: int) -> None:
+    """Warn about sides written with a widened interval for their quantile MCSE.
+
+    Args:
+        quantity: ``"troops"``, ``"troops_neutral"`` or ``"casualties"``.
+        worst: A diagnostics payload's ``"worst"`` object.
+        run_id: The run the sides were written under.
+    """
+    limits = _mcse_failed_limits(worst)
+    if not limits:
+        return
+    logger.warning(
+        "reconcile_low_precision_sides",
+        quantity=quantity,
+        run_id=run_id,
+        side_ids=sorted(limits),
+        limits={str(k): v for k, v in sorted(limits.items())},
+        hint="written with the interval widened by twice each bound's quantile MCSE",
+    )
 
 
 def _fit_neutral_troops(
@@ -279,9 +369,17 @@ def _fit_neutral_troops(
         raise
 
     battle_of_side = {r.side_id: r.battle_id for r in reports if r.quantity == "troops"}
-    summary = summarise_neutral(idata, design, battle_of_side, run_id=run_id, ci_mass=ci_mass)
+    summary = summarise_neutral(
+        idata,
+        design,
+        battle_of_side,
+        run_id=run_id,
+        ci_mass=ci_mass,
+        max_quantile_mcse_frac=_max_quantile_mcse_frac(params),
+        max_median_mcse_log=_max_median_mcse_log(params),
+    )
     worst = summary.diagnostics["worst"]
-    written = _passes_write_thresholds(worst, params)
+    written = _passes_global_thresholds(worst, params)
     summary.diagnostics["written"] = written
     if not written:
         logger.error(
@@ -293,8 +391,16 @@ def _fit_neutral_troops(
         return summary.diagnostics
 
     store.write_neutral_estimates(conn, summary.estimates)
-    store.clear_unmodelled_neutral(conn, side_ids=set(design.side_ids))
-    write_neutral_draws(summary, processed_root=processed_root, run_id=run_id)
+    store.clear_unmodelled_neutral(conn, side_ids={e.side_id for e in summary.estimates})
+    database, started_at = store.run_fingerprint(conn, run_id)
+    write_neutral_draws(
+        summary,
+        processed_root=processed_root,
+        run_id=run_id,
+        database=database,
+        started_at=started_at,
+    )
+    _warn_low_precision("troops_neutral", worst, run_id)
     return summary.diagnostics
 
 
@@ -355,6 +461,7 @@ def _fit_quantity(
         min_battles_per_source_effect=int(
             params.get("min_battles_per_source_effect", DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT)
         ),
+        merge_ranges=bool(params.get("merge_ranges", True)),
     )
     model = build_model(design, priors=priors, inflation=inflation)
 
@@ -378,6 +485,8 @@ def _fit_quantity(
         inflation=inflation,
         priors=priors,
         computed_at=computed_at,
+        max_quantile_mcse_frac=_max_quantile_mcse_frac(params),
+        max_median_mcse_log=_max_median_mcse_log(params),
     )
 
     # Write only a converged fit. The model_convergence gate runs after the
@@ -385,15 +494,18 @@ def _fit_quantity(
     # estimates before anything could object. The run row and its diagnostics
     # are still recorded, so the gate fails loudly; the old estimates stand.
     worst = summary.diagnostics.get("worst", {})
-    if _passes_write_thresholds(worst, params):
+    if _passes_global_thresholds(worst, params):
+        # Sides that fail only their own quantile MCSE are written with the
+        # interval widened in summarise_fit; they are listed, not withheld.
         counts.sides_estimated += store.write_side_estimates(conn, summary.side_estimates)
         counts.sources_updated += store.write_source_biases(conn, summary.source_biases)
         store.clear_unmodelled(
             conn,
             cast(Quantity, quantity),
-            side_ids=set(design.side_ids),
+            side_ids={e.side_id for e in summary.side_estimates},
             source_ids={r.source_id for r in reports if r.quantity == quantity},
         )
+        _warn_low_precision(quantity, worst, run_id)
     else:
         logger.error(
             "reconcile_fit_not_written",

@@ -59,6 +59,8 @@ NON_PERSONNEL_TERMS: Final[tuple[str, ...]] = (
     "helicopters?",
     "tanks?",
     "tankettes?",
+    "stug'?s?",
+    "assault guns?",
     "apcs?",
     "trucks?",
     "guns?",

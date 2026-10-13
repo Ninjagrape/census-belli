@@ -28,11 +28,15 @@ import structlog
 from pipeline.reconcilers.design import Design
 from pipeline.reconcilers.records import NeutralSideEstimate
 from pipeline.reconcilers.summarise import (
+    DEFAULT_MAX_MEDIAN_MCSE_LOG,
+    DEFAULT_MAX_QUANTILE_MCSE_FRAC,
     _convergence,
     _coord_labels,
     _finite,
     _pooled,
     _scalar_stats,
+    widen_bounds,
+    widening_margins,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
@@ -102,6 +106,8 @@ def summarise_neutral(
     *,
     run_id: int,
     ci_mass: float,
+    max_quantile_mcse_frac: float = DEFAULT_MAX_QUANTILE_MCSE_FRAC,
+    max_median_mcse_log: float = DEFAULT_MAX_MEDIAN_MCSE_LOG,
 ) -> NeutralSummary:
     """Summarise the neutral troops fit.
 
@@ -111,6 +117,10 @@ def summarise_neutral(
         battle_of_side: ``side_id`` to ``battle_id`` for every side in the design.
         run_id: The ``model_runs.run_id`` the fit is recorded under.
         ci_mass: Total mass of the credible interval.
+        max_quantile_mcse_frac: The write gate's limit on a side's quantile
+            MCSE as a share of its interval width.
+        max_median_mcse_log: The write gate's absolute limit on the MCSE of a
+            side's median, in log units.
 
     Returns:
         The estimates, diagnostics block and draws.
@@ -119,21 +129,32 @@ def summarise_neutral(
     labels = _coord_labels(idata, "side")
     mu = mu[:, [labels.index(str(side_id)) for side_id in design.side_ids]]
 
-    lower_q = (1.0 - ci_mass) / 2.0
-    estimates = [
-        NeutralSideEstimate(
-            side_id=side_id,
-            value=math.exp(float(np.median(mu[:, i]))),
-            lo=math.exp(float(np.quantile(mu[:, i], lower_q))),
-            hi=math.exp(float(np.quantile(mu[:, i], 1.0 - lower_q))),
-            log_mean=float(np.mean(mu[:, i])),
-            log_sd=float(np.std(mu[:, i])),
-            run_id=run_id,
-        )
-        for i, side_id in enumerate(design.side_ids)
-    ]
+    worst, worst_variable, _ = _convergence(
+        idata,
+        ci_mass=ci_mass,
+        max_quantile_mcse_frac=max_quantile_mcse_frac,
+        max_median_mcse_log=max_median_mcse_log,
+    )
+    margins = widening_margins(idata, ci_mass, worst["mcse_failed_side_ids"])
 
-    worst, worst_variable, _ = _convergence(idata)
+    lower_q = (1.0 - ci_mass) / 2.0
+    estimates: list[NeutralSideEstimate] = []
+    for i, side_id in enumerate(design.side_ids):
+        lo = math.exp(float(np.quantile(mu[:, i], lower_q)))
+        hi = math.exp(float(np.quantile(mu[:, i], 1.0 - lower_q)))
+        if side_id in margins:
+            lo, hi = widen_bounds(lo, hi, margins[side_id])
+        estimates.append(
+            NeutralSideEstimate(
+                side_id=side_id,
+                value=math.exp(float(np.median(mu[:, i]))),
+                lo=lo,
+                hi=hi,
+                log_mean=float(np.mean(mu[:, i])),
+                log_sd=float(np.std(mu[:, i])),
+                run_id=run_id,
+            )
+        )
     m0 = _scalar_stats(idata, "m0")
     s0 = _scalar_stats(idata, "s0")
     diagnostics: dict[str, Any] = {
@@ -146,6 +167,11 @@ def summarise_neutral(
         "era_centre_rows": design.era_centre_rows,
         "worst": worst,
         "worst_variable": worst_variable,
+        "n_sides_mcse_fail": worst["n_sides_mcse_fail"],
+        "n_sides_low_precision": worst["n_sides_mcse_fail"],
+        "mcse_failed_side_ids": worst["mcse_failed_side_ids"],
+        "mcse_failed_limits": worst["mcse_failed_limits"],
+        "worst_side": worst["worst_side"],
         "m0": m0,
         "s0": s0,
     }
@@ -173,8 +199,15 @@ def neutral_draws_path(processed_root: Path, run_id: int) -> Path:
     return processed_root / NEUTRAL_SUBDIR / f"neutral_draws_run{run_id}.npz"
 
 
-def write_neutral_draws(summary: NeutralSummary, *, processed_root: Path, run_id: int) -> Path:
-    """Write the draws file the impute stage reads.
+def write_neutral_draws(
+    summary: NeutralSummary,
+    *,
+    processed_root: Path,
+    run_id: int,
+    database: str,
+    started_at: str,
+) -> Path:
+    """Write the draws file the impute stage reads, one column per side.
 
     Written to a temporary name and renamed, so a reader never sees a partial
     file.
@@ -183,6 +216,10 @@ def write_neutral_draws(summary: NeutralSummary, *, processed_root: Path, run_id
         summary: The neutral fit's summary.
         processed_root: The stage's ``processed_root``.
         run_id: The ``model_runs.run_id``.
+        database: ``current_database()`` of the run, stored so impute can refuse
+            a file written by another database that reached the same run id.
+        started_at: That run's ``started_at`` as an ISO string, stored for the
+            same check.
 
     Returns:
         The path written.
@@ -193,6 +230,8 @@ def write_neutral_draws(summary: NeutralSummary, *, processed_root: Path, run_id
     np.savez(
         tmp,
         run_id=np.int64(run_id),
+        database=np.str_(database),
+        started_at=np.str_(started_at),
         side_id=np.asarray(summary.side_ids, dtype=np.int64),
         battle_id=np.asarray(summary.battle_ids, dtype=np.int64),
         draws=summary.draws,
@@ -204,6 +243,6 @@ def write_neutral_draws(summary: NeutralSummary, *, processed_root: Path, run_id
         "reconcile_neutral_draws_written",
         path=str(path),
         n_draws=int(summary.draws.shape[0]),
-        n_sides=int(summary.draws.shape[1]),
+        n_sides=len(summary.side_ids),
     )
     return path

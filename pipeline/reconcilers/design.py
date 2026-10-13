@@ -46,6 +46,7 @@ from pipeline.reconcilers.claims import (
     collapse_lineages,
     era_flag,
     merge_cross_regime_duplicates,
+    merge_range_pairs,
 )
 from pipeline.reconcilers.records import CLAIM_REGIMES, ReconcileCounts, Report, SourceKey
 
@@ -126,6 +127,8 @@ class Design:
         roundness: 0..1 per row; conventional figures get more observation
             variance because they are coarsened, not merely noisy.
         is_estimate: Whether the source hedged the figure.
+        range_var: Extra log-scale variance of a row merged from a stated range,
+            else 0.
         point_rows: Indices of rows observed exactly, with no stated bound.
         censor_lower_at: Indices whose latent value lies **below** the stated
             figure, from ``is_upper_bound``. Named for the ``pm.Censored``
@@ -157,6 +160,7 @@ class Design:
     era_mean: float
     roundness: np.ndarray
     is_estimate: np.ndarray
+    range_var: np.ndarray
     point_rows: np.ndarray
     censor_lower_at: np.ndarray
     censor_upper_at: np.ndarray
@@ -240,6 +244,7 @@ def build_design(
     ancient_cutoff_year: int,
     counts: ReconcileCounts | None = None,
     min_battles_per_source_effect: int = DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT,
+    merge_ranges: bool = True,
 ) -> Design:
     """Assemble the aligned arrays for one quantity's model.
 
@@ -254,6 +259,10 @@ def build_design(
         min_battles_per_source_effect: A source key reporting on fewer distinct
             battles than this is pooled; see
             :data:`DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT`.
+        merge_ranges: Whether a lower-bound and an upper-bound row of one stated
+            range become one point row; see
+            :func:`pipeline.reconcilers.claims.merge_range_pairs`. Off only to
+            show what the pairs do to the fit.
 
     Returns:
         The design.
@@ -267,9 +276,15 @@ def build_design(
     # model no longer carries a lineage effect instead. The cross-regime merge
     # runs first so an unlabelled restatement of an attributed figure is
     # never read as an independent, faithful report.
-    rows = collapse_lineages(
-        merge_cross_regime_duplicates([r for r in reports if r.quantity == quantity])
-    )
+    quantity_reports = [r for r in reports if r.quantity == quantity]
+    rows = collapse_lineages(merge_cross_regime_duplicates(quantity_reports))
+    # Range pairs merge after the lineage collapse: a Wikidata or DBpedia point
+    # copying the upper bound shares a lineage with that bound's row, so merging
+    # first would drop the bound and leave the copy counted as an independent
+    # point.
+    n_ranges = n_degenerate = 0
+    if merge_ranges:
+        rows, n_ranges, n_degenerate = merge_range_pairs(rows)
     if not rows:
         raise ValueError(
             f"No usable {quantity} reports. Fitting would sample the priors and "
@@ -344,6 +359,8 @@ def build_design(
         counts.censored_upper += int(censor_lower.sum())
         counts.censored_lower += int(censor_upper.sum())
         counts.both_bounds += int(both.sum())
+        counts.ranges_merged += n_ranges
+        counts.ranges_degenerate += n_degenerate
 
     design = Design(
         quantity=quantity,
@@ -361,6 +378,7 @@ def build_design(
         era_mean=era_mean,
         roundness=np.array([r.roundness for r in rows], dtype=float),
         is_estimate=np.array([r.is_estimate for r in rows], dtype=bool),
+        range_var=np.array([r.range_var for r in rows], dtype=float),
         point_rows=np.flatnonzero(point),
         censor_lower_at=np.flatnonzero(censor_lower),
         censor_upper_at=np.flatnonzero(censor_upper),
@@ -390,6 +408,8 @@ def build_design(
         censor_lower_at=int(censor_lower.sum()),
         censor_upper_at=int(censor_upper.sum()),
         both_bounds=int(both.sum()),
+        ranges_merged=n_ranges,
+        ranges_degenerate=n_degenerate,
         zero_rows=int(zero_mask.sum()),
     )
     return design

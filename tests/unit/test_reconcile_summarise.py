@@ -15,6 +15,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 import numpy as np
+import pytest
 
 from pipeline.quality import _roll_up_metrics
 from pipeline.reconcilers.design import Design, build_design
@@ -656,3 +657,320 @@ def test_a_non_finite_rhat_or_ess_fails_the_write_gate() -> None:
     assert _failed_thresholds({**ok, "max_rhat": float("nan")}, {})
     assert _failed_thresholds({**ok, "max_rhat": float("inf")}, {})
     assert _failed_thresholds({**ok, "min_ess_bulk": float("nan")}, {})
+
+
+def _ar1(rng: np.random.Generator, rho: float, shape: tuple[int, int]) -> np.ndarray:
+    """Per-chain AR(1) draws with unit marginal variance."""
+    out = np.empty(shape)
+    out[:, 0] = rng.normal(size=shape[0])
+    noise = rng.normal(size=shape) * math.sqrt(1.0 - rho**2)
+    for t in range(1, shape[1]):
+        out[:, t] = rho * out[:, t - 1] + noise[:, t]
+    return out
+
+
+def _gate_idata(
+    *,
+    side_rho: float,
+    global_rho: float,
+    n_draws: int = 1000,
+    n_sides: int = 3,
+    seed: int = 0,
+    side_sd: float = 0.1,
+) -> Any:
+    import arviz as az  # noqa: PLC0415
+
+    rng = np.random.default_rng(seed)
+    n_chains = 4
+    mu_side = side_sd * np.stack(
+        [_ar1(rng, side_rho, (n_chains, n_draws)) for _ in range(n_sides)], axis=-1
+    )
+    return az.from_dict(
+        posterior={"mu_side": mu_side, "s0": _ar1(rng, global_rho, (n_chains, n_draws))},
+        coords={"side": [str(i) for i in range(n_sides)]},
+        dims={"mu_side": ["side"]},
+    )
+
+
+def test_a_side_with_low_ess_but_precise_quantiles_does_not_fail_the_write_gate() -> None:
+    from pipeline.reconcilers.summarise import _convergence
+    from pipeline.stages.reconcile import _passes_global_thresholds
+
+    # rho 0.9 over 4 chains of 1000 draws: bulk ESS on mu_side near 200, below the 400 floor,
+    # while each published quantile is still pinned down to a few percent of the
+    # interval.
+    idata = _gate_idata(side_rho=0.9, global_rho=0.0, n_draws=1000)
+
+    worst, _, _ = _convergence(idata)
+
+    assert worst["min_ess_bulk_side"] < 400 <= worst["min_ess_bulk"]
+    assert worst["n_sides_mcse_fail"] == 0, worst["worst_side"]
+    assert _passes_global_thresholds(worst, {})
+
+
+def test_a_global_variable_with_low_ess_still_fails_the_write_gate() -> None:
+    from pipeline.reconcilers.summarise import _convergence
+    from pipeline.stages.reconcile import _failed_thresholds
+
+    idata = _gate_idata(side_rho=0.0, global_rho=0.97)
+
+    worst, worst_variable, _ = _convergence(idata)
+
+    assert worst["min_ess_bulk"] < 400
+    assert worst_variable["ess_bulk"] == "s0"
+    assert any("min_ess_bulk" in reason for reason in _failed_thresholds(worst, {}))
+
+
+def test_sides_whose_quantiles_are_too_noisy_fail_the_write_gate_and_the_worst_is_named() -> None:
+    from pipeline.reconcilers.summarise import _convergence
+    from pipeline.stages.reconcile import _failed_thresholds
+
+    idata = _gate_idata(side_rho=0.995, global_rho=0.0, n_draws=300, n_sides=3)
+
+    worst, _, _ = _convergence(idata)
+
+    assert worst["n_sides_mcse_fail"] == 3
+    assert worst["worst_side"]["side"] in {"0", "1", "2"}
+    assert worst["worst_side"]["mcse_frac"] > 0.05
+    reasons = _failed_thresholds(worst, {})
+    assert any("quantile MCSE" in reason for reason in reasons)
+
+
+def test_the_mcse_limit_given_to_the_summary_decides_the_count() -> None:
+    from pipeline.reconcilers.summarise import _convergence
+
+    idata = _gate_idata(side_rho=0.9, global_rho=0.0)
+
+    strict, _, _ = _convergence(idata, max_quantile_mcse_frac=1e-6)
+    default, _, _ = _convergence(idata)
+
+    assert strict["n_sides_mcse_fail"] == 3
+    assert default["n_sides_mcse_fail"] == 0
+
+
+def test_a_side_with_a_noisy_median_fails_the_absolute_limit_though_the_relative_one_passes() -> (
+    None
+):
+    from pipeline.reconcilers.summarise import _convergence
+    from pipeline.stages.reconcile import _failed_thresholds
+
+    # A wide posterior (sd 1 in log units) with rho 0.9: the median MCSE is about
+    # 0.09, a few percent of the interval width but far above 0.05 log units.
+    idata = _gate_idata(side_rho=0.9, global_rho=0.0, side_sd=1.0)
+
+    worst, _, _ = _convergence(idata)
+    relaxed, _, _ = _convergence(idata, max_median_mcse_log=10.0)
+
+    assert worst["n_sides_mcse_fail"] == 3
+    assert worst["worst_side"]["limit"] == "absolute"
+    assert worst["worst_side"]["quantile"] == 0.5
+    assert worst["worst_side"]["mcse_frac"] < 0.05
+    assert relaxed["n_sides_mcse_fail"] == 0
+    assert any("median MCSE" in reason for reason in _failed_thresholds(worst, {}))
+    assert _failed_thresholds(relaxed, {}) == []
+
+
+def test_a_side_failing_only_the_relative_limit_is_labelled_relative() -> None:
+    from pipeline.reconcilers.summarise import _convergence
+
+    idata = _gate_idata(side_rho=0.9, global_rho=0.0, side_sd=0.1)
+
+    worst, _, _ = _convergence(idata, max_quantile_mcse_frac=1e-6)
+
+    assert worst["n_sides_mcse_fail"] == 3
+    assert worst["worst_side"]["limit"] == "relative"
+
+
+def test_the_checked_quantiles_follow_the_configured_ci_mass() -> None:
+    from pipeline.reconcilers.summarise import _convergence
+
+    idata = _gate_idata(side_rho=0.9, global_rho=0.0)
+
+    narrow, _, _ = _convergence(idata, ci_mass=0.5, max_quantile_mcse_frac=1e-6)
+    wide, _, _ = _convergence(idata, ci_mass=0.99, max_quantile_mcse_frac=1e-6)
+
+    assert any(math.isclose(narrow["worst_side"]["quantile"], q) for q in (0.25, 0.5, 0.75))
+    assert any(math.isclose(wide["worst_side"]["quantile"], q) for q in (0.005, 0.5, 0.995))
+    assert wide["worst_side"]["width"] > narrow["worst_side"]["width"]
+
+
+def test_the_failing_sides_are_named_with_the_limit_each_breaks() -> None:
+    from pipeline.reconcilers.summarise import _convergence
+
+    idata = _gate_idata(side_rho=0.9, global_rho=0.0, side_sd=1.0)
+
+    worst, _, _ = _convergence(idata)
+
+    assert worst["mcse_failed_side_ids"] == [0, 1, 2]
+    assert worst["mcse_failed_limits"] == {"0": "absolute", "1": "absolute", "2": "absolute"}
+    assert _convergence(_gate_idata(side_rho=0.0, global_rho=0.0))[0]["mcse_failed_side_ids"] == []
+
+
+def test_a_fit_failing_only_per_side_mcse_passes_the_global_gate_and_names_the_sides() -> None:
+    from pipeline.stages.reconcile import (
+        _failed_thresholds,
+        _mcse_failed_limits,
+        _passes_global_thresholds,
+    )
+
+    worst = {
+        "max_rhat": 1.001,
+        "min_ess_bulk": 900.0,
+        "divergences": 0,
+        "n_sides_mcse_fail": 2,
+        "mcse_failed_side_ids": [4, 9],
+        "mcse_failed_limits": {"4": "relative", "9": "absolute"},
+        "worst_side": {"side": "4", "limit": "relative", "mcse_frac": 0.2, "mcse": 0.1},
+    }
+
+    assert _passes_global_thresholds(worst, {})
+    assert _mcse_failed_limits(worst) == {4: "relative", 9: "absolute"}
+    assert any("quantile MCSE" in reason for reason in _failed_thresholds(worst, {}))
+
+
+def test_a_global_failure_withholds_the_whole_fit_whatever_the_per_side_state() -> None:
+    from pipeline.stages.reconcile import _passes_global_thresholds
+
+    ok = {"max_rhat": 1.001, "min_ess_bulk": 900.0, "divergences": 0}
+
+    assert _passes_global_thresholds(ok, {})
+    assert not _passes_global_thresholds({**ok, "max_rhat": 1.3}, {})
+    assert not _passes_global_thresholds({**ok, "min_ess_bulk": 10.0}, {})
+    assert not _passes_global_thresholds({**ok, "divergences": 3}, {})
+    assert _passes_global_thresholds({**ok, "n_sides_mcse_fail": 5}, {})
+
+
+def test_every_side_keeps_its_column_in_the_neutral_draws_file(tmp_path: Any) -> None:
+    from pipeline.reconcilers.neutral import NeutralSummary, write_neutral_draws
+
+    summary = NeutralSummary(
+        estimates=[],
+        diagnostics={},
+        side_ids=(10, 11, 12),
+        battle_ids=(1, 1, 2),
+        draws=np.arange(12.0).reshape(4, 3),
+        m0_mean=0.0,
+        s0_mean=1.0,
+    )
+
+    path = write_neutral_draws(
+        summary, processed_root=tmp_path, run_id=5, database="db_a", started_at="t"
+    )
+
+    with np.load(path) as data:
+        assert data["side_id"].tolist() == [10, 11, 12]
+        assert data["draws"].shape == (4, 3)
+
+
+def test_widen_bounds_pushes_each_bound_out_in_log_space() -> None:
+    import math
+
+    from pipeline.reconcilers.summarise import widen_bounds
+
+    lo, hi = widen_bounds(100.0, 400.0, (0.2, 0.1))
+
+    assert lo == pytest.approx(100.0 * math.exp(-0.2))
+    assert hi == pytest.approx(400.0 * math.exp(0.1))
+
+
+def test_only_failing_sides_get_a_margin_of_twice_their_bound_mcse() -> None:
+    from pipeline.reconcilers.summarise import widening_margins
+
+    idata = _gate_idata(side_rho=0.9, global_rho=0.0, side_sd=1.0)
+
+    assert widening_margins(idata, 0.95, []) == {}
+    margins = widening_margins(idata, 0.95, [1])
+
+    assert set(margins) == {1}
+    assert all(m > 0.0 and math.isfinite(m) for m in margins[1])
+
+
+# ─── Contamination diagnostics and slope bookkeeping ─────────────────────────────
+
+
+def _contamination_idata(pi_mean: float) -> tuple[Design, Any]:
+    reports = [
+        _report(1, side_id=1, value=10_000.0, url="https://example/a"),
+        _report(2, side_id=1, value=10_500.0, url="https://example/a"),
+        _report(
+            3, side_id=1, value=10_000.0 * math.exp(5.0), lineage_id=777, url="https://example/a"
+        ),
+    ]
+    design = _design(reports)
+    rng = np.random.default_rng(3)
+    shape = (2, 300)
+    idata = _build_idata(
+        design,
+        InflationPrior(),
+        mu_side_mean=math.log(10_000.0),
+        mu_side_sd=0.01,
+        beta_source_sd=0.01,
+        extra_posterior={
+            "pi_contam": ([], np.clip(rng.normal(pi_mean, 0.01, shape), 0.01, 0.99)),
+            "sigma_estimate": ([], np.abs(rng.normal(0.1, 0.01, shape))),
+            "sigma_round": ([], np.abs(rng.normal(0.1, 0.01, shape))),
+        },
+    )
+    return design, idata
+
+
+def test_every_row_above_one_half_is_listed_by_lineage_id_not_by_its_rounded_value() -> None:
+    from pipeline.reconcilers.summarise import _contamination_diagnostics
+
+    design, idata = _contamination_idata(0.1)
+
+    out = _contamination_diagnostics(idata, design, 2.0)
+
+    assert out["n_rows_contaminated"] == len(out["contaminated_rows"]) == 1
+    row = out["contaminated_rows"][0]
+    assert (row["side_id"], row["lineage_id"]) == (1, 777)
+    assert row["prob"] > 0.5
+    assert len(out["top_contaminated"]) <= 10
+    assert out["top_contaminated"][0]["lineage_id"] == 777
+
+
+def test_a_high_contamination_share_logs_a_warning_without_failing() -> None:
+    from structlog.testing import capture_logs
+
+    from pipeline.reconcilers.summarise import _contamination_diagnostics
+
+    design, idata = _contamination_idata(0.4)
+    with capture_logs() as captured:
+        out = _contamination_diagnostics(idata, design, 2.0)
+    assert out["pi_contam"]["q50"] > 0.3
+    assert [e["event"] for e in captured if e["log_level"] == "warning"] == [
+        "reconcile_contamination_share_is_high"
+    ]
+
+    design, idata = _contamination_idata(0.1)
+    with capture_logs() as captured:
+        _contamination_diagnostics(idata, design, 2.0)
+    assert not [e for e in captured if e["log_level"] == "warning"]
+
+
+def test_zero_valued_estimates_are_counted_and_logged_rather_than_dropped_silently() -> None:
+    from structlog.testing import capture_logs
+
+    from pipeline.reconcilers.records import SideEstimate
+    from pipeline.reconcilers.summarise import _log_estimates
+
+    def estimate(side_id: int, value: float | None) -> SideEstimate:
+        return SideEstimate(
+            side_id=side_id,
+            quantity="troops",
+            value=value,
+            lo=value,
+            hi=value,
+            method="single_report_debiased",
+            n_reports=1,
+            n_sources=1,
+            run_id=1,
+            updated_at=_COMPUTED_AT,
+        )
+
+    with capture_logs() as captured:
+        logs = _log_estimates([estimate(1, 5.0), estimate(2, 0.0), estimate(3, None)])
+
+    assert set(logs) == {1}
+    dropped = [e for e in captured if e["event"] == "reconcile_estimates_without_a_log"]
+    assert [e["n_dropped"] for e in dropped] == [1]

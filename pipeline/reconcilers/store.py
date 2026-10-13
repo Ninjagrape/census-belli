@@ -30,6 +30,7 @@ still ends up with ``bias_run_id`` pointing at the one run both
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from typing import Any, Final
 
 import structlog
@@ -46,6 +47,7 @@ __all__ = [
     "clear_unmodelled",
     "clear_unmodelled_neutral",
     "complete_model_run",
+    "run_fingerprint",
     "start_model_run",
     "write_neutral_estimates",
     "write_side_estimates",
@@ -68,6 +70,10 @@ _COMPLETE_MODEL_RUN = text(
     SET completed_at = now(), diagnostics = CAST(:diagnostics AS JSONB)
     WHERE run_id = :run_id
     """
+)
+
+_RUN_FINGERPRINT = text(
+    "SELECT current_database(), started_at FROM model_runs WHERE run_id = :run_id"
 )
 
 _UPDATE_SIDE_TROOPS = text(
@@ -212,6 +218,11 @@ _LOG_WITHHELD_TROOPS = text(
     SELECT bs.battle_id, bs.side_id, 'troop_total', 'unclassified', :notes
     FROM battle_sides bs
     WHERE bs.side_id = ANY(CAST(:side_ids AS INT[])) AND bs.est_troops_total IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM missing_data_log m
+        WHERE m.side_id = bs.side_id AND m.field_name = 'troop_total'
+          AND m.notes LIKE :prefix || '%'
+      )
     """
 )
 
@@ -221,8 +232,29 @@ _LOG_WITHHELD_CASUALTIES = text(
     SELECT bs.battle_id, bs.side_id, 'casualties', 'unclassified', :notes
     FROM battle_sides bs
     WHERE bs.side_id = ANY(CAST(:side_ids AS INT[])) AND bs.est_casualties IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM missing_data_log m
+        WHERE m.side_id = bs.side_id AND m.field_name = 'casualties'
+          AND m.notes LIKE :prefix || '%'
+      )
     """
 )
+
+# An estimate written by a later run supersedes an earlier "estimate withheld"
+# row for the same side and quantity; left behind it would contradict the value.
+_DELETE_STALE_WITHHELD = text(
+    """
+    DELETE FROM missing_data_log
+    WHERE side_id = ANY(CAST(:side_ids AS INT[]))
+      AND field_name = :field_name
+      AND notes LIKE :prefix || '%'
+    """
+)
+
+_FIELD_BY_QUANTITY: Final[dict[Quantity, str]] = {
+    "troops": "troop_total",
+    "casualties": "casualties",
+}
 
 _SIDE_STATEMENT_BY_QUANTITY: Final[dict[Quantity, Any]] = {
     "troops": _UPDATE_SIDE_TROOPS,
@@ -336,6 +368,15 @@ def write_side_estimates(conn: Any, estimates: list[SideEstimate]) -> int:
             },
         )
         written += 1
+    for quantity in {e.quantity for e in estimates}:
+        conn.execute(
+            _DELETE_STALE_WITHHELD,
+            {
+                "side_ids": sorted(e.side_id for e in estimates if e.quantity == quantity),
+                "field_name": _FIELD_BY_QUANTITY[quantity],
+                "prefix": WITHHELD_NOTE_PREFIX,
+            },
+        )
     return written
 
 
@@ -367,7 +408,12 @@ def clear_unmodelled(
 
 
 def log_withheld_sides(
-    conn: Any, quantity: Quantity, *, side_ids: set[int], run_id: int, reason: str
+    conn: Any,
+    quantity: Quantity,
+    *,
+    side_ids: set[int],
+    run_id: int,
+    reason: str,
 ) -> int:
     """Log the sides of an unwritten fit that are left without an estimate.
 
@@ -383,11 +429,38 @@ def log_withheld_sides(
     """
     statement = _LOG_WITHHELD_TROOPS if quantity == "troops" else _LOG_WITHHELD_CASUALTIES
     notes = f"{WITHHELD_NOTE_PREFIX}, fit did not meet write thresholds (run {run_id}): {reason}"
-    logged = int(conn.execute(statement, {"side_ids": sorted(side_ids), "notes": notes}).rowcount)
+    logged = int(
+        conn.execute(
+            statement,
+            {"side_ids": sorted(side_ids), "notes": notes, "prefix": WITHHELD_NOTE_PREFIX},
+        ).rowcount
+    )
     logger.warning(
         "reconcile_withheld_sides_logged", quantity=quantity, run_id=run_id, sides=logged
     )
     return logged
+
+
+def run_fingerprint(conn: Any, run_id: int) -> tuple[str, str]:
+    """Identify a ``model_runs`` row across databases.
+
+    Run ids are per database, so the id alone cannot tell a file from this
+    database's run from one written by another database that also reached it.
+
+    Args:
+        conn: An open database connection.
+        run_id: The ``model_runs.run_id``.
+
+    Returns:
+        ``(current_database(), started_at as a UTC ISO string)``.
+
+    Raises:
+        LookupError: If the run does not exist.
+    """
+    row = conn.execute(_RUN_FINGERPRINT, {"run_id": run_id}).one_or_none()
+    if row is None or row[1] is None:
+        raise LookupError(f"model_runs row {run_id} has no started_at")
+    return str(row[0]), row[1].astimezone(UTC).isoformat()
 
 
 def clear_unmodelled_neutral(conn: Any, *, side_ids: set[int]) -> int:

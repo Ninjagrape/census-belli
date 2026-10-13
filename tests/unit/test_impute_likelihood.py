@@ -9,7 +9,6 @@ import pytest
 
 from pipeline.imputers.likelihood import (
     divide_prior,
-    find_latest_draws,
     likelihoods_from_draws,
     likelihoods_from_published,
     load_neutral_draws,
@@ -108,10 +107,17 @@ def test_singular_covariance_falls_back_to_the_diagonal() -> None:
     assert result.precision[0, 1] == 0.0
 
 
-def _write_draws(path: Path, run_id: int, draws: np.ndarray, side_ids: list[int]) -> None:
+def _write_draws(
+    path: Path,
+    run_id: int,
+    draws: np.ndarray,
+    side_ids: list[int],
+    fingerprint: dict[str, str] | None = None,
+) -> None:
     np.savez(
         path,
         run_id=run_id,
+        **(fingerprint or {}),
         side_id=np.array(side_ids, dtype=np.int64),
         battle_id=np.array([(s + 1) // 2 for s in side_ids], dtype=np.int64),
         draws=draws,
@@ -120,20 +126,25 @@ def _write_draws(path: Path, run_id: int, draws: np.ndarray, side_ids: list[int]
     )
 
 
-def test_find_latest_draws_picks_the_highest_run_id(tmp_path: Path) -> None:
-    for run_id in (3, 12, 7):
-        _write_draws(tmp_path / f"neutral_draws_run{run_id}.npz", run_id, np.zeros((2, 1)), [1])
-
-    assert find_latest_draws(tmp_path) == tmp_path / "neutral_draws_run12.npz"
-    assert find_latest_draws(tmp_path / "absent") is None
-
-
 def test_load_rejects_mismatched_shapes(tmp_path: Path) -> None:
     path = tmp_path / "neutral_draws_run1.npz"
     _write_draws(path, 1, np.zeros((5, 3)), [1, 2])
 
     with pytest.raises(ValueError, match="does not match"):
         load_neutral_draws(path)
+
+
+def test_load_reads_the_fingerprint_and_tolerates_its_absence(tmp_path: Path) -> None:
+    stamped = tmp_path / "neutral_draws_run1.npz"
+    _write_draws(stamped, 1, np.zeros((5, 2)), [1, 2], {"database": "db_a", "started_at": "t0"})
+    old = tmp_path / "neutral_draws_run2.npz"
+    _write_draws(old, 2, np.zeros((5, 2)), [1, 2])
+
+    assert (load_neutral_draws(stamped).database, load_neutral_draws(stamped).started_at) == (
+        "db_a",
+        "t0",
+    )
+    assert load_neutral_draws(old).database is None
 
 
 def test_likelihoods_from_draws_recover_a_known_likelihood(tmp_path: Path) -> None:

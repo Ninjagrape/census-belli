@@ -58,7 +58,7 @@ priors:
 sampler:
   # 1500 + 1500 per chain: the skill vector is non-centred, so ESS for the
   # weakest general (one battle, wide posterior) is the binding constraint.
-  draws: 1500
+  draws: 3000
   tune: 1500
   chains: 4
   # More than one core respawns the interpreter under pytest on Windows.

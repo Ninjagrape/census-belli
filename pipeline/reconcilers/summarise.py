@@ -50,7 +50,8 @@ from __future__ import annotations
 import json
 import math
 from collections import defaultdict
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -67,15 +68,38 @@ from pipeline.reconcilers.model import (
     _UNLABELLED_WEIGHT,
     InflationPrior,
     ModelPriors,
+    _unknown_level_mask,
+    _unlabelled_mask,
 )
 from pipeline.reconcilers.records import Quantity, Report, SideEstimate, SourceBias, SourceKey
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     import arviz as az
 
-__all__ = ["SummaryResult", "reports_honoured", "spread_ratio", "summarise_fit"]
+__all__ = [
+    "DEFAULT_MAX_QUANTILE_MCSE_FRAC",
+    "LOW_PRECISION_MCSE_MULTIPLE",
+    "SummaryResult",
+    "reports_honoured",
+    "singleton_slope",
+    "spread_ratio",
+    "summarise_fit",
+]
 
 logger = structlog.get_logger()
+
+# A contamination share above this means the faithful component is carrying too
+# little of the data; reported, not gated.
+_PI_CONTAM_WARN = 0.3
+
+# The write gate's default limits on a side's quantile MCSE: as a share of its
+# interval width, and for the median as an absolute error on the log scale.
+DEFAULT_MAX_QUANTILE_MCSE_FRAC = 0.05
+DEFAULT_MAX_MEDIAN_MCSE_LOG = 0.05
+
+# A side that fails the MCSE limits is written with each interval bound pushed
+# out by this many of that bound's own quantile MCSEs, in log units.
+LOW_PRECISION_MCSE_MULTIPLE = 2.0
 
 
 @dataclass(frozen=True)
@@ -109,6 +133,8 @@ def summarise_fit(
     inflation: InflationPrior,
     priors: ModelPriors,
     computed_at: datetime,
+    max_quantile_mcse_frac: float = DEFAULT_MAX_QUANTILE_MCSE_FRAC,
+    max_median_mcse_log: float = DEFAULT_MAX_MEDIAN_MCSE_LOG,
 ) -> SummaryResult:
     """Turn a sampled posterior into the records the reconcile stage stores.
 
@@ -127,6 +153,10 @@ def summarise_fit(
         inflation: The fitted claim-regime prior the model was built with.
         priors: The hierarchy scales the model was built with.
         computed_at: The timestamp to stamp every record with.
+        max_quantile_mcse_frac: The write gate's limit on a side's quantile
+            MCSE as a share of its interval width; see :func:`_convergence`.
+        max_median_mcse_log: The write gate's absolute limit on the MCSE of a
+            side's median, in log units.
 
     Returns:
         The side estimates, source biases, and diagnostics payload.
@@ -153,7 +183,16 @@ def summarise_fit(
     side_estimates = _side_estimates(idata, design, reports_by_side, run_id, ci_mass, computed_at)
     source_biases = _source_biases(idata, design, rows, run_id, computed_at)
 
-    worst, worst_variable, divergences = _convergence(idata)
+    worst, worst_variable, divergences = _convergence(
+        idata,
+        ci_mass=ci_mass,
+        max_quantile_mcse_frac=max_quantile_mcse_frac,
+        max_median_mcse_log=max_median_mcse_log,
+    )
+    side_estimates = _widen_low_precision(
+        side_estimates, widening_margins(idata, ci_mass, worst["mcse_failed_side_ids"])
+    )
+    log_estimates = _log_estimates(side_estimates)
     diagnostics: dict[str, Any] = {
         "quantity": design.quantity,
         "n_obs": design.n_obs,
@@ -168,15 +207,13 @@ def summarise_fit(
         "sigma_type": _sigma_type_stats(idata),
         # Do the estimates spread as widely as the reports? ~0.005 on the pilot
         # corpus where every side came back at the same level; see spread_ratio.
-        "spread_ratio": spread_ratio(
-            design,
-            {e.side_id: math.log(e.value) for e in side_estimates if e.value},
-        ),
+        "spread_ratio": spread_ratio(design, log_estimates),
         # The rhetorical weight applied to every unlabelled row in *this* run,
         # not a fitted quantity -- see model.py's module docstring for why the
         # gold set cannot supply one. Carried here so a published estimate is
         # traceable to the judgement call behind it.
         "unlabelled_weight": _UNLABELLED_WEIGHT,
+        "singleton_slope": singleton_slope(design, log_estimates),
         # Round-tripped through JSON because the YAML loader parses
         # `fitted_on: 2026-09-24` as a date, which json.dumps rejects. The
         # payload promises plain JSON; a store that papers over it with
@@ -188,6 +225,11 @@ def summarise_fit(
         "era_centre_rows": design.era_centre_rows,
         "worst": worst,
         "worst_variable": worst_variable,
+        "n_sides_mcse_fail": worst["n_sides_mcse_fail"],
+        "n_sides_low_precision": worst["n_sides_mcse_fail"],
+        "mcse_failed_side_ids": worst["mcse_failed_side_ids"],
+        "mcse_failed_limits": worst["mcse_failed_limits"],
+        "worst_side": worst["worst_side"],
         "offset_bar": _scalar_stats(idata, "offset_bar"),
         "m0": _scalar_stats(idata, "m0"),
         "corpus_level": _scalar_stats(idata, "corpus_level"),
@@ -195,6 +237,7 @@ def summarise_fit(
         "n_identifying_sides": _n_identifying_sides(rows, design.regimes),
         "contraction": _contraction(idata, design, priors, inflation),
     }
+    diagnostics.update(_contamination_diagnostics(idata, design, priors.contamination_sd))
 
     logger.info(
         "reconcile_summary_built",
@@ -210,6 +253,94 @@ def summarise_fit(
     return SummaryResult(
         side_estimates=side_estimates, source_biases=source_biases, diagnostics=diagnostics
     )
+
+
+def widening_margins(
+    idata: az.InferenceData, ci_mass: float, side_ids: list[int]
+) -> dict[int, tuple[float, float]]:
+    """How far to push each published bound out for sides with noisy quantiles.
+
+    Args:
+        idata: The fit's posterior.
+        ci_mass: The published credible interval's total mass.
+        side_ids: The sides that failed the quantile MCSE limits.
+
+    Returns:
+        ``side_id`` to ``(lower margin, upper margin)`` in log units: the
+        multiple :data:`LOW_PRECISION_MCSE_MULTIPLE` of the MCSE of that bound's
+        quantile. A non-finite MCSE (a single chain) gives a zero margin. Empty
+        when ``side_ids`` is, without computing anything.
+    """
+    import arviz as az  # noqa: PLC0415 - deliberately deferred; see module docstring
+
+    if not side_ids or "mu_side" not in idata.posterior:
+        return {}
+    lower_q = (1.0 - ci_mass) / 2.0
+    labels = _coord_labels(idata, "side")
+    errors: list[np.ndarray] = []
+    for q in (lower_q, 1.0 - lower_q):
+        mcse = az.mcse(idata, var_names=["mu_side"], method="quantile", prob=q)["mu_side"]
+        errors.append(np.asarray(mcse.values, dtype=float))
+    margins: dict[int, tuple[float, float]] = {}
+    for side_id in side_ids:
+        if str(side_id) not in labels:
+            continue
+        j = labels.index(str(side_id))
+        lo_err, hi_err = (float(e[j]) if math.isfinite(float(e[j])) else 0.0 for e in errors)
+        margins[side_id] = (
+            LOW_PRECISION_MCSE_MULTIPLE * lo_err,
+            LOW_PRECISION_MCSE_MULTIPLE * hi_err,
+        )
+    return margins
+
+
+def widen_bounds(lo: float, hi: float, margin: tuple[float, float]) -> tuple[float, float]:
+    """Push an interval's bounds out in log space by the given margins.
+
+    Args:
+        lo: Lower bound, on the natural scale.
+        hi: Upper bound, on the natural scale.
+        margin: ``(lower, upper)`` log-unit margins from :func:`widening_margins`.
+
+    Returns:
+        ``(exp(log(lo) - lower), exp(log(hi) + upper))``.
+    """
+    return math.exp(math.log(lo) - margin[0]), math.exp(math.log(hi) + margin[1])
+
+
+def _widen_low_precision(
+    side_estimates: list[SideEstimate], margins: dict[int, tuple[float, float]]
+) -> list[SideEstimate]:
+    """Widen the interval of every side that has a margin; the point estimate stays."""
+    widened: list[SideEstimate] = []
+    for estimate in side_estimates:
+        margin = margins.get(estimate.side_id)
+        if margin is None or estimate.lo is None or estimate.hi is None:
+            widened.append(estimate)
+            continue
+        lo, hi = widen_bounds(estimate.lo, estimate.hi, margin)
+        widened.append(replace(estimate, lo=lo, hi=hi))
+    return widened
+
+
+def _log_estimates(side_estimates: list[SideEstimate]) -> dict[int, float]:
+    """Log of each side's published estimate, counting the ones that cannot be logged.
+
+    Args:
+        side_estimates: The published estimates.
+
+    Returns:
+        ``side_id`` to ``log(value)``, leaving out a side whose value is zero or
+        negative (a side with no estimate is not counted); those are counted
+        and logged rather than dropped silently.
+    """
+    positive = {
+        e.side_id: math.log(e.value) for e in side_estimates if e.value is not None and e.value > 0
+    }
+    n_dropped = sum(e.value is not None and e.value <= 0 for e in side_estimates)
+    if n_dropped:
+        logger.warning("reconcile_estimates_without_a_log", n_dropped=n_dropped)
+    return positive
 
 
 def spread_ratio(design: Design, log_estimates: dict[int, float]) -> float | None:
@@ -251,6 +382,161 @@ def spread_ratio(design: Design, log_estimates: dict[int, float]) -> float | Non
     if observed_sd <= 0.0:
         return None
     return _finite(float(np.std(estimated)) / observed_sd)
+
+
+def singleton_slope(design: Design, log_estimates: dict[int, float]) -> float | None:
+    """OLS slope of the log estimate on the report, over singleton sides.
+
+    A slope near 1 means a lone report is trusted at face value up to the
+    bias terms; near 0 means every singleton has been shrunk to the corpus
+    mean, which the spread ratio can miss when multi-report sides keep their
+    spread.
+
+    Args:
+        design: The design the fit used.
+        log_estimates: ``side_id`` to the log of the published estimate.
+
+    Returns:
+        The slope, or None when fewer than three singleton sides exist or
+        their reports do not vary.
+    """
+    counts = np.bincount(design.side_index, minlength=design.n_sides)
+    xs: list[float] = []
+    ys: list[float] = []
+    for row in design.point_rows:
+        position = int(design.side_index[row])
+        side_id = design.side_ids[position]
+        if counts[position] != 1 or side_id not in log_estimates:
+            continue
+        xs.append(float(design.log_y[row]))
+        ys.append(log_estimates[side_id])
+    if len(xs) < 3 or float(np.var(xs)) <= 0.0:
+        return None
+    return _finite(float(np.polyfit(xs, ys, 1)[0]))
+
+
+def _log_normal_pdf(y: np.ndarray, mu: np.ndarray, sd: np.ndarray) -> np.ndarray:
+    """Log density of a Normal, elementwise.
+
+    Args:
+        y: Observations.
+        mu: Means.
+        sd: Standard deviations.
+
+    Returns:
+        The log density.
+    """
+    z = (y - mu) / sd
+    return cast(np.ndarray, -0.5 * z * z - np.log(sd) - 0.5 * math.log(2.0 * math.pi))
+
+
+def _row_eta_and_var(
+    draw: Callable[[str], np.ndarray], design: Design, rows: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Linear predictor and variance of the given rows, per draw.
+
+    The same algebra as ``build_model``'s ``eta`` and ``sd ** 2``; a unit test
+    compiles the model's own and checks this against it.
+
+    Args:
+        draw: Name to an array of shape ``(n_draws, ...)`` of that posterior
+            variable.
+        design: The design the fit used.
+        rows: Row indices into the design.
+
+    Returns:
+        ``(eta, var)``, each of shape ``(n_draws, len(rows))``.
+    """
+    eta = (
+        draw("mu_side")[:, design.side_index[rows]]
+        + draw("beta_source")[:, design.source_index[rows]]
+        + draw("g_regime")[:, design.regime_index[rows]]
+        + draw("delta_level")[:, design.level_index[rows]]
+        + draw("a_era")[:, None] * (design.era * _unlabelled_mask(design))[rows]
+    )
+    var = (
+        draw("sigma_source")[:, design.source_index[rows]] ** 2
+        + draw("sigma_estimate")[:, None] ** 2 * design.is_estimate.astype(float)[rows]
+        + draw("sigma_round")[:, None] ** 2 * design.roundness[rows]
+        + design.range_var[rows]
+    )
+    unknown = _unknown_level_mask(design)
+    if unknown.any():
+        var = var + draw("sigma_unknown")[:, None] ** 2 * unknown[rows]
+    return eta, var
+
+
+def _contamination_diagnostics(
+    idata: az.InferenceData, design: Design, contamination_sd: float, *, max_draws: int = 500
+) -> dict[str, Any]:
+    """Posterior contamination probability of each point row.
+
+    Rebuilds each point row's linear predictor and scale from the posterior
+    (see :func:`_row_eta_and_var`), then for each draw takes
+    ``pi * N_wide / ((1 - pi) * N_faithful + pi * N_wide)``, averaged over
+    draws. Thinned to ``max_draws`` so a long chain does not allocate a
+    draws-by-rows matrix.
+
+    Args:
+        idata: The fit's posterior.
+        design: The design the fit used.
+        contamination_sd: The fixed log-unit sd added in the wide component.
+        max_draws: The most draws to evaluate.
+
+    Returns:
+        ``pi_contam``, ``n_rows_contaminated``, ``contaminated_rows`` (every
+        row with probability above 0.5, keyed by side and lineage) and
+        ``top_contaminated`` (the ten most likely), or an empty dict when the
+        fit has no ``pi_contam`` (another likelihood family, or a hand-built
+        posterior).
+    """
+    if "pi_contam" not in idata.posterior or design.point_rows.size == 0:
+        return {}
+    pi = _pooled(idata, "pi_contam")
+    stats: dict[str, Any] = {
+        "mean": _finite(float(np.mean(pi))),
+        "q05": _finite(float(np.quantile(pi, 0.05))),
+        "q50": _finite(float(np.quantile(pi, 0.5))),
+        "q95": _finite(float(np.quantile(pi, 0.95))),
+    }
+    if stats["q50"] is not None and stats["q50"] > _PI_CONTAM_WARN:
+        logger.warning(
+            "reconcile_contamination_share_is_high",
+            pi_contam_q50=stats["q50"],
+            threshold=_PI_CONTAM_WARN,
+            hint="the faithful component may be too narrow for this corpus",
+        )
+    keep = np.unique(np.linspace(0, pi.shape[0] - 1, min(max_draws, pi.shape[0])).astype(int))
+    pi = pi[keep]
+    rows = design.point_rows
+
+    def draw(name: str) -> np.ndarray:
+        thinned: np.ndarray = _pooled(idata, name)[keep]
+        return thinned
+
+    eta, var = _row_eta_and_var(draw, design, rows)
+    y = design.log_y[rows][None, :]
+    log_faithful = np.log1p(-pi)[:, None] + _log_normal_pdf(y, eta, np.sqrt(var))
+    log_wide = np.log(pi)[:, None] + _log_normal_pdf(y, eta, np.sqrt(var + contamination_sd**2))
+    prob = np.exp(log_wide - np.logaddexp(log_faithful, log_wide)).mean(axis=0)
+
+    def describe(i: int) -> dict[str, Any]:
+        row = rows[i]
+        return {
+            "side_id": int(design.side_ids[int(design.side_index[row])]),
+            "lineage_id": int(design.lineage_ids[int(design.lineage_index[row])]),
+            "value": float(math.exp(design.log_y[row])),
+            "prob": _finite(float(prob[i])),
+        }
+
+    flagged = np.flatnonzero(prob > 0.5)
+    order = np.argsort(-prob)[:10]
+    return {
+        "pi_contam": stats,
+        "n_rows_contaminated": int(flagged.size),
+        "contaminated_rows": [describe(int(i)) for i in flagged[np.argsort(-prob[flagged])]],
+        "top_contaminated": [describe(int(i)) for i in order],
+    }
 
 
 def _sigma_type_stats(idata: az.InferenceData) -> dict[str, float | None]:
@@ -562,8 +848,12 @@ def _source_biases(
 
 def _convergence(
     idata: az.InferenceData,
-) -> tuple[dict[str, float | int | None], dict[str, str | None], int]:
-    """Roll up rhat, bulk ESS and divergences across every sampled variable.
+    *,
+    ci_mass: float = 0.95,
+    max_quantile_mcse_frac: float = DEFAULT_MAX_QUANTILE_MCSE_FRAC,
+    max_median_mcse_log: float = DEFAULT_MAX_MEDIAN_MCSE_LOG,
+) -> tuple[dict[str, Any], dict[str, str | None], int]:
+    """Roll up rhat, bulk ESS, divergences and per-side quantile error.
 
     Run over arviz's default variable selection for the ``posterior`` group,
     which is every free and deterministic variable the model registered --
@@ -571,20 +861,40 @@ def _convergence(
     is exactly the failure mode that sampled cleanly on ``mu_side`` while
     ``ess(m0) = 5.3`` in the case §19.8 of ``docs/handover-log.md`` records. Restricting
     to a hand-picked variable list would have hidden that case by
-    construction. Deterministics are included too: they are cheap here (no
-    extra sampling, just a reduction over an already-materialised array), and
-    a redundant fully-determined entry contributes rhat/ESS values that get
-    silently skipped below rather than corrupting the max/min.
+    construction.
+
+    The gate is split by what a variable publishes. Global variables (no
+    ``side`` dim) keep the rhat and bulk-ESS limits. Side variables
+    (``mu_side``, ``z_side``) need rhat only, plus a Monte Carlo error bound on
+    the published quantities. A side's quantities are judged on the precision
+    of the quantiles the stage writes, which is what the gate exists to
+    protect, rather than on bulk ESS: with hundreds of side variables the
+    minimum ESS fails by multiplicity alone, and it does so on exactly the
+    sides whose reports are only weakly separated, where the posterior mixes
+    slowly but its quantiles are still estimated well relative to the
+    interval they publish. What the stage writes is the lower, 50% and upper
+    quantile of ``mu_side`` (the lower and upper from ``ci_mass``), so the
+    check is that the MCSE of each is at most ``max_quantile_mcse_frac`` of
+    that side's interval width, and that the median's MCSE is at most
+    ``max_median_mcse_log`` in absolute log units.
 
     Args:
         idata: The fit's posterior, plus ``sample_stats`` for divergences.
+        ci_mass: The published credible interval's total mass.
+        max_quantile_mcse_frac: The largest allowed quantile MCSE as a share
+            of the side's interval width.
+        max_median_mcse_log: The largest allowed MCSE of a side's median, in
+            log units. A narrow interval can pass the relative limit while the
+            median is still off by more than anyone would read from the value.
 
     Returns:
         A ``(worst, worst_variable, divergences)`` triple. ``worst`` maps
-        ``"max_rhat"``, ``"min_ess_bulk"`` and ``"divergences"`` to their
-        values, with ``None`` where every candidate value was non-finite
-        (e.g. a single-chain fit, where rhat is undefined). ``worst_variable``
-        names which variable produced the extreme rhat and ESS.
+        ``"max_rhat"`` (every variable), ``"min_ess_bulk"`` (global variables
+        only), ``"min_ess_bulk_side"`` (informational), ``"divergences"``,
+        ``"n_sides_mcse_fail"`` and ``"worst_side"`` to their values, with
+        ``None`` where every candidate value was non-finite (e.g. a
+        single-chain fit, where rhat is undefined). ``worst_variable`` names
+        which variable produced the extreme rhat and ESS.
     """
     import arviz as az  # noqa: PLC0415 - deliberately deferred; see module docstring
 
@@ -605,13 +915,16 @@ def _convergence(
 
     min_ess = float("inf")
     worst_ess_var: str | None = None
+    min_ess_side = float("inf")
     for var_name, data_array in ess_ds.data_vars.items():
         values = np.asarray(data_array.values, dtype=float).ravel()
         values = values[~np.isnan(values)]
         if values.size == 0:
             continue
         candidate = float(values.min())
-        if candidate < min_ess:
+        if "side" in data_array.dims:
+            min_ess_side = min(min_ess_side, candidate)
+        elif candidate < min_ess:
             min_ess = candidate
             worst_ess_var = str(var_name)
 
@@ -624,13 +937,94 @@ def _convergence(
     if "sample_stats" in idata.groups() and "diverging" in idata.sample_stats:
         divergences = int(np.asarray(idata.sample_stats["diverging"].values).sum())
 
-    worst: dict[str, float | int | None] = {
+    n_fail, worst_side, failed_sides = _side_quantile_mcse(
+        idata, ci_mass, max_quantile_mcse_frac, max_median_mcse_log
+    )
+    worst: dict[str, Any] = {
         "max_rhat": _finite(max_rhat) if worst_rhat_var is not None else None,
         "min_ess_bulk": _finite(min_ess) if worst_ess_var is not None else None,
+        "min_ess_bulk_side": _finite(min_ess_side) if min_ess_side != float("inf") else None,
         "divergences": divergences,
+        "n_sides_mcse_fail": n_fail,
+        "worst_side": worst_side,
+        "mcse_failed_side_ids": sorted(int(label) for label in failed_sides),
+        "mcse_failed_limits": failed_sides,
     }
     worst_variable: dict[str, str | None] = {"rhat": worst_rhat_var, "ess_bulk": worst_ess_var}
     return worst, worst_variable, divergences
+
+
+def _side_quantile_mcse(
+    idata: az.InferenceData,
+    ci_mass: float,
+    max_frac: float,
+    max_median_log: float,
+) -> tuple[int, dict[str, Any] | None, dict[str, str]]:
+    """Find the sides whose published quantiles are too noisy to write.
+
+    Args:
+        idata: The fit's posterior.
+        ci_mass: The published credible interval's total mass; the quantiles
+            checked are ``((1 - c) / 2, 0.5, (1 + c) / 2)``.
+        max_frac: The largest allowed quantile MCSE as a share of the side's
+            interval width.
+        max_median_log: The largest allowed MCSE of the median, in log units.
+
+    Returns:
+        ``(n_fail, worst)``: the number of sides where any published quantile
+        has MCSE above ``max_frac`` times the interval width, or the median's
+        MCSE exceeds ``max_median_log``; and the side with the largest ratio
+        to its limit as ``{"side", "quantile", "mcse_frac", "mcse", "width",
+        "limit"}`` (None when the posterior has no ``mu_side``). ``limit`` is
+        ``"relative"`` or ``"absolute"``, whichever the worst side is furthest
+        past (or closest to), plus a mapping from each failing side's label to
+        the limit it is furthest past (``"relative"`` or ``"absolute"``). A
+        non-finite MCSE (a single chain) is skipped, as a non-finite rhat is.
+    """
+    import arviz as az  # noqa: PLC0415 - deliberately deferred; see module docstring
+
+    if "mu_side" not in idata.posterior:
+        return 0, None, {}
+    lower_q = (1.0 - ci_mass) / 2.0
+    quantiles = (lower_q, 0.5, 1.0 - lower_q)
+    mu = _pooled(idata, "mu_side")
+    lo, hi = np.quantile(mu, [quantiles[0], quantiles[2]], axis=0)
+    width = np.maximum(hi - lo, np.finfo(float).tiny)
+    labels = _coord_labels(idata, "side")
+    errors = np.full((len(quantiles), mu.shape[1]), np.nan)
+    for i, q in enumerate(quantiles):
+        mcse = az.mcse(idata, var_names=["mu_side"], method="quantile", prob=q)["mu_side"]
+        errors[i] = np.asarray(mcse.values, dtype=float)
+    relative = errors / width
+    # Each limit becomes a ratio to its own bound, so one argmax ranks sides by
+    # how far past either limit they are. Only the median has an absolute limit.
+    relative_ratio = np.where(np.isnan(relative), -np.inf, relative / max_frac)
+    absolute_ratio = np.full_like(relative, -np.inf)
+    median_ratio = errors[1] / max_median_log
+    absolute_ratio[1] = np.where(np.isnan(median_ratio), -np.inf, median_ratio)
+    combined = np.maximum(relative_ratio, absolute_ratio)
+    per_side = combined.max(axis=0)
+    n_fail = int(np.sum(per_side > 1.0))
+    failed: dict[str, str] = {}
+    for j in np.flatnonzero(per_side > 1.0):
+        k = int(np.argmax(combined[:, j]))
+        failed[labels[int(j)]] = (
+            "absolute" if absolute_ratio[k, j] > relative_ratio[k, j] else "relative"
+        )
+    if not np.isfinite(per_side).any():
+        return n_fail, None, failed
+    side = int(np.argmax(per_side))
+    q_index = int(np.argmax(combined[:, side]))
+    absolute_wins = absolute_ratio[q_index, side] > relative_ratio[q_index, side]
+    worst_side = {
+        "side": labels[side],
+        "quantile": quantiles[q_index],
+        "mcse_frac": _finite(float(relative[q_index, side])),
+        "mcse": _finite(float(errors[q_index, side])),
+        "width": _finite(float(width[side])),
+        "limit": "absolute" if absolute_wins else "relative",
+    }
+    return n_fail, worst_side, failed
 
 
 def _scalar_stats(idata: az.InferenceData, name: str) -> dict[str, float | None]:

@@ -44,7 +44,7 @@ from pipeline.imputers.conditional import RoundSet, draw_rounds, extract_posteri
 from pipeline.imputers.design import ImputeDesign, build_design
 from pipeline.imputers.gates import GateResult, run_gates
 from pipeline.imputers.likelihood import (
-    find_latest_draws,
+    NeutralDraws,
     likelihoods_from_draws,
     likelihoods_from_published,
     load_neutral_draws,
@@ -68,6 +68,7 @@ from pipeline.imputers.summarise import (
 )
 from pipeline.reconcilers import store as run_store
 from pipeline.reconcilers.model import SamplerSettings, sample
+from pipeline.reconcilers.neutral import neutral_draws_path
 from pipeline.stages.base import StageContext
 
 __all__ = ["run"]
@@ -107,14 +108,25 @@ def _build_likelihoods(
             published_run_id(conn),
         )
 
-    path = Path(ip.draws_path) if ip.draws_path else find_latest_draws(Path(ip.reconcile_root))
-    if path is None or not path.is_file():
+    expected = latest_written_neutral_run_id(conn)
+    if ip.draws_path:
+        path = Path(ip.draws_path)
+    else:
+        # Run ids are per database, so the file is named by this database's own
+        # latest written neutral run rather than the highest number on disk,
+        # which may belong to another database sharing the directory.
+        if expected is None:
+            raise FileNotFoundError(
+                "no reconcile run has written a neutral fit in this database: run reconcile first "
+                "(its neutral fit must converge to write one)"
+            )
+        path = Path(ip.reconcile_root) / neutral_draws_path(Path(), expected).name
+    if not path.is_file():
         raise FileNotFoundError(
-            f"no neutral_draws_run*.npz under {ip.reconcile_root}: run reconcile first "
+            f"expected neutral draws file {path} not found: run reconcile first "
             "(its neutral fit must converge to write one)"
         )
     neutral = load_neutral_draws(path)
-    expected = latest_written_neutral_run_id(conn)
     if expected is None or neutral.run_id != expected:
         raise ValueError(
             f"{path.name} comes from reconcile run {neutral.run_id}, but the latest reconcile "
@@ -122,6 +134,7 @@ def _build_likelihoods(
             "different database. Re-run reconcile, or point reconcile_root/draws_path at "
             "the matching file."
         )
+    _check_fingerprint(conn, neutral, path)
     logger.info("impute_neutral_draws_loaded", path=str(path), run_id=neutral.run_id)
     liks, stats = likelihoods_from_draws(
         neutral, {s.side_id for s in sides}, min_precision=ip.min_lik_precision
@@ -130,6 +143,27 @@ def _build_likelihoods(
     counts.sides_weak_as_missing = stats.weak_sides
     counts.battles_diagonal_fallback = stats.diagonal_battles
     return liks, neutral.run_id
+
+
+def _check_fingerprint(conn: Any, neutral: NeutralDraws, path: Path) -> None:
+    """Refuse a draws file written by another database or an earlier run row.
+
+    Raises:
+        ValueError: If the file has no fingerprint, or its database name or run
+            start time differs from this connection's.
+    """
+    if neutral.database is None or neutral.started_at is None:
+        raise ValueError(
+            f"{path.name} has no database fingerprint (written by an older reconcile): "
+            "re-run reconcile to write a new draws file."
+        )
+    database, started_at = run_store.run_fingerprint(conn, neutral.run_id)
+    if neutral.database != database or neutral.started_at != started_at:
+        raise ValueError(
+            f"{path.name} fingerprint mismatch: file is from database {neutral.database!r} "
+            f"run started {neutral.started_at}, this connection is database {database!r} "
+            f"run started {started_at}. Re-run reconcile on this database."
+        )
 
 
 def _fit_and_write(

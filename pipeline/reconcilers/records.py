@@ -153,6 +153,9 @@ class Report:
         roundness: How conventional this figure looks, from
             :func:`pipeline.reconcilers.claims.roundness`, or its default
             ``0.0`` before that has run.
+        range_var: Extra observation variance on the log scale, nonzero only for
+            a row built from a stated range (see
+            :func:`pipeline.reconcilers.claims.merge_range_pairs`).
     """
 
     report_id: int
@@ -174,6 +177,7 @@ class Report:
     claim_regime: str = "unlabelled"
     lineage_id: int | None = None
     roundness: float = 0.0
+    range_var: float = 0.0
 
     def __post_init__(self) -> None:
         """Validate every vocabulary field at construction, once, at the boundary.
@@ -229,6 +233,8 @@ class ReconcileCounts:
     censored_upper: int = 0
     censored_lower: int = 0
     both_bounds: int = 0
+    ranges_merged: int = 0
+    ranges_degenerate: int = 0
     sides_estimated: int = 0
     sides_unfillable: int = 0
     sources_updated: int = 0
@@ -256,6 +262,8 @@ class ReconcileCounts:
             "censored_upper": self.censored_upper,
             "censored_lower": self.censored_lower,
             "both_bounds": self.both_bounds,
+            "ranges_merged": self.ranges_merged,
+            "ranges_degenerate": self.ranges_degenerate,
             "sides_estimated": self.sides_estimated,
             "sides_unfillable": self.sides_unfillable,
             "sources_updated": self.sources_updated,

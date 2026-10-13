@@ -39,6 +39,7 @@ from sqlalchemy.engine import Connection, Engine
 from pipeline.db import DatabaseConfigError, apply_schema, database_url, get_engine
 from pipeline.imputers.load import load_side_rows
 from pipeline.quality import QualityRunner
+from pipeline.reconcilers.store import run_fingerprint
 from pipeline.stages import impute as impute_stage
 from pipeline.stages.base import StageContext, check_conforms
 from tests.model.impute_sim import SimCorpus, simulate_corpus
@@ -146,8 +147,9 @@ _INSERT_MISSING = text(
 # wrote a neutral fit, so the fixture needs such a run to exist.
 _INSERT_RECONCILE_RUN = text(
     """
-    INSERT INTO model_runs (run_id, run_name, model_type, config, completed_at, diagnostics)
-    VALUES (:run_id, 'fake reconcile', 'source_disagreement', '{}'::jsonb, now(),
+    INSERT INTO model_runs (run_id, run_name, model_type, config, started_at, completed_at,
+                            diagnostics)
+    VALUES (:run_id, 'fake reconcile', 'source_disagreement', '{}'::jsonb, now(), now(),
             '{"troops_neutral": {"written": true}}'::jsonb)
     """
 )
@@ -249,9 +251,12 @@ def _write_draws(path: Path, corpus: SimCorpus, db_side: dict[int, int], conn: A
         dtype=np.int64,
     )
     centres = np.array([corpus.measured_y[s.side_id] for s in observed])
+    database, started_at = run_fingerprint(conn, FAKE_RECONCILE_RUN_ID)
     np.savez(
         path,
         run_id=FAKE_RECONCILE_RUN_ID,
+        database=database,
+        started_at=started_at,
         side_id=side_ids,
         battle_id=battle_ids,
         draws=centres + 0.5 * rng.standard_normal((400, len(observed))),
@@ -525,6 +530,17 @@ def test_neutral_scale_without_a_draws_file_fails_loudly(
         impute_stage.run(spec, context=StageContext(db_conn=conn))
 
 
+def test_a_draws_file_from_another_run_in_the_directory_is_not_picked_up(
+    conn: Connection, seeded: dict[str, Any], tmp_path: Path
+) -> None:
+    other = tmp_path / f"neutral_draws_run{FAKE_RECONCILE_RUN_ID + 1}.npz"
+    other.write_bytes(seeded["draws_path"].read_bytes())
+    spec = _spec(seeded, draws_path=None, reconcile_root=str(tmp_path))
+
+    with pytest.raises(FileNotFoundError, match=f"neutral_draws_run{FAKE_RECONCILE_RUN_ID}.npz"):
+        impute_stage.run(spec, context=StageContext(db_conn=conn))
+
+
 def test_a_stale_draws_file_is_refused(
     conn: Connection, seeded: dict[str, Any], tmp_path: Path
 ) -> None:
@@ -540,6 +556,50 @@ def test_a_stale_draws_file_is_refused(
             context=StageContext(db_conn=conn),
         )
     assert not (tmp_path / "neutral").exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("database", "some_other_db", "some_other_db"),
+        ("started_at", "1999-01-01T00:00:00+00:00", "1999-01-01"),
+    ],
+)
+def test_a_draws_file_from_another_database_is_refused(
+    conn: Connection,
+    seeded: dict[str, Any],
+    tmp_path: Path,
+    field: str,
+    value: str,
+    message: str,
+) -> None:
+    with np.load(seeded["draws_path"]) as data:
+        arrays = {name: data[name] for name in data.files}
+    arrays[field] = np.array(value)
+    foreign = tmp_path / f"neutral_draws_run{FAKE_RECONCILE_RUN_ID}.npz"
+    np.savez(foreign, **arrays)
+
+    with pytest.raises(ValueError, match=f"fingerprint mismatch.*{message}"):
+        impute_stage.run(
+            _spec(seeded, draws_path=str(foreign), imputed_root=str(tmp_path)),
+            context=StageContext(db_conn=conn),
+        )
+    assert not (tmp_path / "neutral").exists()
+
+
+def test_a_draws_file_without_a_fingerprint_asks_for_a_reconcile_rerun(
+    conn: Connection, seeded: dict[str, Any], tmp_path: Path
+) -> None:
+    with np.load(seeded["draws_path"]) as data:
+        arrays = {n: data[n] for n in data.files if n not in {"database", "started_at"}}
+    old = tmp_path / f"neutral_draws_run{FAKE_RECONCILE_RUN_ID}.npz"
+    np.savez(old, **arrays)
+
+    with pytest.raises(ValueError, match="re-run reconcile"):
+        impute_stage.run(
+            _spec(seeded, draws_path=str(old), imputed_root=str(tmp_path)),
+            context=StageContext(db_conn=conn),
+        )
 
 
 def test_published_scale_writes_files_but_never_missing_data_log(

@@ -63,7 +63,23 @@ params:
   # without one, which puts this model out of reach on a machine with no
   # toolchain. nutpie compiles the logp through numba instead.
   nuts_sampler: nutpie
-  likelihood_family: student_t        # 'normal' for the ablation in the recovery test
+  likelihood_family: student_t        # 'contaminated' or 'normal' for ablations
+  # Under `contaminated` point rows are a two-component Normal mixture (faithful
+  # noise plus a wide component, keys below). Kept as an ablation: on the real
+  # corpus pi_contam came back at 0.02, so it was not the cause of the collapse.
+  # Censored, bound and zero rows stay Normal in every family.
+  contamination_pi_alpha: 1.0
+  contamination_pi_beta: 9.0
+  contamination_sd: 2.0
+  # An infobox range ("914,000-1,067,500") is loaded as a lower-bound row and an
+  # upper-bound row from one claim. Each censored probability tends to 0.5 as
+  # sigma grows, so a pair never pays for a wide sigma and sigma inflated to 1.4,
+  # collapsing singletons to the corpus mean. With this on, such a pair becomes
+  # one point row at the log midpoint with extra variance (log(B/A)/4)^2. The /4
+  # reads the stated range as a central 95% interval (matching the published CI
+  # convention); a uniform reading on the log interval would give /sqrt(12),
+  # about 15% wider. Off only to reproduce the collapse.
+  merge_ranges: true
   ci_mass: 0.95
 
   # A fit is written to battle_sides only if it clears these. Also recorded in
@@ -73,6 +89,19 @@ params:
   write_max_rhat: 1.05
   write_min_ess_bulk: 400
   write_max_divergences: 0
+  # rhat, ESS and divergences judge the global variables. The side variables
+  # (mu_side, z_side) get rhat plus this: the Monte Carlo error of the 2.5%,
+  # 50% and 97.5% quantile of mu_side, each at most this share of that side's
+  # 95% interval width. Bulk ESS on a one-report side is not the right measure
+  # of whether the published quantiles are stable, because a rare second mode
+  # (the lone report being the contaminated one) depresses it while the
+  # quantiles stay precise.
+  write_max_quantile_mcse_frac: 0.05
+  # The quantiles checked are ((1-c)/2, 0.5, (1+c)/2) for ci_mass c. The median
+  # also has an absolute limit, in log units: a side fails if it breaks either the
+  # relative or this one. It stops a very narrow interval from passing the
+  # relative test while the median is still visibly noisy.
+  write_max_median_mcse_log: 0.05
 
   # ── gate thresholds (resolved into the quality_checks thresholds below) ────
   min_spread_ratio: 0.25              # estimates_not_collapsed
@@ -80,6 +109,7 @@ params:
   max_median_ci_log_width: 4.5        # ci_width_reasonable, LN(hi/lo) on multi-claim sides
   min_singleton_ci_log_width: 0.8     # singleton_estimates_are_honestly_uncertain
   min_calibration_sides: 20           # calibration_set_is_not_empty
+  max_low_precision_frac: 0.05        # sides_low_precision
 
   # ── load-time plausibility (pipeline/reconcilers/plausibility.py) ─────────
   # The extractor defaults branch to 'total', so day numbers, vessel counts and
@@ -175,12 +205,47 @@ quality_checks:
     description: >
       The regime-neutral troops fit converged, on the limits the run applied
       when deciding whether to write (config.write_thresholds, defaulting to
-      rhat 1.05, ESS 400, no divergences). When it fails no est_troops_neutral values and no
+      rhat 1.05, ESS 400, no divergences). A side that fails only its own quantile
+      MCSE limit is still written, with a widened interval, and is judged by
+      sides_low_precision, not here. When this check fails no est_troops_neutral values and no
       neutral_draws_run file are written for that run, and there is no
       fallback to the published estimates, because the published figures carry
       the unlabelled-regime prior that the neutral fit exists to remove from
       force ratios. Kept apart from model_convergence, which reads the
       published fits only.
+
+  - name: sides_low_precision
+    check: >
+      SELECT COALESCE((
+        SELECT GREATEST(
+          COALESCE((latest.diagnostics -> 'troops' ->> 'n_sides_low_precision')::float
+                   / NULLIF((latest.diagnostics -> 'troops' ->> 'n_sides')::float, 0), 0::float),
+          COALESCE((latest.diagnostics -> 'troops_neutral' ->> 'n_sides_low_precision')::float
+                   / NULLIF((latest.diagnostics -> 'troops_neutral' ->> 'n_sides')::float, 0), 0::float),
+          COALESCE((latest.diagnostics -> 'casualties' ->> 'n_sides_low_precision')::float
+                   / NULLIF((latest.diagnostics -> 'casualties' ->> 'n_sides')::float, 0), 0::float)
+        )
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 0::float)
+    threshold: "<= {params.max_low_precision_frac}"
+    severity: error
+    description: >
+      The share of modelled sides whose own quantile MCSE broke the relative or
+      absolute limit stays small. Such a side (typically a singleton whose
+      heavy-tailed report conflicts with the heavy-tailed prior, giving a bimodal
+      posterior) is still written, with its interval widened by twice the MCSE of
+      each bound so the published interval covers the quantile noise; it is listed
+      in diagnostics (mcse_failed_side_ids) and in the reconcile_low_precision_sides
+      warning, and not in missing_data_log. The worst fraction over troops, the
+      neutral troops fit and casualties is read. A high share means the sampler,
+      not a few awkward sides, is the problem.
 
   - name: estimates_not_collapsed
     check: >

@@ -156,6 +156,7 @@ def _load_spec(processed_root: Path, **param_overrides: Any) -> dict[str, Any]:
             "write_max_rhat": 10.0,
             "write_min_ess_bulk": 0,
             "write_max_divergences": 1_000_000,
+            "write_max_quantile_mcse_frac": 1.0e6,
         }
     )
     params.update(param_overrides)
@@ -473,7 +474,7 @@ def test_every_quality_check_in_the_reconcile_spec_executes(
     del reconciled
     raw = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))
     checks = raw["quality_checks"]
-    assert len(checks) == 12
+    assert len(checks) == 13
 
     runner = QualityRunner(conn)
     results = runner.run_all(checks)
@@ -586,7 +587,16 @@ def test_the_neutral_fit_writes_estimates_diagnostics_and_a_draws_file(
     ).scalar_one()
     block = diagnostics["troops_neutral"]
     assert block["written"] is True
-    assert set(block["worst"]) == {"max_rhat", "min_ess_bulk", "divergences"}
+    assert set(block["worst"]) == {
+        "max_rhat",
+        "min_ess_bulk",
+        "min_ess_bulk_side",
+        "divergences",
+        "n_sides_mcse_fail",
+        "worst_side",
+        "mcse_failed_side_ids",
+        "mcse_failed_limits",
+    }
     assert block["m0"]["mean"] is not None and block["s0"]["mean"] is not None
     # Neutral diagnostics stay out of the rollup model_convergence reads.
     assert "troops_neutral" not in diagnostics["worst"]
@@ -828,6 +838,143 @@ def test_an_unconverged_fit_writes_no_estimates(engine: Engine, tmp_path: Path) 
     assert "min_ess_bulk" in withheld_notes[0]
     assert unfillable_gate.passed, unfillable_gate
     assert not populated_gate.passed, populated_gate
+
+
+def test_a_side_failing_only_its_mcse_is_written_with_a_widened_interval(
+    engine: Engine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pipeline.reconcilers import summarise as summarise_module
+
+    setup = engine.connect()
+    source = _source(setup, "mcse-doc")
+    battle = _battle(setup, "Battle India Mcse", "1916-01-01")
+    good = _side(setup, battle, "Passing Side")
+    bad = _side(setup, battle, "Noisy Side")
+    _troop(setup, good, source, 12_000.0)
+    _troop(setup, bad, source, 300.0)
+    setup.commit()
+    setup.close()
+
+    def one_noisy_side(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        return 1, None, {str(bad): "relative"}
+
+    before: dict[int, Any] = {}
+    real_widen = summarise_module._widen_low_precision
+
+    def record_then_widen(estimates: Any, margins: Any) -> Any:
+        before.update({e.side_id: e for e in estimates})
+        return real_widen(estimates, margins)
+
+    monkeypatch.setattr(summarise_module, "_side_quantile_mcse", one_noisy_side)
+    monkeypatch.setattr(summarise_module, "_widen_low_precision", record_then_widen)
+
+    conn = engine.connect()
+    try:
+        spec = _load_spec(tmp_path)
+        reconcile_stage.run(spec, context=StageContext(db_conn=conn))
+        rows = {
+            side_id: (value, lo, hi, run_id)
+            for side_id, value, lo, hi, run_id in conn.execute(
+                text(
+                    "SELECT side_id, est_troops_total, est_troops_total_lo, "
+                    "est_troops_total_hi, est_troops_run_id "
+                    "FROM battle_sides WHERE battle_id = :b"
+                ),
+                {"b": battle},
+            ).all()
+        }
+        diagnostics = conn.execute(
+            text("SELECT diagnostics FROM model_runs WHERE run_id = :r"), {"r": rows[bad][3]}
+        ).scalar_one()
+        logged = conn.execute(
+            text("SELECT COUNT(*) FROM missing_data_log WHERE side_id IN (:g, :b)"),
+            {"g": good, "b": bad},
+        ).scalar_one()
+        unfillable_gate = QualityRunner(conn).run_one(_quality_check("unfillable_sides_are_logged"))
+        stale_gate = QualityRunner(conn).run_one(_quality_check("estimates_are_not_stale"))
+    finally:
+        conn.rollback()
+        conn.close()
+        cleanup = engine.connect()
+        cleanup.execute(text("DELETE FROM missing_data_log WHERE battle_id = :b"), {"b": battle})
+        cleanup.execute(
+            text("DELETE FROM troop_reports WHERE side_id IN (:g, :b)"), {"g": good, "b": bad}
+        )
+        cleanup.execute(text("DELETE FROM battle_sides WHERE battle_id = :b"), {"b": battle})
+        cleanup.execute(text("DELETE FROM battles WHERE battle_id = :b"), {"b": battle})
+        cleanup.execute(text("DELETE FROM sources WHERE source_id = :s"), {"s": source})
+        cleanup.commit()
+        cleanup.close()
+
+    value, lo, hi, _ = rows[bad]
+    assert value is not None and lo is not None and hi is not None
+    assert value == pytest.approx(before[bad].value, rel=1e-6)
+    assert lo < before[bad].lo and hi > before[bad].hi
+    assert rows[good][1] == pytest.approx(before[good].lo, rel=1e-6)
+    assert rows[good][2] == pytest.approx(before[good].hi, rel=1e-6)
+    assert diagnostics["troops"]["n_sides_low_precision"] == 1
+    assert diagnostics["troops"]["mcse_failed_side_ids"] == [bad]
+    assert logged == 0
+    assert unfillable_gate.passed, unfillable_gate
+    assert stale_gate.passed, stale_gate
+
+
+def test_a_later_estimate_deletes_a_stale_withheld_row_and_withheld_rows_do_not_stack(
+    engine: Engine,
+) -> None:
+    from datetime import UTC, datetime
+
+    from pipeline.reconcilers import store
+    from pipeline.reconcilers.records import SideEstimate
+
+    conn = engine.connect()
+    source = _source(conn, "stale-doc")
+    battle = _battle(conn, "Battle India Stale", "1917-01-01")
+    side = _side(conn, battle, "Stale Side")
+    _troop(conn, side, source, 5_000.0)
+    conn.commit()
+    try:
+        store.log_withheld_sides(conn, "troops", side_ids={side}, run_id=1, reason="x")
+        store.log_withheld_sides(conn, "troops", side_ids={side}, run_id=1, reason="x")
+        # A later failed run names a different run id and reason, and must not add a row.
+        store.log_withheld_sides(conn, "troops", side_ids={side}, run_id=2, reason="y")
+        count = text(
+            "SELECT COUNT(*) FROM missing_data_log WHERE side_id = :s "
+            "AND notes LIKE 'reconcile: estimate withheld%'"
+        )
+        assert conn.execute(count, {"s": side}).scalar_one() == 1
+
+        run_id = store.start_model_run(conn, model_type="test", run_name="stale", config={})
+        store.write_side_estimates(
+            conn,
+            [
+                SideEstimate(
+                    side_id=side,
+                    quantity="troops",
+                    value=5_000.0,
+                    lo=4_000.0,
+                    hi=6_000.0,
+                    run_id=run_id,
+                    n_reports=1,
+                    n_sources=1,
+                    method="single_report_debiased",
+                    updated_at=datetime.now(UTC),
+                )
+            ],
+        )
+        assert conn.execute(count, {"s": side}).scalar_one() == 0
+    finally:
+        conn.rollback()
+        conn.close()
+        cleanup = engine.connect()
+        cleanup.execute(text("DELETE FROM missing_data_log WHERE battle_id = :b"), {"b": battle})
+        cleanup.execute(text("DELETE FROM troop_reports WHERE side_id = :s"), {"s": side})
+        cleanup.execute(text("DELETE FROM battle_sides WHERE battle_id = :b"), {"b": battle})
+        cleanup.execute(text("DELETE FROM battles WHERE battle_id = :b"), {"b": battle})
+        cleanup.execute(text("DELETE FROM sources WHERE source_id = :s"), {"s": source})
+        cleanup.commit()
+        cleanup.close()
 
 
 def _fabricate_run(conn: Connection, diagnostics_json: str) -> None:

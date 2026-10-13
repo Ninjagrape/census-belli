@@ -473,6 +473,7 @@ def run_fit(
     inflation: InflationPrior,
     sampler: SamplerSettings,
     ancient_cutoff_year: int = ANCIENT_CUTOFF_YEAR,
+    merge_ranges: bool = True,
 ) -> Fit:
     """Build, sample and summarise one fit, the same three calls the reconcile stage makes.
 
@@ -485,11 +486,17 @@ def run_fit(
             Windows/no-compiler note) and ``nuts_sampler`` should stay
             ``"nutpie"``.
         ancient_cutoff_year: The era fallback's cutoff year.
+        merge_ranges: Passed to ``build_design``; off to see what range pairs do.
 
     Returns:
         The design, posterior and summary.
     """
-    design = build_design(reports, quantity=quantity, ancient_cutoff_year=ancient_cutoff_year)
+    design = build_design(
+        reports,
+        quantity=quantity,
+        ancient_cutoff_year=ancient_cutoff_year,
+        merge_ranges=merge_ranges,
+    )
     model = build_model(design, priors=priors, inflation=inflation)
     idata = sample(model, sampler)
     summary = summarise_fit(

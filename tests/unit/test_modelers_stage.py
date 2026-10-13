@@ -107,7 +107,7 @@ def test_config_overrides_merge_section_by_section(tmp_path: Path) -> None:
 def test_default_config_loads() -> None:
     params = load_model_params({})
 
-    assert params.sampler.draws == 1500 and params.max_rhat == 1.02
+    assert params.sampler.draws == 3000 and params.max_rhat == 1.02
     assert params.gates.ppc_level == 0.99 and params.replacement_percentile == 40
 
 

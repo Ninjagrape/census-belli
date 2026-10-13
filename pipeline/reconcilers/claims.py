@@ -17,9 +17,11 @@ network or a database.
 
 from __future__ import annotations
 
+import math
 import re
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Final
 
 from pipeline.reconcilers.records import Report
@@ -30,6 +32,7 @@ __all__ = [
     "collapse_lineages",
     "era_flag",
     "merge_cross_regime_duplicates",
+    "merge_range_pairs",
     "roundness",
 ]
 
@@ -346,6 +349,76 @@ def collapse_lineages(reports: Sequence[Report]) -> list[Report]:
         if current is None or _origin_rank(report) < _origin_rank(current):
             kept[key] = report
     return list(kept.values())
+
+
+def merge_range_pairs(reports: Sequence[Report]) -> tuple[list[Report], int, int]:
+    """Merge a lower-bound and an upper-bound row of one stated range into a point row.
+
+    An infobox range such as "914,000-1,067,500" is loaded as two censored rows
+    ("at least A" and "up to B") from one claim. Each censored probability tends
+    to one half as sigma grows, so a pair never pays for a wide sigma and sigma
+    inflates until singletons collapse to the corpus mean. The pair is read as
+    one point observation at the log midpoint with extra variance
+    ``(log(B / A) / 4) ** 2``.
+
+    The ``/ 4`` reads the stated range as a central 95% interval: its log width
+    is about four standard deviations, which matches the published CI
+    convention. Reading it as a uniform distribution on the log interval would
+    give ``/ sqrt(12)`` instead, a standard deviation about 15% wider. The
+    narrower reading is kept deliberately.
+
+    A pair is a group of rows sharing side, source key, quantity, branch,
+    casualty type, scope and extracted context with exactly one lower and one
+    upper bound, both positive and ``A <= B``. A lone bound, an ambiguous group,
+    or a pair differing in any of those fields stays censored. A degenerate
+    range (``A == B``) becomes one point row with zero extra variance.
+
+    Args:
+        reports: One quantity's reports.
+
+    Returns:
+        The reports with each pair replaced, at the position of the lower-bound
+        row, by one point row carrying ``range_var``; the number of pairs
+        merged (degenerate ones included); and how many of those were
+        degenerate.
+    """
+    groups: dict[tuple[object, ...], list[Report]] = defaultdict(list)
+    for report in reports:
+        if report.is_lower_bound != report.is_upper_bound:
+            key = (
+                report.side_id,
+                report.source_key,
+                report.quantity,
+                report.branch,
+                report.casualty_type,
+                report.scope,
+                report.extracted_context,
+            )
+            groups[key].append(report)
+    replacements: dict[int, Report] = {}
+    dropped: set[int] = set()
+    n_degenerate = 0
+    for rows in groups.values():
+        lowers = [r for r in rows if r.is_lower_bound]
+        uppers = [r for r in rows if r.is_upper_bound]
+        if len(lowers) != 1 or len(uppers) != 1:
+            continue
+        low, high = lowers[0], uppers[0]
+        if not 0.0 < low.reported_value <= high.reported_value:
+            continue
+        log_low, log_high = math.log(low.reported_value), math.log(high.reported_value)
+        if low.reported_value == high.reported_value:
+            n_degenerate += 1
+        replacements[low.report_id] = replace(
+            low,
+            reported_value=math.exp(0.5 * (log_low + log_high)),
+            is_lower_bound=False,
+            is_upper_bound=False,
+            range_var=((log_high - log_low) / 4.0) ** 2,
+        )
+        dropped.add(high.report_id)
+    merged = [replacements.get(r.report_id, r) for r in reports if r.report_id not in dropped]
+    return merged, len(replacements), n_degenerate
 
 
 def merge_cross_regime_duplicates(

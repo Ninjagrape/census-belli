@@ -61,6 +61,8 @@ def test_the_floor_itself_is_kept() -> None:
         (2_000.0, "2 Panokseons, 2,000 Panokseons"),
         (1_400.0, "1,400 helicopters"),
         (3_253.0, "3,253 tanks"),
+        (101.0, "101 operational StuG's"),
+        (60.0, "60 assault guns"),
         (9_966.0, "9,966 guns and mortars"),
         (2_792.0, "2,792 to 3,549 aircraft"),
         (3_549.0, "2,792 to 3,549 aircraft"),
