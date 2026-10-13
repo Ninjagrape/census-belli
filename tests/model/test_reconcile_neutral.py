@@ -17,7 +17,7 @@ count.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pytest
@@ -32,6 +32,7 @@ from pipeline.reconcilers.model import (
     sample,
 )
 from pipeline.reconcilers.records import Report, SourceKey
+from tests.model.conftest import fit_until_converged
 
 pytestmark = pytest.mark.model
 
@@ -120,6 +121,7 @@ class RatioPair:
     neutral: float
     n_obs: int
     neutral_worst: dict[str, float | int | None]
+    neutral_attempts: int = 1
 
 
 def _log_ratio(idata: object, design: object) -> float:
@@ -127,6 +129,11 @@ def _log_ratio(idata: object, design: object) -> float:
     mu = mu.reshape(-1, mu.shape[-1])
     sides = list(design.side_ids)  # type: ignore[attr-defined]
     return float(np.mean(mu[:, sides.index(PERSIAN)] - mu[:, sides.index(MACEDONIAN)]))
+
+
+def _neutral_converged(worst: dict[str, float | int | None]) -> bool:
+    """The convergence claim test_the_neutral_fits_converge asserts."""
+    return worst["divergences"] == 0 and (worst["max_rhat"] or 0.0) < 1.05
 
 
 def _fit_pair(
@@ -139,13 +146,20 @@ def _fit_pair(
     published = sample(build_model(design, priors=priors, inflation=inflation), SAMPLER)
     if not fit_neutral:
         return RatioPair(_log_ratio(published, design), math.nan, design.n_obs, {})
-    neutral = sample(build_model(design, priors=priors, inflation=inflation, neutral=True), SAMPLER)
+    neutral_model = build_model(design, priors=priors, inflation=inflation, neutral=True)
+    neutral, seeds = fit_until_converged(
+        lambda seed: sample(neutral_model, replace(SAMPLER, random_seed=seed)),
+        seed=SEED,
+        converged=lambda idata: _neutral_converged(_convergence(idata)[0]),
+        describe=lambda idata: _convergence(idata)[:2],
+    )
     worst, _, _ = _convergence(neutral)
     return RatioPair(
         published=_log_ratio(published, design),
         neutral=_log_ratio(neutral, design),
         n_obs=design.n_obs,
         neutral_worst=worst,
+        neutral_attempts=len(seeds),
     )
 
 
@@ -253,7 +267,10 @@ def test_the_neutral_fits_converge(
     gaugamela: RatioPair,
     gaugamela_with_copy: RatioPair,
     both_unlabelled: RatioPair,
+    record_property: pytest.RecordProperty,
 ) -> None:
-    for pair in (gaugamela, gaugamela_with_copy, both_unlabelled):
+    pairs = (gaugamela, gaugamela_with_copy, both_unlabelled)
+    record_property("convergence_attempts", ",".join(str(p.neutral_attempts) for p in pairs))
+    for pair in pairs:
         assert pair.neutral_worst["divergences"] == 0
         assert (pair.neutral_worst["max_rhat"] or 0.0) < 1.05, pair.neutral_worst

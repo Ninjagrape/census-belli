@@ -59,6 +59,7 @@ from tests.model.conftest import (
     Fit,
     add_lineage_test_sides,
     coverage_fraction,
+    fit_until_converged,
     log_errors,
     mean_log_width,
     run_fit,
@@ -121,16 +122,49 @@ def main_truth() -> object:
     return corpus
 
 
-@pytest.fixture(scope="module")
-def main_fit(main_truth: object, inflation_prior: object, troop_priors: ModelPriors) -> Fit:
-    """Fit the main corpus once; every main-fit test reads from this."""
-    return run_fit(
-        main_truth.reports,  # type: ignore[attr-defined]
-        priors=troop_priors,
-        inflation=inflation_prior,  # type: ignore[arg-type]
-        sampler=MAIN_SAMPLER,
-        ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
+def _m0_ess(fit: Fit) -> float:
+    import arviz as az
+
+    return float(np.asarray(az.ess(fit.idata, var_names=["m0"], method="bulk")["m0"].values))
+
+
+def _main_fit_converged(fit: Fit) -> bool:
+    """The convergence the main-fit claims rely on: stage gate, clean rhat, m0 identified."""
+    from pipeline.stages.reconcile import _passes_global_thresholds
+
+    worst = fit.summary.diagnostics["worst"]
+    return (
+        _passes_global_thresholds(worst, {})
+        and worst["max_rhat"] < 1.01
+        and worst["divergences"] == 0
+        and _m0_ess(fit) > 400
     )
+
+
+@pytest.fixture(scope="module")
+def main_fit_run(
+    main_truth: object, inflation_prior: object, troop_priors: ModelPriors
+) -> tuple[Fit, int]:
+    """Fit the main corpus, refitting on a new seed while it misses the convergence gate."""
+    fit, seeds = fit_until_converged(
+        lambda seed: run_fit(
+            main_truth.reports,  # type: ignore[attr-defined]
+            priors=troop_priors,
+            inflation=inflation_prior,  # type: ignore[arg-type]
+            sampler=replace(MAIN_SAMPLER, random_seed=seed),
+            ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
+        ),
+        seed=SEED,
+        converged=_main_fit_converged,
+        describe=lambda fit: (fit.summary.diagnostics["worst"], f"ess(m0)={_m0_ess(fit):.0f}"),
+    )
+    return fit, len(seeds)
+
+
+@pytest.fixture(scope="module")
+def main_fit(main_fit_run: tuple[Fit, int]) -> Fit:
+    """The accepted main-corpus fit; every main-fit test reads from this."""
+    return main_fit_run[0]
 
 
 def test_source_type_biases_recovered_within_tolerance_and_rank_order(main_fit: Fit) -> None:
@@ -241,21 +275,37 @@ def test_singleton_intervals_are_much_wider_than_four_report_intervals(
     assert singleton_width >= 1.8 * four_report_width, (singleton_width, four_report_width)
 
 
-def test_convergence_is_clean(main_fit: Fit) -> None:
+def test_convergence_is_clean(
+    main_fit: Fit, main_fit_run: tuple[Fit, int], record_property: pytest.RecordProperty
+) -> None:
+    record_property("convergence_attempts", main_fit_run[1])
     worst = main_fit.summary.diagnostics["worst"]
     assert worst["max_rhat"] is not None and worst["max_rhat"] < 1.01, worst
     assert worst["divergences"] == 0, worst
 
 
+def _neutral_main_converged(worst: dict[str, object]) -> bool:
+    """The convergence the neutral-fit test asserts on the main corpus."""
+    rhat, ess = worst["max_rhat"], worst["min_ess_bulk"]
+    return (
+        rhat is not None
+        and rhat <= 1.05  # type: ignore[operator]
+        and ess is not None
+        and ess >= 400  # type: ignore[operator]
+        and worst["divergences"] == 0
+    )
+
+
 @pytest.fixture(scope="module")
 def main_neutral_fit(
     main_truth: object, inflation_prior: object, troop_priors: ModelPriors
-) -> tuple[object, float]:
-    """The regime-neutral fit on the main corpus, and how long it took."""
+) -> tuple[object, float, int]:
+    """The regime-neutral fit on the main corpus, how long it took and how many attempts."""
     import time
 
     from pipeline.reconcilers.design import build_design
     from pipeline.reconcilers.model import build_model, sample
+    from pipeline.reconcilers.summarise import _convergence
 
     design = build_design(
         main_truth.reports,  # type: ignore[attr-defined]
@@ -269,16 +319,22 @@ def main_neutral_fit(
         inflation=inflation_prior,  # type: ignore[arg-type]
         neutral=True,
     )
-    idata = sample(model, MAIN_SAMPLER)
-    return idata, time.perf_counter() - started
+    idata, seeds = fit_until_converged(
+        lambda seed: sample(model, replace(MAIN_SAMPLER, random_seed=seed)),
+        seed=SEED,
+        converged=lambda idata: _neutral_main_converged(_convergence(idata)[0]),
+        describe=lambda idata: _convergence(idata)[:2],
+    )
+    return idata, time.perf_counter() - started, len(seeds)
 
 
 def test_the_neutral_fit_clears_the_write_thresholds_on_the_main_corpus(
-    main_neutral_fit: tuple[object, float], record_property: pytest.RecordProperty
+    main_neutral_fit: tuple[object, float, int], record_property: pytest.RecordProperty
 ) -> None:
     from pipeline.reconcilers.summarise import _convergence
 
-    idata, seconds = main_neutral_fit
+    idata, seconds, attempts = main_neutral_fit
+    record_property("convergence_attempts", attempts)
     worst, worst_variable, _ = _convergence(idata)  # type: ignore[arg-type]
     record_property("neutral_fit_seconds", round(seconds, 1))
     print(f"neutral fit: {seconds:.1f}s worst={worst} at {worst_variable}")
@@ -391,8 +447,14 @@ def test_treating_a_stated_bound_as_a_point_value_degrades_the_recovered_scale(
 # ─── Ablation 2: an all-unlabelled corpus ───────────────────────────────────
 
 
+def _all_unlabelled_converged(worst: dict[str, object]) -> bool:
+    """Only rhat is asserted on this corpus: ess(m0) is not meaningful on its shape."""
+    rhat = worst["max_rhat"]
+    return rhat is not None and rhat < 1.02  # type: ignore[operator]
+
+
 @pytest.fixture(scope="module")
-def all_unlabelled_fit() -> tuple[Fit, float]:
+def all_unlabelled_fit() -> tuple[Fit, float, int]:
     """Fit a corpus where every report is claim_regime='unlabelled'.
 
     60 sides (20x4, 20x2, 20x1 = 140 obs), scope fixed to 'engaged' so the
@@ -429,21 +491,27 @@ def all_unlabelled_fit() -> tuple[Fit, float]:
     sampler = SamplerSettings(
         draws=1500, tune=1500, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
     )
-    fit = run_fit(
-        corpus.reports,
-        priors=priors,
-        inflation=inflation,
-        sampler=sampler,
-        ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
+    fit, seeds = fit_until_converged(
+        lambda seed: run_fit(
+            corpus.reports,
+            priors=priors,
+            inflation=inflation,
+            sampler=replace(sampler, random_seed=seed),
+            ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
+        ),
+        seed=SEED,
+        converged=lambda fit: _all_unlabelled_converged(fit.summary.diagnostics["worst"]),
+        describe=lambda fit: fit.summary.diagnostics["worst"],
     )
     true_identified_level = 9.3 + true_offset
-    return fit, true_identified_level
+    return fit, true_identified_level, len(seeds)
 
 
 def test_an_all_unlabelled_corpus_recovers_the_identified_level_not_m0(
-    all_unlabelled_fit: tuple[Fit, float],
+    all_unlabelled_fit: tuple[Fit, float, int], record_property: pytest.RecordProperty
 ) -> None:
-    fit, true_identified_level = all_unlabelled_fit
+    fit, true_identified_level, attempts = all_unlabelled_fit
+    record_property("convergence_attempts", attempts)
     identified = fit.summary.diagnostics["identified_level"]
 
     assert identified["mean"] is not None
@@ -820,6 +888,30 @@ def _fit_nested_intervals(
 HEAVY_TAIL_SEEDS = (SEED + 2, SEED + 3, SEED + 4)
 
 
+def _fit_nested_intervals_converged(
+    reports: list,  # type: ignore[type-arg]
+    inflation: object,
+    troop_priors: ModelPriors,
+    sampler: SamplerSettings,
+) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, object]], int]:
+    """:func:`_fit_nested_intervals`, refitted on a new seed while it misses the write gate.
+
+    Returns:
+        The accepted fit's intervals and convergence summary, and the attempt count.
+    """
+    from pipeline.stages.reconcile import _passes_global_thresholds
+
+    result, seeds = fit_until_converged(
+        lambda seed: _fit_nested_intervals(
+            reports, inflation, troop_priors, replace(sampler, random_seed=seed)
+        ),
+        seed=sampler.random_seed,
+        converged=lambda result: _passes_global_thresholds(result[-1], {}),
+        describe=lambda result: result[-1],
+    )
+    return result, len(seeds)
+
+
 def _simulate_heavy_tail(seed: int) -> tuple[list, dict[int, float]]:  # type: ignore[type-arg]
     return _simulate_nested(
         seed,
@@ -854,7 +946,9 @@ def test_a_student_t_side_prior_covers_extreme_sides_no_worse_than_a_normal_one(
 
     Three seeds, each fitted twice under the default (student_t) likelihood:
     once with the Student-t side prior and once with a Normal one
-    (``side_prior_nu=1e6``). Every fit must clear the stage's write gate first.
+    (``side_prior_nu=1e6``). Every fit must clear the stage's write gate first;
+    a fit that misses it is refitted on a new seed, as the model stage does, and
+    only a miss on every attempt fails. The coverage claims are never retried.
     The top decile by true level is pooled across seeds (k = 90) and compared on
     the same sides: ``t_only`` counts sides the Student-t fit covers and the
     Normal fit does not, ``normal_only`` the reverse. The claim is
@@ -864,26 +958,25 @@ def test_a_student_t_side_prior_covers_extreme_sides_no_worse_than_a_normal_one(
     The measured advantage is small, and no absolute coverage floor is asserted.
     Over 5 seeds (SEED + 2 to SEED + 6, 150 top-decile sides) the Student-t side
     prior covers 78 (0.520) and the Normal side prior 72 (0.480); t_only 13,
-    normal_only 7. Fits are not bit-reproducible across runs; two runs on the
+    normal_only 7. A fixed seed is bit-reproducible on one dependency set (see
+    requirements/ci-lock.txt); before CI was locked, two runs on the
     three test seeds gave t_only 10 / normal_only 1 and t_only 11 / normal_only 1
     (pooled coverage 57/90 vs 47/90 in the latter). An
     earlier version asserted an absolute coverage floor of 0.45, which failed on
     CI at 13/30 and is not true of the model.
-
-    The sampler runs 3000 draws because at 2000 draws two of five Student-t fits
-    missed the global ESS gate (min ESS 378 and 357).
     """
-    from pipeline.stages.reconcile import _passes_global_thresholds
-
     normal_priors = replace(troop_priors, side_prior_nu=1.0e6)
     t_only = normal_only = k_total = t_covered = normal_covered = 0
+    attempts: list[int] = []
     for seed in HEAVY_TAIL_SEEDS:
         reports, truth = _simulate_heavy_tail(seed)
         sampler = replace(HEAVY_TAIL_SAMPLER, random_seed=seed)
         fits = {}
         for name, priors in (("t", troop_priors), ("normal", normal_priors)):
-            *interval, worst = _fit_nested_intervals(reports, inflation_prior, priors, sampler)
-            assert _passes_global_thresholds(worst, {}), (seed, name, worst)
+            (*interval, _), n_attempts = _fit_nested_intervals_converged(
+                reports, inflation_prior, priors, sampler
+            )
+            attempts.append(n_attempts)
             fits[name] = _top_decile_covered(interval[1], interval[2], interval[3], truth)
         t_cover, normal_cover = fits["t"], fits["normal"]
         t_only += sum(t_cover[s] and not normal_cover[s] for s in t_cover)
@@ -895,6 +988,7 @@ def test_a_student_t_side_prior_covers_extreme_sides_no_worse_than_a_normal_one(
             f"heavy-tail seed {seed}: t covers {sum(t_cover.values())}/{len(t_cover)}, "
             f"normal covers {sum(normal_cover.values())}/{len(normal_cover)}"
         )
+    record_property("convergence_attempts", ",".join(map(str, attempts)))
     record_property("t_only", t_only)
     record_property("normal_only", normal_only)
     summary = (

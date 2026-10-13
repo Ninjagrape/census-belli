@@ -15,13 +15,15 @@ the caller; nothing here reads global numpy state.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 import numpy as np
 import pytest
 
+from pipeline.modelers.fitting import RETRY_SEED_OFFSET
 from pipeline.reconcilers.design import Design, build_design
 from pipeline.reconcilers.model import (
     InflationPrior,
@@ -36,6 +38,51 @@ from pipeline.reconcilers.summarise import SummaryResult, summarise_fit
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     import arviz as az
+
+T = TypeVar("T")
+
+
+def fit_until_converged(
+    fit: Callable[[int], T],
+    *,
+    seed: int,
+    converged: Callable[[T], bool],
+    describe: Callable[[T], object] = repr,
+    max_attempts: int = 3,
+) -> tuple[T, list[int]]:
+    """Fit, and refit on a new seed while the convergence gate is missed.
+
+    Mirrors ``pipeline.modelers.fitting.fit_with_retry``: ESS in particular varies
+    run to run, so one unlucky chain set is not a regression. ``converged`` must
+    test sampler diagnostics only (rhat, ESS, divergences, the stage's write gate).
+    Retrying because a recovery or coverage claim failed would turn the test into
+    a search for a passing seed.
+
+    Args:
+        fit: Runs one fit for the given sampler seed.
+        seed: Seed of the first attempt; retries use ``seed + attempt * RETRY_SEED_OFFSET``.
+        converged: Whether a fit's diagnostics clear the gate.
+        describe: Renders a fit's diagnostics for the failure message.
+        max_attempts: How many seeds to try before failing.
+
+    Returns:
+        The first converged fit and the seeds tried, the last one being its own.
+        Its length is the attempt count.
+    """
+    tried: list[int] = []
+    diagnostics: list[str] = []
+    for attempt in range(max_attempts):
+        attempt_seed = seed + attempt * RETRY_SEED_OFFSET
+        tried.append(attempt_seed)
+        result = fit(attempt_seed)
+        if converged(result):
+            return result, tried
+        diagnostics.append(f"seed {attempt_seed}: {describe(result)}")
+    details = "\n".join(diagnostics)
+    pytest.fail(
+        f"no converged fit in {max_attempts} attempts (a real regression, not bad luck):\n{details}"
+    )
+
 
 # ─── Corpus truth: source types, sources, biases ────────────────────────────
 

@@ -198,6 +198,17 @@ floor. Recurring classes, with the log section that records each:
   dimension's labels); pass every per-observation array as `pm.Data`, because
   numpy constants are compiled into nutpie's code and compile time explodes
   with corpus size.
+- **CI installs from `requirements/ci-lock.txt`, not `pyproject.toml`.** A
+  fixed seed is bit-reproducible on one dependency set (verified 2026-10-13,
+  in and across processes), so a locked CI result depends on the code alone.
+  A new dependency goes in `pyproject.toml` and the lock is regenerated (command
+  in its header) in its own commit, or CI will not have it.
+- **Model tests retry convergence, never claims.** `fit_until_converged` in
+  `tests/model/conftest.py` refits on `seed + k * RETRY_SEED_OFFSET` (3
+  attempts, as `pipeline/modelers/fitting.py` does) only when a convergence
+  gate is missed; a coverage or recovery assertion is never retried. A new
+  model test whose fit must converge uses it instead of asserting a gate on
+  one fit.
 - `yaml.safe_load` turns `2026-09-24` into a `date`; convert before writing
   JSON.
 - `logging_config.configure()` is process-global; a test that calls it needs

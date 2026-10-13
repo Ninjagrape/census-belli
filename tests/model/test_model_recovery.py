@@ -18,7 +18,7 @@ Real MCMC (``pytest.mark.model``), no database; nutpie and one core.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pytest
@@ -36,6 +36,7 @@ from pipeline.modelers.priors import ModelPriors
 from pipeline.modelers.records import ModelDesign
 from pipeline.modelers.war import centre_skills
 from pipeline.reconcilers.model import SamplerSettings, sample
+from tests.model.conftest import fit_until_converged
 from tests.model.model_sim import (
     TRUE_BETA_FORCE,
     SimTournament,
@@ -67,16 +68,39 @@ class Fit:
     draws: PosteriorDraws
     convergence: dict[str, object]
     seconds: float
+    attempts: int
+
+
+def _converged(convergence: dict[str, object]) -> bool:
+    """Whether a fit's roll-up clears the convergence gate this module asserts."""
+    rhat, ess = convergence["max_rhat"], convergence["min_ess_bulk"]
+    return (
+        rhat is not None
+        and rhat <= 1.02  # type: ignore[operator]
+        and ess is not None
+        and ess >= 400  # type: ignore[operator]
+        and convergence["divergences"] == 0
+    )
 
 
 @pytest.fixture(scope="module")
 def fit() -> Fit:
-    """Fit once; every test reads the same posterior."""
+    """Fit once; every test reads the same posterior.
+
+    A fit that misses the convergence gate is refitted on a new seed, as the model
+    stage does, so one unlucky chain set does not fail every claim below.
+    """
     tournament = simulate_tournament(SEED)
     design = build_design(tournament.sides)
     x_diff = x_difference(design, tournament.log_troops)
+    model = build_model(design, x_diff, ModelPriors())
     started = time.time()
-    idata = sample(build_model(design, x_diff, ModelPriors()), SETTINGS)
+    idata, seeds = fit_until_converged(
+        lambda seed: sample(model, replace(SETTINGS, random_seed=seed)),
+        seed=SEED,
+        converged=lambda idata: _converged(round_convergence(idata)),
+        describe=round_convergence,
+    )
     seconds = time.time() - started
     return Fit(
         tournament=tournament,
@@ -84,6 +108,7 @@ def fit() -> Fit:
         draws=extract_draws(idata, design),
         convergence=round_convergence(idata),
         seconds=seconds,
+        attempts=len(seeds),
     )
 
 
@@ -98,8 +123,12 @@ def test_design_keeps_the_battles_and_classifies_unknown_sides(fit: Fit) -> None
     assert counts.sides_unattributed == 0
 
 
-def test_fit_converged(fit: Fit) -> None:
-    print(f"\nmodel recovery: sampling {fit.seconds:.0f}s, convergence={fit.convergence}")
+def test_fit_converged(fit: Fit, record_property: pytest.RecordProperty) -> None:
+    record_property("convergence_attempts", fit.attempts)
+    print(
+        f"\nmodel recovery: sampling {fit.seconds:.0f}s over {fit.attempts} attempt(s), "
+        f"convergence={fit.convergence}"
+    )
     assert fit.convergence["max_rhat"] is not None and fit.convergence["max_rhat"] <= 1.02  # type: ignore[operator]
     assert fit.convergence["min_ess_bulk"] is not None and fit.convergence["min_ess_bulk"] >= 400  # type: ignore[operator]
     assert fit.convergence["divergences"] == 0

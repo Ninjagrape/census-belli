@@ -32,6 +32,7 @@ from pipeline.imputers.model import build_model
 from pipeline.imputers.priors import load_priors
 from pipeline.imputers.summarise import convergence
 from pipeline.reconcilers.model import SamplerSettings, sample
+from tests.model.conftest import fit_until_converged
 from tests.model.impute_sim import (
     TRUE_A_ERA,
     TRUE_BETA_OUT,
@@ -69,18 +70,41 @@ class Fit:
     samples: PosteriorSamples
     worst: dict[str, float | int | None]
     seconds: float
+    attempts: int
     rounds: RoundSet
     coverage_rounds: RoundSet
 
 
+def _converged(worst: dict[str, float | int | None]) -> bool:
+    """Whether a fit's roll-up clears the convergence gate this module asserts."""
+    rhat, ess = worst["max_rhat"], worst["min_ess_bulk"]
+    return (
+        rhat is not None
+        and rhat <= 1.01
+        and ess is not None
+        and ess >= 400
+        and worst["divergences"] == 0
+    )
+
+
 @pytest.fixture(scope="module")
 def fit() -> Fit:
-    """Fit the model once; every test in this module reads the same posterior."""
+    """Fit the model once; every test in this module reads the same posterior.
+
+    A fit that misses the convergence gate is refitted on a new seed, as the model
+    stage does, so one unlucky chain set does not fail every claim below.
+    """
     corpus = simulate_corpus(SEED, n_battles=300, p_missing=0.3)
     priors = load_priors("config/imputation_priors.yaml")
     design = build_design(corpus.sides, corpus.likelihoods, priors)
     started = time.time()
-    idata = sample(build_model(design), SETTINGS)
+    model = build_model(design)
+    idata, seeds = fit_until_converged(
+        lambda seed: sample(model, replace(SETTINGS, random_seed=seed)),
+        seed=SEED,
+        converged=lambda idata: _converged(convergence(idata)),
+        describe=convergence,
+    )
     seconds = time.time() - started
     samples = extract_posterior(idata, design)
     posterior = {
@@ -94,6 +118,7 @@ def fit() -> Fit:
         samples=samples,
         worst=convergence(idata),
         seconds=seconds,
+        attempts=len(seeds),
         rounds=draw_rounds(design, samples, n_rounds=20, seed=SEED, mnar_delta=0.0),
         coverage_rounds=draw_rounds(
             design, samples, n_rounds=N_COVERAGE_ROUNDS, seed=SEED + 1, mnar_delta=0.0
@@ -119,8 +144,14 @@ def _slope(outcome: np.ndarray, ratio: np.ndarray) -> float:
     return float((centred * (outcome - outcome.mean())).sum() / (centred**2).sum())
 
 
-def test_fit_converged_within_the_write_gate(fit: Fit) -> None:
-    print(f"\nimpute recovery: sampling {fit.seconds:.0f}s, worst={fit.worst}")
+def test_fit_converged_within_the_write_gate(
+    fit: Fit, record_property: pytest.RecordProperty
+) -> None:
+    record_property("convergence_attempts", fit.attempts)
+    print(
+        f"\nimpute recovery: sampling {fit.seconds:.0f}s over {fit.attempts} attempt(s), "
+        f"worst={fit.worst}"
+    )
     assert fit.worst["max_rhat"] is not None and fit.worst["max_rhat"] <= 1.01
     assert fit.worst["min_ess_bulk"] is not None and fit.worst["min_ess_bulk"] >= 400
     assert fit.worst["divergences"] == 0
