@@ -920,3 +920,22 @@ def test_report_exclusion_concentration_is_an_evaluable_error_gate() -> None:
 
     assert check["severity"] == "error"
     assert check["params"]["run"] == "evaluable"
+
+
+def test_model_gate_root_follows_the_stage_diagnostics_root(tmp_path: Path) -> None:
+    given, other = tmp_path / "given", tmp_path / "other"
+    _write_model_gate_report(given, 5, passed=True)
+    _write_model_gate_report(other, 5, passed=False)
+    check = _model_gate_check(other, run="evaluable")
+
+    bound = QualityRunner(StubConnection(value=5), {"diagnostics_root": str(given)}).run_one(check)
+    unbound = QualityRunner(StubConnection(value=5), {}).run_one(check)
+
+    assert bound.passed, bound.message
+    assert not unbound.passed
+
+
+def test_model_gate_binding_leaves_the_model_spec_untouched() -> None:
+    spec = yaml.safe_load((AGENTS_DIR / "model.yaml").read_text(encoding="utf-8"))
+
+    assert "diagnostics_root" not in (spec.get("params") or {})

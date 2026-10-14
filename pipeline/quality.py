@@ -928,6 +928,7 @@ METHOD_HANDLERS: dict[str, MethodHandler] = {
 _SPEC_PARAM_BINDINGS: dict[str, dict[str, str]] = {
     "imputation_gate": {"scale": "scale", "root": "imputed_root"},
     "evaluation_gate": {"report": "report_path"},
+    "model_gate": {"root": "diagnostics_root"},
 }
 
 # Why each `method:` without a handler cannot run yet. Every method named in

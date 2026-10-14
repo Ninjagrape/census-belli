@@ -22,14 +22,14 @@ until classify's LLM slice runs).
 `historiography-reviewer`); statistics reviewed by `bayesian-model-reviewer`
 (B1 and S1-S6 applied, see §9.10).
 
-**Report is unbuilt; its gates are fixed in the tree (uncommitted, a parallel
-session).** `agents/report.yaml` selects the run by
-`quality.EVALUABLE_RUN_PREDICATE` in every gate and adds
-`exclusion_concentration` as an error (the two BLOCKING items in
-`docs/todo/09-report.md`). `_check_model_gate` takes `params.run`: `latest`
-(default, newest pooled run, directory-scan fallback) or `evaluable` (newest
-converged run with estimates, no fallback); tests in `tests/unit/test_quality.py`.
-Not yet run against a database.
+**Report is built (uncommitted, 2026-10-14)** and runs on the corpus via the
+CLI. Code in `pipeline/stages/report.py` and `pipeline/reporters/`; outputs in
+`data/processed/report/` (rankings.csv/json, explorer.html, report.md,
+figures/, manifest.json). Gate fixes committed in 7d9ba5e. Design decisions are
+in §9.11. Reviewed (python-reviewer, `bayesian-model-reviewer` on the overlap
+flag) and fixed; integration test `tests/integration/test_report.py` (10).
+Full non-model suite 2026-10-14: 1639 passed, 0 skipped, then 6 more unit
+tests (evaluate gate severities) passed. Ready to commit.
 
 ---
 
@@ -45,7 +45,7 @@ Not yet run against a database.
 | impute | yes | **yes** (integration suite) | **passes** at 2000 draws / 1500 tune (max rhat 1.0092 vs 1.01: thin margin) |
 | model | yes | on fixtures | **passes** at 3000 draws (run 54: rhat 1.004, ESS 1445); 59 of 210 battles included; 4 warning gates (§7 step 1) |
 | evaluate | yes | **yes** (integration 12, model CV 4) | **runs, 4 of 5 gates pass** (2026-10-14, model run 54): held-out accuracy 0.70, Brier 0.222; named_checks not_evaluable |
-| report | **no** (spec gates revised, uncommitted) | — | — |
+| report | yes (uncommitted) | **yes** (integration 10, seeded run, no fit) | **runs, all gates pass except `exclusion_concentration`** (by design: output marked provisional, exit 1); 3 headline generals, 58 below `min_battles` |
 
 Counts on 2026-10-13 (uncommitted tree): non-model suite 1392 passed, 0
 skipped (before the last small fixes; unit 1182, reconcile+impute integration
@@ -290,13 +290,11 @@ floor. Recurring classes, with the log section that records each:
    errors on the 87% singleton sides are not detectable by the model. Impute
    passes rhat 1.0092 against 1.01 on hierarchical scales `tau_p`, `tau_c`;
    another corpus may need more draws.
-4. **Report.** Evaluate is committed (3f01939). The report gate fixes and
-   `params.run: evaluable` are in the tree, uncommitted: verify them (ruff,
-   mypy, the non-model suite with `DATABASE_URL`), commit, then build
-   `pipeline/stages/report.py` against `docs/todo/09-report.md`. Evaluate open
-   items: the calibration gate sits on the imputed CV arm (decision in §9.10);
-   the +/-1 sd `g_unlabelled` sensitivity is not built (needs reconcile regime
-   draws).
+4. **Report**: built, verified, uncommitted (commit it). Open: the model-side
+   WAR interval and P(adjacent order) (§9.11, deferred by the user). A real
+   ranking needs step 2 first. Evaluate open items: the calibration
+   gate sits on the imputed CV arm (§9.10); the +/-1 sd `g_unlabelled`
+   sensitivity is not built (needs reconcile regime draws).
 5. Full-pipeline integration test on fixtures (crawl through model).
 
 Say explicitly what was and was not verified against a database.
@@ -593,6 +591,43 @@ is in the log section cited.
   grades: no decisive level is ever observed in the corpus (extract writes
   victory/defeat only).
 
+### 9.11 Report
+
+`agents/report.yaml` carries the params; `pipeline/reporters/` the code.
+
+- **Presentational only**: reads the run named by `LATEST_EVALUABLE_RUN`,
+  that run's `model_diagnostics/run{N}/` files and evaluate's
+  `evaluation/run{N}/`; writes files, never the database. Nothing is re-ranked:
+  generals with `n_battles >= min_battles` keep their stored rank, the rest are
+  listed unranked.
+- **Provisional, not refused.** A failed blocking model gate
+  (`exclusion_concentration` always counts, although the model records it as a
+  warning), or a missing or stale evaluation report, still writes every output
+  with `provisional: true` and a banner naming each reason; the spec's error
+  gates then fail the stage. No evaluable run writes nothing and deletes the
+  old manifest. A failed evaluate gate counts only at error severity, read from
+  `agents/evaluate.yaml` (the evaluation report stores none); unknown gates block.
+- `model_gate` checks bind `root` to the spec's `diagnostics_root`
+  (`_SPEC_PARAM_BINDINGS`); before that, the report's `exclusion_concentration`
+  read a fixed path whatever the override.
+- `manifest.json` carries `model_run_id` and stage-side gates
+  (`export_matches_db`, `evaluation_current`) in evaluate's gate format, read by
+  the existing `evaluation_gate` handler through spec param `report_path`, so a
+  manifest for an older run fails as stale.
+- **Rank overlap is approximate**: `total_war +/- z*war_sd`, because the model
+  stores no WAR interval or WAR draws. Exported as `war_normal_approx_lo/hi`,
+  disclosed in every output. `bayesian-model-reviewer` (2026-10-14) judged it a
+  poor proxy for ordering: generals' WAR is correlated (shared replacement
+  level, shared battles) and skewed. **Agreed follow-up (user's call, deferred)**:
+  in `pool_reductions` (`summarise.py`, `war_by_round` is already there) store
+  `war_ci_lo/hi` via `widen_interval` like skill, and `p_above_next_rank` =
+  mean over pooled draws of WAR_i > WAR_next; persist WAR draws in
+  `pooled_draws.npz`; same in `summarise_single`. Migration + schema.sql,
+  model re-review, corpus refit; then report drops the approximation.
+- No Jinja (not a declared dependency): `string.Template`. Names from Wikipedia
+  are inlined as JSON with `<`, `>`, `&` escaped and rendered via `textContent`.
+- `explorer.html` is ~4.9 MB, almost all inlined plotly.js, so it works offline.
+
 ---
 
 ## 10. Honest status
@@ -612,7 +647,9 @@ request file (`/process-llm-batch` has never run), any billed API call
 which has only run against empty or fixture databases, apart from the pilot's
 (§11). The gold sets are agent-built and unreviewed by a human. Evaluate runs
 on the corpus (§9.10) but the model covers 59 of 210 battles, so its numbers
-are a mechanics check; report does not exist, so there is no published ranking.
+are a mechanics check. Report runs on the corpus and correctly refuses to call
+its output publishable (`exclusion_concentration`), so there is no published
+ranking.
 
 ---
 
