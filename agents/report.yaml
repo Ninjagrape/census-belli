@@ -34,8 +34,11 @@ tools:
   - file_write
 
 params:
-  # which model run to report on; 'latest' resolves to max(run_id) among
-  # runs whose diagnostics passed, never a run that failed convergence
+  # which model run to report on; 'latest' resolves to the newest
+  # bradley_terry_hierarchical run that converged and wrote estimates
+  # (quality.EVALUABLE_RUN_PREDICATE, the run evaluate validated). Every gate
+  # below selects the same run; a bare MAX(run_id) over model_runs can name a
+  # reconcile, impute, sensitivity or unconverged run.
   run_selection: latest
   require_passing_diagnostics: true
 
@@ -63,7 +66,13 @@ quality_checks:
   - name: top_rankings_have_intervals
     check: >
       SELECT COUNT(*) FROM general_skill_estimates
-      WHERE rank <= 100
+      WHERE run_id = (
+        SELECT MAX(run_id) FROM model_runs
+        WHERE model_type = 'bradley_terry_hierarchical'
+          AND diagnostics ->> 'converged' = 'true'
+          AND diagnostics ->> 'estimates_written' = 'true'
+      )
+        AND rank <= 100
         AND (skill_ci_lo IS NULL OR skill_ci_hi IS NULL OR war_sd IS NULL)
     threshold: "= 0"
     severity: error
@@ -72,7 +81,12 @@ quality_checks:
   - name: export_non_empty
     check: >
       SELECT COUNT(*) FROM general_skill_estimates gse
-      WHERE gse.run_id = (SELECT MAX(run_id) FROM model_runs)
+      WHERE gse.run_id = (
+        SELECT MAX(run_id) FROM model_runs
+        WHERE model_type = 'bradley_terry_hierarchical'
+          AND diagnostics ->> 'converged' = 'true'
+          AND diagnostics ->> 'estimates_written' = 'true'
+      )
         AND gse.n_battles >= 3
     threshold: "> 0"
     severity: error
@@ -83,7 +97,13 @@ quality_checks:
       SELECT COUNT(*) FROM battle_war_details bwd
       LEFT JOIN general_skill_estimates gse
         ON gse.run_id = bwd.run_id AND gse.general_id = bwd.general_id
-      WHERE gse.estimate_id IS NULL
+      WHERE bwd.run_id = (
+        SELECT MAX(run_id) FROM model_runs
+        WHERE model_type = 'bradley_terry_hierarchical'
+          AND diagnostics ->> 'converged' = 'true'
+          AND diagnostics ->> 'estimates_written' = 'true'
+      )
+        AND gse.estimate_id IS NULL
     threshold: "= 0"
     severity: error
     description: "Every per-battle WAR row must belong to a general present in the same run's estimates"
@@ -95,7 +115,12 @@ quality_checks:
         FROM general_skill_estimates gse
         LEFT JOIN battle_war_details bwd
           ON bwd.run_id = gse.run_id AND bwd.general_id = gse.general_id
-        WHERE gse.run_id = (SELECT MAX(run_id) FROM model_runs)
+        WHERE gse.run_id = (
+          SELECT MAX(run_id) FROM model_runs
+          WHERE model_type = 'bradley_terry_hierarchical'
+            AND diagnostics ->> 'converged' = 'true'
+            AND diagnostics ->> 'estimates_written' = 'true'
+        )
         GROUP BY gse.general_id, gse.total_war
         HAVING ABS(gse.total_war - COALESCE(SUM(bwd.war_contribution), 0)) > 0.01
       ) t
@@ -104,20 +129,39 @@ quality_checks:
     description: "Aggregate WAR must equal the sum of its per-battle contributions, or the explorer will contradict the ranking"
 
   - name: reported_run_converged
+    # The run selection already excludes unconverged runs, so this asks
+    # whether any publishable run exists at all.
     check: >
       SELECT COUNT(*) FROM model_runs
-      WHERE run_id = (SELECT MAX(run_id) FROM model_runs)
-        AND (diagnostics IS NULL OR diagnostics->>'converged' IS DISTINCT FROM 'true')
-    threshold: "= 0"
+      WHERE model_type = 'bradley_terry_hierarchical'
+        AND diagnostics ->> 'converged' = 'true'
+        AND diagnostics ->> 'estimates_written' = 'true'
+    threshold: "> 0"
     severity: error
-    description: "Never publish a ranking from a run that did not converge"
+    description: "Never publish a ranking from a run that did not converge; with no converged pooled run there is nothing to report"
+
+  - name: exclusion_concentration
+    check: "top-50 generals have most of their battles credited"
+    method: model_gate
+    params: {gate: exclusion_concentration, root: data/processed/model_diagnostics, run: evaluable}
+    severity: error
+    description: >
+      The model stage's exclusion_concentration gate, read from the reported
+      run's gate_report.json and raised to an error: do not publish while any
+      top-50 general has most battles uncredited or over 30% of
+      multi-commander sides are default_split (before classify's LLM pass).
 
   - name: rank_ties_are_resolved
     check: >
       SELECT COUNT(*) FROM (
         SELECT run_id, rank
         FROM general_skill_estimates
-        WHERE run_id = (SELECT MAX(run_id) FROM model_runs)
+        WHERE run_id = (
+          SELECT MAX(run_id) FROM model_runs
+          WHERE model_type = 'bradley_terry_hierarchical'
+            AND diagnostics ->> 'converged' = 'true'
+            AND diagnostics ->> 'estimates_written' = 'true'
+        )
         GROUP BY run_id, rank
         HAVING COUNT(*) > 1
       ) t

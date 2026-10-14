@@ -696,6 +696,16 @@ def _check_imputation_gate(
     )
 
 
+# diagnostics.converged is the string 'true'/'false' (combine_rounds) and
+# diagnostics.estimates_written a JSON boolean; ->> renders both as text. The
+# evaluate stage selects its target run with the same predicate.
+EVALUABLE_RUN_PREDICATE = (
+    "model_type = 'bradley_terry_hierarchical' "
+    "AND diagnostics ->> 'converged' = 'true' "
+    "AND diagnostics ->> 'estimates_written' = 'true'"
+)
+LATEST_EVALUABLE_RUN = text(f"SELECT MAX(run_id) FROM model_runs WHERE {EVALUABLE_RUN_PREDICATE}")
+
 _LATEST_POOLED_RUN = text(
     "SELECT MAX(run_id) FROM model_runs WHERE model_type = 'bradley_terry_hierarchical'"
 )
@@ -735,6 +745,32 @@ def _latest_model_run_dir(root: Path, conn: Connection | None) -> Path | None:
     return max(numbered)[1] if numbered else None
 
 
+def _evaluable_run_dir(root: Path, conn: Connection | None) -> tuple[Path | None, str]:
+    """The diagnostics directory of the newest evaluable model run.
+
+    Unlike ``_latest_model_run_dir`` this never falls back to a directory scan:
+    a run that did not converge must not be read as if it had been published.
+
+    Args:
+        root: The diagnostics root.
+        conn: A database connection, or None.
+
+    Returns:
+        The directory and an empty string, or None and the reason none exists.
+    """
+    if conn is None:
+        return None, "No database connection to find the evaluable model run."
+    try:
+        with conn.begin_nested():
+            run_id = conn.execute(LATEST_EVALUABLE_RUN).scalar()
+    except Exception as exc:
+        logger.warning("model_gate_evaluable_lookup_failed", error=str(exc))
+        return None, f"Could not look up the evaluable model run ({type(exc).__name__})."
+    if run_id is None:
+        return None, "No converged model run with estimates; run the model stage first."
+    return root / f"run{int(run_id)}", ""
+
+
 def _check_model_gate(
     name: str,
     check: dict[str, Any],
@@ -744,16 +780,19 @@ def _check_model_gate(
     """Report one dataset-level gate recorded by the model stage.
 
     The model stage records its gates in
-    ``{root}/run{pooled_run_id}/gate_report.json``. When a round failed to
+    ``{root}/run{run_id}/gate_report.json``. When a round failed to
     converge the stage writes no gates, so every one of them reports absent and
     the convergence gate carries the real reason.
 
     Args:
         name: The check's name, as declared in the agent spec.
-        check: The raw check dict; ``params.gate`` names the gate (default: the
-            check's own name) and ``params.root`` the diagnostics root.
+        check: The raw check dict. ``params.gate`` names the gate (default: the
+            check's own name), ``params.root`` the diagnostics root, and
+            ``params.run`` which run to read: ``"latest"`` (default) the newest
+            pooled run with a directory scan fallback, or ``"evaluable"`` the
+            newest converged run that wrote estimates, with no fallback.
         severity: The severity to report the result at.
-        conn: A database connection used to find the newest pooled run.
+        conn: A database connection used to find the run, or None.
 
     Returns:
         The check's result. Never raises.
@@ -761,14 +800,27 @@ def _check_model_gate(
     raw_params = check.get("params")
     params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
     root = Path(str(params.get("root", "data/processed/model_diagnostics")))
-    directory = _latest_model_run_dir(root, conn)
+    selection = str(params.get("run", "latest"))
+    if selection == "latest":
+        directory = _latest_model_run_dir(root, conn)
+        missing = f"No model run directory under {root}. Run the model stage first."
+    elif selection == "evaluable":
+        directory, missing = _evaluable_run_dir(root, conn)
+    else:
+        return QualityCheckResult(
+            name=name,
+            passed=False,
+            severity=severity,
+            threshold=str(check.get("threshold", "")),
+            message=f"Unknown params.run {selection!r}; expected 'latest' or 'evaluable'.",
+        )
     if directory is None:
         return QualityCheckResult(
             name=name,
             passed=False,
             severity=severity,
             threshold=str(check.get("threshold", "")),
-            message=f"No model run directory under {root}. Run the model stage first.",
+            message=missing,
         )
     return _gate_result(
         name,
@@ -779,17 +831,6 @@ def _check_model_gate(
         missing_hint="Run the model stage first.",
         absent_hint="a round did not converge, so the stage evaluated no gates.",
     )
-
-
-# diagnostics.converged is the string 'true'/'false' (combine_rounds) and
-# diagnostics.estimates_written a JSON boolean; ->> renders both as text. The
-# evaluate stage selects its target run with the same predicate.
-EVALUABLE_RUN_PREDICATE = (
-    "model_type = 'bradley_terry_hierarchical' "
-    "AND diagnostics ->> 'converged' = 'true' "
-    "AND diagnostics ->> 'estimates_written' = 'true'"
-)
-LATEST_EVALUABLE_RUN = text(f"SELECT MAX(run_id) FROM model_runs WHERE {EVALUABLE_RUN_PREDICATE}")
 
 
 def _stale_report_failure(report: Any, conn: Connection | None) -> str | None:

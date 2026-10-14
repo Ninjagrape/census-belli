@@ -7,6 +7,7 @@ these assertions would have passed vacuously against it except by accident.
 
 from __future__ import annotations
 
+import json
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import Any
@@ -791,3 +792,131 @@ def test_evaluation_gate_follows_the_spec_report_path(tmp_path: Path) -> None:
     result = QualityRunner(None, {"report_path": str(report)}).run_one(check)
 
     assert not result.passed
+
+
+# ─── model_gate method handler ───────────────────────────────────────────────
+
+
+def _write_model_gate_report(root: Path, run_id: int, passed: bool) -> None:
+    directory = root / f"run{run_id}"
+    directory.mkdir(parents=True)
+    gate = {"name": "exclusion_concentration", "passed": passed, "actual": 0.1}
+    gates = [{**gate, "threshold": "< 0.3"}]
+    (directory / "gate_report.json").write_text(json.dumps({"gates": gates}), encoding="utf-8")
+
+
+def _model_gate_check(root: Path, **params: Any) -> dict[str, Any]:
+    return {
+        "name": "exclusion_concentration",
+        "method": "model_gate",
+        "params": {"gate": "exclusion_concentration", "root": str(root), **params},
+        "severity": "error",
+    }
+
+
+def test_model_gate_default_reads_the_newest_directory_when_there_is_no_connection(
+    tmp_path: Path,
+) -> None:
+    _write_model_gate_report(tmp_path, 2, passed=False)
+    _write_model_gate_report(tmp_path, 10, passed=True)
+
+    result = QualityRunner(None).run_one(_model_gate_check(tmp_path))
+
+    assert result.passed, result.message
+
+
+def test_model_gate_default_reads_the_pooled_run_from_the_database(tmp_path: Path) -> None:
+    _write_model_gate_report(tmp_path, 3, passed=True)
+    _write_model_gate_report(tmp_path, 10, passed=False)
+
+    result = QualityRunner(StubConnection(value=3)).run_one(_model_gate_check(tmp_path))
+
+    assert result.passed, result.message
+
+
+def test_model_gate_evaluable_reads_the_gate_report_of_the_evaluable_run(tmp_path: Path) -> None:
+    _write_model_gate_report(tmp_path, 7, passed=True)
+    _write_model_gate_report(tmp_path, 9, passed=False)
+
+    result = QualityRunner(StubConnection(value=7)).run_one(
+        _model_gate_check(tmp_path, run="evaluable")
+    )
+
+    assert result.passed, result.message
+
+
+def test_model_gate_evaluable_fails_a_failing_gate_of_the_evaluable_run(tmp_path: Path) -> None:
+    _write_model_gate_report(tmp_path, 7, passed=False)
+
+    result = QualityRunner(StubConnection(value=7)).run_one(
+        _model_gate_check(tmp_path, run="evaluable")
+    )
+
+    assert not result.passed
+    assert result.severity is Severity.ERROR
+
+
+def test_model_gate_evaluable_fails_without_a_run_and_never_reads_a_higher_directory(
+    tmp_path: Path,
+) -> None:
+    _write_model_gate_report(tmp_path, 9, passed=True)
+
+    result = QualityRunner(StubConnection(value=None)).run_one(
+        _model_gate_check(tmp_path, run="evaluable")
+    )
+
+    assert not result.passed
+    assert "No converged model run" in result.message
+
+
+def test_model_gate_evaluable_fails_without_a_connection(tmp_path: Path) -> None:
+    _write_model_gate_report(tmp_path, 9, passed=True)
+
+    result = QualityRunner(None).run_one(_model_gate_check(tmp_path, run="evaluable"))
+
+    assert not result.passed
+    assert "database connection" in result.message
+
+
+def test_model_gate_evaluable_fails_without_raising_when_the_lookup_fails(tmp_path: Path) -> None:
+    _write_model_gate_report(tmp_path, 9, passed=True)
+    conn = StubConnection(raises=RuntimeError("connection lost"))
+
+    result = QualityRunner(conn).run_one(_model_gate_check(tmp_path, run="evaluable"))
+
+    assert not result.passed
+    assert "RuntimeError" in result.message
+
+
+def test_model_gate_unknown_run_value_fails_without_raising(tmp_path: Path) -> None:
+    _write_model_gate_report(tmp_path, 9, passed=True)
+
+    result = QualityRunner(StubConnection(value=9)).run_one(
+        _model_gate_check(tmp_path, run="newest")
+    )
+
+    assert not result.passed
+    assert "'newest'" in result.message
+
+
+def _model_gate_spec_checks() -> list[dict[str, Any]]:
+    spec = yaml.safe_load((AGENTS_DIR / "report.yaml").read_text(encoding="utf-8"))
+    return list(spec["quality_checks"])
+
+
+def test_report_sql_checks_select_only_evaluable_runs() -> None:
+    sql_checks = [c for c in _model_gate_spec_checks() if "method" not in c]
+    touching_runs = [c for c in sql_checks if "model_runs" in c["check"]]
+
+    assert touching_runs
+    for check in touching_runs:
+        assert "estimates_written" in check["check"], check["name"]
+        assert "converged" in check["check"], check["name"]
+        assert "SELECT MAX(run_id) FROM model_runs)" not in check["check"], check["name"]
+
+
+def test_report_exclusion_concentration_is_an_evaluable_error_gate() -> None:
+    (check,) = [c for c in _model_gate_spec_checks() if c["name"] == "exclusion_concentration"]
+
+    assert check["severity"] == "error"
+    assert check["params"]["run"] == "evaluable"

@@ -31,8 +31,8 @@ class EvaluateParams:
         held_out_folds: Number of cross-validation folds.
         cv_rounds: Imputed rounds per fold fit.
         eval_draws: Sampler draws per chain for evaluation fits.
-        eval_min_ess_bulk: Bulk ESS floor of evaluation fits, replacing the
-            model's publish threshold.
+        eval_min_ess_bulk: Bulk ESS floor of evaluation fits. Evaluation fits
+            use the lower of this and the model's ``min_ess_bulk``.
         calibration_bins: Equal-width bins of the calibration table.
         sensitivity_rounds: Imputed rounds per sensitivity fit.
         top_n: Size of the top set compared across variants.
