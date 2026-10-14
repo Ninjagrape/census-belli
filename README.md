@@ -8,10 +8,10 @@ math proves it"](https://towardsdatascience.com/napoleon-was-the-best-general-ev
 which borrowed baseball's WAR framework for generals. This project keeps the
 framework and rebuilds the data and the statistics underneath it.
 
-> **Status: partially built.** Seven of nine pipeline stages are implemented.
-> The first three are verified against a real database; the statistical
-> stages have run only on fixtures and synthetic data, and the two stages that
-> evaluate the model and produce a ranking do not exist yet. See
+> **Status: partially built.** Eight of nine pipeline stages are implemented.
+> All eight run end to end on a real 211-battle corpus, but with no LLM
+> extraction answered yet the model sees only 59 of those battles, and the
+> report stage that would produce a ranking does not exist yet. See
 > [Project status](#project-status) before assuming any number here is real.
 > There is no published ranking, and there should not be one until the
 > [known limitations](#known-limitations) below are closed.
@@ -33,7 +33,7 @@ This project keeps that idea and changes almost everything underneath it:
 | **Skill** | Sum of outcome surpluses | Hierarchical Bayesian Bradley-Terry model on graded outcomes (decisive to indecisive), with skills shrunk towards a population and uncertainty carried through |
 | **WAR** | Realised: outcome minus expectation | Expected WAR against a 40th-percentile replacement commander, so a lucky 3-0 record does not read as certain greatness |
 | **Output** | A point score per general | A posterior per general with credible intervals; overlapping generals are reported as inseparable |
-| **Checking it** | — | Quality gates between every stage, parameter-recovery tests on synthetic data, a check that imputation is not feeding the model its own outcomes, and (planned) held-out prediction and sensitivity analysis |
+| **Checking it** | — | Quality gates between every stage, parameter-recovery tests on synthetic data, a check that imputation is not feeding the model its own outcomes, held-out prediction and sensitivity analysis |
 
 ## What problem this is trying to solve
 
@@ -82,11 +82,11 @@ corrupting what came after it.
 | 1 | `crawl` | Fetch Wikipedia battle lists and articles, Wikidata, DBpedia, citations | Built, verified |
 | 2 | `extract` | Parse infoboxes, map Wikidata and DBpedia, LLM-extract from article text | Built, verified |
 | 3 | `resolve` | Link commanders and battles to canonical Wikidata entities | Built, verified |
-| 4 | `reconcile` | Source-disagreement model over troop and casualty reports | Built, fixtures only |
-| 5 | `classify` | Command roles, hierarchy, attribution weights, missingness types | First slice, fixtures only |
-| 6 | `impute` | Multiple imputation for missing troop data | Built, fixtures only |
-| 7 | `model` | Hierarchical Bayesian Bradley-Terry fit, WAR calculation | Built, fixtures only |
-| 8 | `evaluate` | Held-out prediction, posterior predictive checks, sensitivity analysis | Not built |
+| 4 | `reconcile` | Source-disagreement model over troop and casualty reports | Built, runs on the real corpus |
+| 5 | `classify` | Command roles, hierarchy, attribution weights, missingness types | First slice, LLM pass not yet run |
+| 6 | `impute` | Multiple imputation for missing troop data | Built, runs on the real corpus |
+| 7 | `model` | Hierarchical Bayesian Bradley-Terry fit, WAR calculation | Built, runs on the real corpus (59 of 210 battles) |
+| 8 | `evaluate` | Held-out prediction, posterior predictive checks, sensitivity analysis | Built, runs on the real corpus |
 | 9 | `report` | Rankings with credible intervals, interactive explorer | Not built |
 
 Between stages the orchestrator runs that stage's quality gates — real SQL
@@ -184,13 +184,17 @@ Alembic migration, the crawl log, the extract writer, and the resolve stage end
 to end. Verified against live services: Wikipedia and DBpedia fetching and
 parsing, Wikidata SPARQL lookup, and one real LLM disambiguation call.
 
-Built and tested on fixtures and synthetic data only: reconcile, classify,
-impute and model, each with parameter-recovery tests for the statistical
-parts. Not yet built: evaluate and report.
+Built and tested on fixtures and synthetic data, with parameter-recovery tests
+for the statistical parts: reconcile, classify, impute, model and evaluate. On
+a 211-article corpus (Ethan Arsht's battle list) every stage from crawl to
+evaluate runs through the command line and passes its error gates, but no LLM
+request has been answered yet, so command roles are unknown and the model
+covers only 59 of 210 battles. Its numbers are a check that the machinery
+works, not a result. Not yet built: report.
 
-Not yet proven: any real corpus past resolve, any crawl at corpus scale, and
-the quality gates' thresholds, which execute correctly but have only run
-against empty or fixture databases.
+Not yet proven: a ranking from a corpus with its LLM extraction done, and most
+quality-gate thresholds, which have run against fixtures and this one corpus
+only.
 
 ## Known limitations
 

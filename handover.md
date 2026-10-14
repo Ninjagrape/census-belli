@@ -12,15 +12,24 @@ here.
 2026-10-10. Code comments cite its section numbers ("handover-log §16.1").
 Do not read it by default; open the cited section when a comment points there.
 
-Last updated: 2026-10-14. Committed through 85de7e8 (§7 step 0 is committed).
-The real corpus passes crawl through model on the CLI (model on 59 of 210
-battles until classify's LLM slice runs).
+Last updated: 2026-10-14. Committed through 3f01939 (evaluate stage). The real
+corpus passes crawl through evaluate on the CLI (model on 59 of 210 battles
+until classify's LLM slice runs).
 
-**Evaluate stage built 2026-10-14, uncommitted.** Contract in
-`agents/evaluate.yaml`; code in `pipeline/stages/evaluate.py` and
-`pipeline/evaluators/`; named checks in `config/expert_rankings.yaml` (Q-ids
-looked up live, reviewed by `historiography-reviewer`); statistics reviewed by
-`bayesian-model-reviewer` (B1 and S1-S6 applied, see §9.10). Report is unbuilt.
+**Evaluate is committed** (3f01939). Contract in `agents/evaluate.yaml`; code in
+`pipeline/stages/evaluate.py` and `pipeline/evaluators/`; named checks in
+`config/expert_rankings.yaml` (Q-ids looked up live, reviewed by
+`historiography-reviewer`); statistics reviewed by `bayesian-model-reviewer`
+(B1 and S1-S6 applied, see §9.10).
+
+**Report is unbuilt; its gates are fixed in the tree (uncommitted, a parallel
+session).** `agents/report.yaml` selects the run by
+`quality.EVALUABLE_RUN_PREDICATE` in every gate and adds
+`exclusion_concentration` as an error (the two BLOCKING items in
+`docs/todo/09-report.md`). `_check_model_gate` takes `params.run`: `latest`
+(default, newest pooled run, directory-scan fallback) or `evaluable` (newest
+converged run with estimates, no fallback); tests in `tests/unit/test_quality.py`.
+Not yet run against a database.
 
 ---
 
@@ -35,8 +44,8 @@ looked up live, reviewed by `historiography-reviewer`); statistics reviewed by
 | classify | first slice | on fixtures; LLM path offline/cache only | **passes**, 254 LLM requests deferred (exit 3) |
 | impute | yes | **yes** (integration suite) | **passes** at 2000 draws / 1500 tune (max rhat 1.0092 vs 1.01: thin margin) |
 | model | yes | on fixtures | **passes** at 3000 draws (run 54: rhat 1.004, ESS 1445); 59 of 210 battles included; 4 warning gates (§7 step 1) |
-| evaluate | yes (uncommitted) | **yes** (integration 12, model CV 4) | **runs, 4 of 5 gates pass** (2026-10-14, model run 54): held-out accuracy 0.70, Brier 0.222; named_checks not_evaluable |
-| report | **no** | — | — |
+| evaluate | yes | **yes** (integration 12, model CV 4) | **runs, 4 of 5 gates pass** (2026-10-14, model run 54): held-out accuracy 0.70, Brier 0.222; named_checks not_evaluable |
+| report | **no** (spec gates revised, uncommitted) | — | — |
 
 Counts on 2026-10-13 (uncommitted tree): non-model suite 1392 passed, 0
 skipped (before the last small fixes; unit 1182, reconcile+impute integration
@@ -50,7 +59,7 @@ xfailed (~11 min alone). Run the model files one per command; a single
 ```bash
 export DATABASE_URL="postgresql+psycopg://general_war:general_war@127.0.0.1:5432/general_war"
 ruff check pipeline/ tests/ scripts/ alembic/   # expect: All checks passed
-python -m mypy pipeline/                         # expect: Success, 116 source files (strict)
+python -m mypy pipeline/                         # expect: Success, 131 source files (strict)
 python -m pytest tests/ -q -m "not live and not model"   # expect: 0 failed, 0 skipped (~1395 passed)
 PYTHONIOENCODING=utf-8 alembic heads             # expect: one head, a7b8c9d0e1f2
 python -m pytest tests/model -m model            # recovery suites; slow (~15 min)
@@ -281,12 +290,13 @@ floor. Recurring classes, with the log section that records each:
    errors on the 87% singleton sides are not detectable by the model. Impute
    passes rhat 1.0092 against 1.01 on hierarchical scales `tau_p`, `tau_c`;
    another corpus may need more draws.
-4. **Commit the evaluate stage**, then **report**. Fix the two BLOCKING
-   report items first (`docs/todo/09-report.md`). Evaluate open items: the
-   calibration gate sits on the imputed CV arm (decision in §9.10); the
-   +/-1 sd `g_unlabelled` sensitivity is not built (needs reconcile regime
-   draws); `EvaluateParams` docstring still says the ESS floor "replaces" the
-   model's (it is `min` of the two).
+4. **Report.** Evaluate is committed (3f01939). The report gate fixes and
+   `params.run: evaluable` are in the tree, uncommitted: verify them (ruff,
+   mypy, the non-model suite with `DATABASE_URL`), commit, then build
+   `pipeline/stages/report.py` against `docs/todo/09-report.md`. Evaluate open
+   items: the calibration gate sits on the imputed CV arm (decision in §9.10);
+   the +/-1 sd `g_unlabelled` sensitivity is not built (needs reconcile regime
+   draws).
 5. Full-pipeline integration test on fixtures (crawl through model).
 
 Say explicitly what was and was not verified against a database.
@@ -588,12 +598,13 @@ is in the log section cited.
 ## 10. Honest status
 
 Built and verified against a real Postgres: crawl, extract, resolve, and
-reconcile, classify, impute and model on fixtures. The recovery suites pass on
-synthetic data. The real-corpus pilot (§11) showed that "verified against a
-database" meant "verified when a test passes the connection in". After the
-2026-10-12 sweep (§12), crawl, extract and resolve pass their gates through
-the CLI on the real corpus; reconcile converges but over-shrinks (§7 step 0);
-classify, impute and model have not run on real data since.
+reconcile, classify, impute, model and evaluate on fixtures. The recovery
+suites pass on synthetic data. The real-corpus pilot (§11) showed that
+"verified against a database" meant "verified when a test passes the
+connection in". On the real corpus (`general_war_corpus2`) crawl through model
+pass their error gates through the CLI (§1), and evaluate runs with 4 of 5
+gates passing, but every LLM request is still deferred, so the model sees 59 of
+210 battles.
 
 Not proven: any real corpus producing a ranking, the offline batch path on a real
 request file (`/process-llm-batch` has never run), any billed API call

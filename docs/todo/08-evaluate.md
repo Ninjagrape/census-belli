@@ -14,4 +14,4 @@
 - [x] Diagnostic plots (rank stability, CI widths, skill vs n_battles, calibration)
 - [x] config/expert_rankings.yaml
 - [ ] Decide whether the calibration gate should sit on the joint arm (handover §9.10)
-- [ ] Fix the EvaluateParams docstring (ESS floor is min of model and eval)
+- [x] Fix the EvaluateParams docstring (ESS floor is min of model and eval) (uncommitted)
