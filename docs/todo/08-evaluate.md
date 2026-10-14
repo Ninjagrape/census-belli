@@ -1,17 +1,17 @@
 ## Stage 8: Evaluate (pipeline/stages/evaluate.py)
-- [ ] Held-out prediction (5-fold CV on battles)
-- [ ] Brier score / calibration plot
-- [ ] Posterior predictive checks (simulate outcomes, compare to observed)
-- [ ] Sensitivity analysis runner
-  - [ ] g_unlabelled +/- 1 sd sensitivity on the neutral estimates (bounds the shared reconcile error impute does not propagate, see agents/impute.yaml)
-  - [ ] Refit with each variant from agents/evaluate.yaml
-  - [ ] New variants from the model review: exclude_extreme_ratio (|x_A - x_B| > 2),
-        three_level_outcome (collapse decisive grades), realised_war ranking,
-        equal_attribution consuming default_split sides at 1/n
-- [ ] Sensitivity refits must not take MAX(run_id) away from the published run: filter on model_type
-  - [ ] Compute rank correlation and top-20 overlap across variants
-- [ ] Expert ranking comparison (load config/expert_rankings.yaml, compute overlap)
-- [ ] Named sanity checks (Agrippa > Octavian, Belisarius > Justinian)
-- [ ] Evaluation report generator (JSON + summary text)
-- [ ] Diagnostic plots (rank stability, CI widths, skill vs n_battles)
-- [ ] config/expert_rankings.yaml (curated from published lists)
+- [x] Held-out prediction (5-fold CV on battles; imputed and joint-latent arms)
+- [x] Brier score / calibration plot (favourite frame; side A wins 79% on the corpus)
+- [x] Posterior predictive checks (by era, battle type, per-general win rate)
+- [x] Sensitivity analysis runner
+  - [ ] g_unlabelled +/- 1 sd sensitivity on the neutral estimates (bounds the shared reconcile error impute does not propagate, see agents/impute.yaml); needs reconcile regime draws exported
+  - [x] Refit with each variant from agents/evaluate.yaml
+  - [x] New variants from the model review: exclude_extreme_ratio, three_level_outcome, realised_war ranking, equal_attribution consuming default_split sides at 1/n
+- [x] Sensitivity refits must not take MAX(run_id) away from the published run (evaluate writes no model_runs rows)
+  - [x] Rank correlation and top-20 overlap across variants, plus a noise-floor refit
+- [x] Expert ranking comparison (config/expert_rankings.yaml)
+- [x] Named sanity checks (Agrippa > Octavian; Justinian uncredited)
+- [x] Evaluation report generator (JSON + CSVs)
+- [x] Diagnostic plots (rank stability, CI widths, skill vs n_battles, calibration)
+- [x] config/expert_rankings.yaml
+- [ ] Decide whether the calibration gate should sit on the joint arm (handover §9.10)
+- [ ] Fix the EvaluateParams docstring (ESS floor is min of model and eval)

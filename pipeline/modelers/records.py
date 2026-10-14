@@ -51,11 +51,14 @@ class CommanderInput:
         attribution_weight: The weight classify wrote; renormalised per side.
         attribution_method: ``rule_single``, ``rule_roles``, ``llm``,
             ``manual`` or ``default_split``.
+        command_role: ``battle_commanders.command_role`` text, or None when
+            the loader did not read it.
     """
 
     general_id: int
     attribution_weight: float
     attribution_method: str
+    command_role: str | None = None
 
 
 @dataclass(frozen=True)

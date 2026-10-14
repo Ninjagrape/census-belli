@@ -15,6 +15,12 @@ outcome has ``k_lo == k_hi``, a same-class grade disagreement spans two levels.
 log-troop difference per battle with a measurement prior, in one fit with no
 imputation; it is the comparator for the circularity check.
 
+``build_model`` and ``build_joint_latent_model`` also take an optional per-battle
+``loglik_weight`` for held-out cross-validation: weight 0 drops a battle's outcome
+from the likelihood while its sides and generals stay in the graph, so they sample
+from their prior predictive.
+Without it the graph is exactly the unweighted one.
+
 pymc is imported inside the functions, as in ``pipeline/imputers/model.py``.
 Every per-observation array is a ``pm.Data`` (numpy constants make nutpie's
 compile time explode, handover-log 20.2 item 7).
@@ -57,7 +63,27 @@ def _data(pm_module: Any, name: str, values: np.ndarray) -> Any:
     return pm_module.Data(name, values)
 
 
-def build_model(design: ModelDesign, x_diff: np.ndarray, priors: ModelPriors) -> pm.Model:
+def _check_loglik_weight(
+    design: ModelDesign, loglik_weight: np.ndarray | None
+) -> np.ndarray | None:
+    """Validate an optional per-battle likelihood weight; None passes through."""
+    if loglik_weight is None:
+        return None
+    weight = np.asarray(loglik_weight, dtype=float)
+    if weight.shape != (design.n_battles,):
+        raise ValueError(f"loglik_weight has shape {weight.shape}, expected ({design.n_battles},)")
+    if not np.isfinite(weight).all() or (weight < 0).any() or (weight > 1).any():
+        raise ValueError("loglik_weight must be finite and within [0, 1]")
+    return weight
+
+
+def build_model(
+    design: ModelDesign,
+    x_diff: np.ndarray,
+    priors: ModelPriors,
+    *,
+    loglik_weight: np.ndarray | None = None,
+) -> pm.Model:
     """Build the model with the log-troop difference fixed at ``x_diff``.
 
     Args:
@@ -65,19 +91,23 @@ def build_model(design: ModelDesign, x_diff: np.ndarray, priors: ModelPriors) ->
         x_diff: ``x_A - x_B`` per battle, shape ``(n_battles,)``. Held in a
             ``pm.Data`` named ``x_diff``.
         priors: Hyperparameters.
+        loglik_weight: Optional weight per battle on its log-likelihood term,
+            shape ``(n_battles,)``, finite, in ``[0, 1]``. Held in a ``pm.Data``
+            named ``data_loglik_weight``. None leaves the graph unweighted.
 
     Returns:
         An unsampled :class:`pymc.Model`.
 
     Raises:
         ImportError: If pymc is not installed.
-        ValueError: If the design has no battles or ``x_diff`` has the wrong
-            length.
+        ValueError: If the design has no battles, ``x_diff`` has the wrong
+            length, or ``loglik_weight`` has the wrong shape or values.
     """
     _check_design(design)
     if x_diff.shape != (design.n_battles,):
         raise ValueError(f"x_diff has shape {x_diff.shape}, expected ({design.n_battles},)")
-    return _build(design, priors, x_diff=x_diff, measurement=None)
+    weight = _check_loglik_weight(design, loglik_weight)
+    return _build(design, priors, x_diff=x_diff, measurement=None, loglik_weight=weight)
 
 
 def joint_x_diff_prior(
@@ -122,6 +152,8 @@ def build_joint_latent_model(
     obs_sd: np.ndarray,
     sigma_w: float,
     priors: ModelPriors,
+    *,
+    loglik_weight: np.ndarray | None = None,
 ) -> pm.Model:
     """Build the joint model with a latent log-troop difference per battle (R2).
 
@@ -134,23 +166,30 @@ def build_joint_latent_model(
         obs_sd: Observed log-troop sd per side index, NaN where missing.
         sigma_w: Within-battle sd of log troops, positive.
         priors: Hyperparameters.
+        loglik_weight: Optional weight per battle on its log-likelihood term,
+            as in :func:`build_model`. A battle with weight 0 keeps its latent
+            ``x_diff_latent`` in the graph, where it samples the measurement
+            prior. None leaves the graph unweighted.
 
     Returns:
         An unsampled :class:`pymc.Model`.
 
     Raises:
-        ValueError: On a length mismatch or a non-positive ``sigma_w``.
+        ValueError: On a length mismatch, a non-positive ``sigma_w`` or an
+            invalid ``loglik_weight``.
     """
     _check_design(design)
     if any(a.shape != (design.n_sides,) for a in (obs_mean, obs_sd)):
         raise ValueError(f"measurement arrays must have shape ({design.n_sides},)")
     if not sigma_w > 0:
         raise ValueError("sigma_w must be positive")
+    weight = _check_loglik_weight(design, loglik_weight)
     return _build(
         design,
         priors,
         x_diff=None,
         measurement=joint_x_diff_prior(design, obs_mean, obs_sd, sigma_w),
+        loglik_weight=weight,
     )
 
 
@@ -165,6 +204,7 @@ def _build(
     *,
     x_diff: np.ndarray | None,
     measurement: tuple[np.ndarray, np.ndarray] | None,
+    loglik_weight: np.ndarray | None = None,
 ) -> pm.Model:
     import pymc as pm  # noqa: PLC0415 - deliberately deferred; see module docstring
     import pytensor.tensor as pt  # noqa: PLC0415
@@ -235,7 +275,10 @@ def _build(
             cdf[rows, _data(pm, "data_k_hi", design.k_hi) + 1]
             - cdf[rows, _data(pm, "data_k_lo", design.k_lo)]
         )
-        pm.Potential("outcome_loglik", pt.log(pt.maximum(prob, PROB_FLOOR)).sum())
+        log_prob = pt.log(pt.maximum(prob, PROB_FLOOR))
+        if loglik_weight is not None:
+            log_prob = _data(pm, "data_loglik_weight", loglik_weight) * log_prob
+        pm.Potential("outcome_loglik", log_prob.sum())
 
     logger.info(
         "model_built",

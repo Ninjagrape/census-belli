@@ -1,104 +1,193 @@
 stage: evaluate
 description: >
-  Validate the model through held-out prediction, posterior predictive
-  checks, sensitivity analysis, and comparison against expert rankings.
-  Produces a comprehensive evaluation report.
+  Validate the latest converged primary model run: held-out prediction,
+  posterior predictive checks, sensitivity refits, and comparison against
+  named sanity checks and external rankings. Writes files only; no
+  model_runs or general_skill_estimates rows, so MAX(run_id) over model_runs
+  still names the published run.
+
+  Target run. The newest bradley_terry_hierarchical row with
+  diagnostics->>'converged' = 'true' and estimates written. The imputed
+  rounds on disk must come from that run's imputation_run_id
+  (check_round_provenance), or the stage refuses.
+
+  Held-out prediction. Battles are split into held_out_folds seeded folds.
+  Each fold refits the model on cv_rounds imputed rounds with the held-out
+  battles' outcomes masked out of the likelihood (loglik_weight 0); they stay
+  in the design, so a general seen only in held-out battles, and every
+  held-out latent side, samples from its prior predictive. Leakage: impute
+  conditions troops on outcome, so a held-out battle's imputed force ratio
+  encodes its result. Prediction therefore draws x_A - x_B from the
+  measurement-only prior (joint_x_diff_prior), never from the imputed rounds.
+  Residual leakage (impute's hyperparameters saw every outcome) is disclosed
+  in the report. Metrics on battles A won or lost outright: accuracy (Wilson
+  interval), Brier, calibration bins; on exact outcomes, ranked probability
+  score; on every battle, log score of the observed interval. Baselines:
+  chance, and "larger measured army wins". The model is also scored on exactly
+  the battles that baseline covers (decided, both sides measured), as
+  on_force_baseline_mask, so the comparison is like for like.
+
+  Two arms, reported as cv.imputed and cv.joint. The imputed arm trains on
+  imputed x_diff (outcome-conditioned) and predicts from the measurement-only
+  prior, so it mixes model quality with a circularity penalty. The joint arm
+  fits the joint latent-troops model once per fold with the same likelihood
+  mask and predicts held-out battles from the posterior draws' own
+  x_diff_latent (which, at weight 0, samples the measurement prior). The gates
+  held_out_accuracy, calibration and cv_converged use the imputed arm, which is
+  what the published ranking resembles. The joint arm is reported alongside; if
+  it does not converge that is recorded and the stage does not fail.
+
+  Sensitivity. A baseline refit and every variant use the same
+  sensitivity_rounds rounds and seeds, so differences are the variant's, not
+  Monte Carlo's. Post-hoc variants re-reduce the baseline draws without a
+  refit. A variant whose design equals the baseline's is reported no_op and
+  not refitted. Rankings are compared by Spearman over common generals and
+  top-N overlap, against the baseline refit and against the published run.
+
+  observed_only changes the sample and removes imputation at once, so its
+  companion refit observed_only_imputed_subset fits the same both-measured
+  battles on the imputed rounds' x_diff; observed_only is reported against it
+  (isolating imputation and circularity) as well as against the baseline.
+  sensitivity.noise_floor is the baseline refitted under another seed offset
+  and, when the imputed rounds on disk allow, a disjoint set of
+  sensitivity_rounds rounds (else the same rounds), compared with the baseline:
+  the top-N overlap two fits of the same model reach by chance. It is shown in
+  the ranking_stability gate's actual and message; the pass rule is unchanged.
+
+  Named checks and external rankings come from config/expert_rankings.yaml,
+  keyed by Wikidata Q-id. A check whose general is not ranked is
+  not_evaluable, which fails its gate rather than passing silently.
+
+  Not done here: the +/-1 sd g_unlabelled sensitivity (handover-log 21.7). It
+  needs reconcile's regime draws exported and propagated through impute.
 
 inputs:
-  - db: model_runs, general_skill_estimates, battle_war_details
+  - db: model_runs, general_skill_estimates, generals
   - db: battles, battle_sides, battle_commanders
-  - config/expert_rankings.yaml           # curated expert top-50 lists for comparison
-  - config/sensitivity_specs.yaml         # alternative model specs to test
+  - data/imputed/{scale}/round_*           # the rounds the target run was fitted on
+  - data/processed/model_diagnostics/run{N}/
+  - config/expert_rankings.yaml
 
 outputs:
-  - data/processed/evaluation_report.json
-  - data/processed/sensitivity_results/
-  - data/processed/figures/               # diagnostic plots
+  - data/processed/evaluation_report.json  # latest; carries model_run_id and gates
+  - data/processed/evaluation/run{N}/      # report copy, cv_predictions.csv, sensitivity/*.csv, figures/*.png
 
-tools:
-  - pymc_ppc             # posterior predictive checks
-  - held_out_eval        # k-fold or leave-one-out on battles
-  - sensitivity_runner   # refit model with altered specs
-  - plot_diagnostics
+tools: []
 
 params:
+  # Model parameters (priors, sampler, write thresholds, scale, imputed_root)
+  # come from this spec's params via load_model_params, as in the model stage.
+  model_spec: agents/model.yaml
+  expert_rankings: config/expert_rankings.yaml
+  output_root: data/processed/evaluation
+  report_path: data/processed/evaluation_report.json
+  seed: 20261014
+
   held_out_folds: 5
+  # Imputed rounds per fold fit, mixture-pooled for prediction.
+  cv_rounds: 3
+  # Sampler draws per chain for evaluation fits; tune is the model's. Lower
+  # than the model's 3000 because evaluation fits are compared, not published,
+  # but each still has to meet the model's write thresholds.
+  eval_draws: 1500
+  # Bulk ESS floor for evaluation fits, lowering the model's publish threshold
+  # (800) to this value, never raising it above the model's: at eval_draws they
+  # reach ~715-760, and these fits are compared, not published. 400 is the bar
+  # reconcile and the recovery suites use. max_rhat and max_divergences stay the
+  # model's.
+  eval_min_ess_bulk: 400
+  calibration_bins: 5
+
+  sensitivity_rounds: 5
+  top_n: 20
+  min_top_overlap: 12          # of top_n; scaled down when fewer generals are ranked
+
   sensitivity_variants:
     - name: drop_low_quality
+      kind: battle_filter
       description: "Drop battles with data_quality_score < 0.3"
-      filter: "data_quality_score >= 0.3"
-
+      min_quality: 0.3
     - name: observed_only
-      description: "No imputation, only observed troop data"
-      imputation: none
-
-    - name: flat_priors
-      description: "Use very wide priors on all parameters"
+      kind: x_source
+      description: "No imputation: battles with both sides measured, x_diff from reconcile's neutral means"
+    # Skills stay hierarchically shrunk: skill_prior_sd scales the HalfNormal
+    # on sigma_skill, and the cutpoint and latent-side priors are unchanged.
+    - name: weak_hyperpriors
+      kind: priors
+      description: "Wider hyperprior on the skill sd and a wider force-slope prior"
       skill_prior_sd: 5.0
-      beta_force_prior_sd: 2.0
-
+      beta_force_sd: 2.0
     - name: equal_attribution
-      description: "Ignore command hierarchy, equal credit to all commanders"
-      attribution_method: equal
-
+      kind: side_transform
+      description: "Equal credit to every commander on a side, default_split sides included"
     - name: field_commanders_only
-      description: "Only attribute to field_commander and subordinate roles"
+      kind: side_transform
+      description: >
+        Drop sovereign and nominal commanders (never emptying a side). A
+        commander with no recorded role is kept. A side whose kept commanders
+        have no positive finite weight gets equal weights (sides_reweighted).
       exclude_roles: [sovereign, nominal]
-
+    - name: exclude_extreme_ratio
+      kind: battle_filter
+      description: >
+        Drop battles whose measurement-only |x_A - x_B| (both sides measured,
+        obs_mean[A] - obs_mean[B], no imputation) exceeds 2 (odds worse than
+        ~1:7). Imputed x_diff is outcome-conditioned and is not used. Battles
+        with an unmeasured side are kept.
+      max_abs_log_ratio: 2.0
+    - name: three_level_outcome
+      kind: design_transform
+      description: "Collapse decisive and ordinary grades by interval censoring (win / indecisive / loss)"
     - name: replacement_50th
-      description: "Set replacement level at median instead of 40th percentile"
-      replacement_level: percentile_50
-
-  # validation targets
-  expert_checks:
-    - general: Napoleon
-      expected_rank_range: [1, 3]
-    - general: Alexander the Great
-      expected_rank_range: [1, 15]
-    - general: Genghis Khan
-      expected_rank_range: [1, 20]
-    - general: Agrippa
-      expected_note: "Should rank higher than Octavian"
-    - general: Octavian
-      expected_note: "Should rank lower than Agrippa"
-    - general: Belisarius
-      expected_note: "Should rank higher than Justinian"
+      kind: post_hoc
+      description: "Replacement level at the median instead of the 40th percentile"
+      replacement_percentile: 50
+    - name: realised_war
+      kind: post_hoc
+      description: "Rank by realised WAR (outcome minus replacement) instead of expected WAR"
+      rank_by: realised
 
 prompt: null
 
 quality_checks:
   - name: held_out_accuracy
-    check: "Held-out prediction accuracy (binary win/loss) above chance"
-    method: held_out_accuracy    # not SQL: needs the k-fold predictions, not the DB
+    check: "Held-out binary accuracy above 0.55"
+    method: evaluation_gate
+    params: {gate: held_out_accuracy}
     threshold: "> 0.55"
     severity: warning
 
   - name: calibration
-    check: "Predicted win probabilities are calibrated (Brier score < 0.25)"
-    method: brier_score
+    check: "Held-out Brier score below 0.25 (a coin flip scores 0.25)"
+    method: evaluation_gate
+    params: {gate: calibration}
+    threshold: "< 0.25"
+    severity: warning
+
+  - name: cv_converged
+    check: "Every cross-validation fold fit met the model's write thresholds"
+    method: evaluation_gate
+    params: {gate: cv_converged}
     severity: warning
 
   - name: ranking_stability
     check: >
-      Top-20 generals should overlap by at least 12 across all sensitivity
-      variants (60% stability)
-    method: jaccard_overlap
+      Top-20 generals overlap by at least 12 between the baseline refit and
+      every refitted variant (scaled down below 20 ranked generals)
+    method: evaluation_gate
+    params: {gate: ranking_stability}
     severity: warning
 
-  - name: octavian_agrippa_check
+  - name: named_checks
     check: >
-      SELECT gse_agrippa.rank < gse_octavian.rank
-      FROM general_skill_estimates gse_agrippa
-      JOIN generals g_agrippa ON g_agrippa.general_id = gse_agrippa.general_id
-        AND g_agrippa.canonical_name LIKE '%Agrippa%'
-      CROSS JOIN general_skill_estimates gse_octavian
-      JOIN generals g_octavian ON g_octavian.general_id = gse_octavian.general_id
-        AND g_octavian.canonical_name LIKE '%Octavian%'
-      WHERE gse_agrippa.run_id = gse_octavian.run_id
-    threshold: "= true"
+      Every gated check in config/expert_rankings.yaml passes (Agrippa above
+      Octavian; Justinian has no credited battles); not_evaluable fails. Rank
+      ranges (Napoleon, Alexander) are reported, not gated.
+    method: evaluation_gate
+    params: {gate: named_checks}
     severity: warning
-    description: "Agrippa should rank above Octavian if attribution is working"
 
 retry_policy:
-  max_stage_retries: 1
+  # Fixed seeds: a retry would reproduce the same result.
+  max_stage_retries: 0
   on_failure: complete_with_warnings

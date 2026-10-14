@@ -12,13 +12,15 @@ here.
 2026-10-10. Code comments cite its section numbers ("handover-log §16.1").
 Do not read it by default; open the cited section when a comment points there.
 
-Last updated: 2026-10-13. Committed through a54e239. **Uncommitted, verified
-locally, awaiting the user's commit:** the reconcile over-shrinkage fix (range
-pairs merged), per-side MCSE write gate with widened intervals, impute draws
-fingerprint, impute and model sampler settings, and the CI heavy-tail test fix
-(§7 step 0). With it, the real corpus passes crawl through model on the CLI
-(model on 59 of 210 battles until classify's LLM slice runs).
-Evaluate and report are unbuilt.
+Last updated: 2026-10-14. Committed through 85de7e8 (§7 step 0 is committed).
+The real corpus passes crawl through model on the CLI (model on 59 of 210
+battles until classify's LLM slice runs).
+
+**Evaluate stage built 2026-10-14, uncommitted.** Contract in
+`agents/evaluate.yaml`; code in `pipeline/stages/evaluate.py` and
+`pipeline/evaluators/`; named checks in `config/expert_rankings.yaml` (Q-ids
+looked up live, reviewed by `historiography-reviewer`); statistics reviewed by
+`bayesian-model-reviewer` (B1 and S1-S6 applied, see §9.10). Report is unbuilt.
 
 ---
 
@@ -33,7 +35,7 @@ Evaluate and report are unbuilt.
 | classify | first slice | on fixtures; LLM path offline/cache only | **passes**, 254 LLM requests deferred (exit 3) |
 | impute | yes | **yes** (integration suite) | **passes** at 2000 draws / 1500 tune (max rhat 1.0092 vs 1.01: thin margin) |
 | model | yes | on fixtures | **passes** at 3000 draws (run 54: rhat 1.004, ESS 1445); 59 of 210 battles included; 4 warning gates (§7 step 1) |
-| evaluate | **no** | — | — |
+| evaluate | yes (uncommitted) | **yes** (integration 12, model CV 4) | **runs, 4 of 5 gates pass** (2026-10-14, model run 54): held-out accuracy 0.70, Brier 0.222; named_checks not_evaluable |
 | report | **no** | — | — |
 
 Counts on 2026-10-13 (uncommitted tree): non-model suite 1392 passed, 0
@@ -116,8 +118,9 @@ its own SAVEPOINT. When a gate fails, **check whether the spec is wrong before
 assuming the code is**: several gates have measured tables their stage never
 writes (see §4). `method:` checks dispatch through `METHOD_HANDLERS`
 (`diagnostics_json`, `imputation_gate`, `model_gate`); an unregistered method
-reports "not implemented" rather than passing. Outstanding, all evaluate's:
-`brier_score`, `jaccard_overlap`, `held_out_accuracy`.
+reports "not implemented" rather than passing. Evaluate's gates use
+`evaluation_gate`: it reads `evaluation_report.json` and fails as stale when
+the report's `model_run_id` is not the newest converged pooled run.
 
 `pipeline/quality.py`'s `Connection` protocol has **two** test doubles:
 `StubConnection` (tests/unit/test_quality.py) and `ScriptedConnection`
@@ -236,8 +239,6 @@ floor. Recurring classes, with the log section that records each:
 
 ## 6. What is missing
 
-- `config/expert_rankings.yaml` and `config/sensitivity_specs.yaml`, referenced
-  by `agents/evaluate.yaml`.
 - The extraction gold set (`tests/fixtures/gold/` for `/extraction-eval`).
 - Everything in `docs/todo/`.
 
@@ -245,15 +246,8 @@ floor. Recurring classes, with the log section that records each:
 
 ## 7. Next steps, in order
 
-0. **Commit the 2026-10-13 change, push, and check CI.** It fixes the CI
-   failure on a54e239 (heavy-tail coverage test asserted 0.45 absolute
-   coverage; measured over 5 seeds the Student-t side prior is only marginally
-   better than Normal, 0.52 vs 0.48, so the test now asserts non-inferiority
-   pooled over 3 seeds at 3000 draws). The CI model job grows by ~5-7 min.
-   What the change is and why: §9.6, last five bullets. History in brief: the
-   first diagnosis (scope outliers inflating sigma; contamination mixture) was
-   wrong and made the corpus worse (spread 0.10); ablation fits found the range
-   pairs. **Do not lower `min_spread_ratio`.**
+0. Done: the 2026-10-13 reconcile fix is committed (a89f377, 85de7e8); CI not
+   yet checked. **Do not lower `min_spread_ratio`** (§9.6).
 1. **Model stage on the corpus passes its error gates** (2026-10-13, 3000
    draws in `config/model_default.yaml`, was 1500: ESS 660 < 800). Warnings to
    work through: `circularity_check` (joint latent beta_force gap 0.276 vs
@@ -287,8 +281,12 @@ floor. Recurring classes, with the log section that records each:
    errors on the 87% singleton sides are not detectable by the model. Impute
    passes rhat 1.0092 against 1.01 on hierarchical scales `tau_p`, `tau_c`;
    another corpus may need more draws.
-4. **Evaluate and report.** Fix the two BLOCKING report items first
-   (`docs/todo/09-report.md`).
+4. **Commit the evaluate stage**, then **report**. Fix the two BLOCKING
+   report items first (`docs/todo/09-report.md`). Evaluate open items: the
+   calibration gate sits on the imputed CV arm (decision in §9.10); the
+   +/-1 sd `g_unlabelled` sensitivity is not built (needs reconcile regime
+   draws); `EvaluateParams` docstring still says the ESS floor "replaces" the
+   model's (it is `min` of the two).
 5. Full-pipeline integration test on fixtures (crawl through model).
 
 Say explicitly what was and was not verified against a database.
@@ -547,6 +545,44 @@ is in the log section cited.
   volume-weighted, so a coverage gap by era is a rank gap; attribution weights
   are fixed data.
 
+### 9.10 Evaluate
+
+`agents/evaluate.yaml` carries the rationale.
+
+- **Writes files only** (`data/processed/evaluation/run{N}/`, plus
+  `data/processed/evaluation_report.json`), never `model_runs` or estimate
+  rows, so `MAX(run_id)` still names the published run. Targets the newest
+  converged pooled run with estimates and refuses a design or imputed rounds
+  that no longer match it.
+- **CV masks, it does not rebuild**: `loglik_weight` 0 on held-out battles
+  (`build_model` and `build_joint_latent_model`; None leaves the graph
+  identical). Held-out x_diff comes from the measurement-only prior, never the
+  imputed rounds, which encode the outcome. Two arms: imputed (gated, what is
+  published) and joint latent. Synthetic null with leaky imputation: both arms
+  at chance, imputed arm Brier 0.34 (confidently wrong when imputation is
+  circular), leaky predictor 0.76; that is the test guarding leakage.
+- **Listing order predicts the winner**: side A won 79% of decided corpus
+  battles. The model ignores orientation, so judge accuracy against 0.5 and
+  calibration in the favourite's frame (`calibration_favourite`), never the
+  A-frame bins.
+- Evaluation fits use `eval_draws` 1500 and an ESS floor of
+  `min(model, eval_min_ess_bulk=400)`; rhat and divergences stay the model's.
+  At the model's 800 the corpus folds failed on ESS 715-760.
+- Variants run on the same rounds and seeds as a baseline refit; a second
+  baseline on disjoint rounds is the noise floor (corpus: top-20 overlap 17).
+  `realised_war` ranks on `realised_mean`; `exclude_extreme_ratio` filters on
+  measured troops only; `observed_only` is also compared with the same battle
+  subset on imputed rounds; `weak_hyperpriors` keeps skills shrunk.
+- Named checks by Q-id; rank ranges are reported, not gated; not_evaluable
+  fails. The Arsht list is a recomputed 22-general subset.
+- Corpus run, defaults, ~24 min (cv 556 s, sensitivity 859 s); run it in the
+  background (it finished fine there). Imputed arm accuracy 0.70 (0.56-0.80,
+  n=53), Brier 0.222; joint 0.60, 0.223; larger army wins 0.45 (n=33), model
+  0.70 on that mask. equal_attribution and observed_only overlap exactly 12 of
+  20. Napoleon 2nd, Alexander 24th: mechanics check, 59 battles. Outcome
+  grades: no decisive level is ever observed in the corpus (extract writes
+  victory/defeat only).
+
 ---
 
 ## 10. Honest status
@@ -563,8 +599,9 @@ Not proven: any real corpus producing a ranking, the offline batch path on a rea
 request file (`/process-llm-batch` has never run), any billed API call
 (refusal and truncation branches untested), CI (no git remote), and every gate threshold,
 which has only run against empty or fixture databases, apart from the pilot's
-(§11). The gold sets are agent-built and unreviewed by a human. Evaluate and
-report do not exist, so there is no ranking.
+(§11). The gold sets are agent-built and unreviewed by a human. Evaluate runs
+on the corpus (§9.10) but the model covers 59 of 210 battles, so its numbers
+are a mechanics check; report does not exist, so there is no published ranking.
 
 ---
 

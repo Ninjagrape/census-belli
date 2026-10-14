@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
+import pytest
 
 from pipeline.modelers.design import build_design, x_difference
 from pipeline.modelers.model import (
@@ -13,7 +14,7 @@ from pipeline.modelers.model import (
     build_model,
     joint_x_diff_prior,
 )
-from pipeline.modelers.ordinal import linear_predictor, log_likelihood
+from pipeline.modelers.ordinal import linear_predictor, log_likelihood, log_likelihood_pointwise
 from pipeline.modelers.priors import ModelPriors
 from pipeline.modelers.records import KIND_UNATTRIBUTED, KIND_UNKNOWN, CommanderInput, SideInput
 from tests.model.model_sim import simulate_tournament
@@ -101,3 +102,149 @@ def test_joint_prior_is_a_difference_and_ignores_absolute_level() -> None:
     np.testing.assert_allclose(shifted, mu)  # a common level shift cancels
     model = build_joint_latent_model(design, mean, sd, 1.0, ModelPriors())
     assert "x_diff_latent" in model.named_vars
+
+
+def _random_point(model: object, seed: int = 0) -> dict[str, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    point = model.initial_point()  # type: ignore[attr-defined]
+    for name in point:
+        point[name] = rng.normal(size=point[name].shape) * 0.7
+    return point  # type: ignore[no-any-return]
+
+
+def test_loglik_weight_none_leaves_graph_unweighted() -> None:
+    sides, log_troops = _awkward_sides()
+    design = build_design(sides)
+    x = x_difference(design, log_troops)
+    plain = build_model(design, x, ModelPriors())
+    ones = build_model(design, x, ModelPriors(), loglik_weight=np.ones(design.n_battles))
+
+    assert "data_loglik_weight" not in plain.named_vars
+    assert "data_loglik_weight" in ones.named_vars
+    assert [v.name for v in plain.free_RVs] == [v.name for v in ones.free_RVs]
+    assert [p.name for p in plain.potentials] == [p.name for p in ones.potentials]
+
+    point = _random_point(plain)
+    np.testing.assert_allclose(
+        float(plain.compile_logp()(point)), float(ones.compile_logp()(point)), rtol=1e-12
+    )
+
+
+def test_loglik_weight_zero_removes_only_that_battles_term() -> None:
+    sides, log_troops = _awkward_sides()
+    design = build_design(sides)
+    x = x_difference(design, log_troops)
+    weight = np.ones(design.n_battles)
+    weight[:5] = 0.0
+    full = build_model(design, x, ModelPriors())
+    masked = build_model(design, x, ModelPriors(), loglik_weight=weight)
+    point = _random_point(full, seed=3)
+
+    sigma = np.exp(point["sigma_skill_log__"])
+    scores = assemble_side_scores(
+        design,
+        (sigma * point["z_skill"])[None],
+        np.array([sigma]),
+        point["z_side"][None],
+        np.array([point["mu_unknown"]]),
+        np.array([point["mu_unattributed"]]),
+    )[0]
+    c1 = float(np.exp(point["log_c1"]))
+    c2 = c1 + float(np.exp(point["log_gap"]))
+    eta = linear_predictor(
+        design.side_a, design.side_b, scores, x, design.defender_diff, point["beta_force"], 0.0
+    )
+    pointwise = log_likelihood_pointwise(eta, design.k_lo, design.k_hi, c1, c2)
+
+    diff = float(full.compile_logp()(point)) - float(masked.compile_logp()(point))
+    np.testing.assert_allclose(diff, pointwise[:5].sum(), rtol=1e-8)
+
+
+def test_loglik_weight_is_validated() -> None:
+    sides, log_troops = _awkward_sides()
+    design = build_design(sides)
+    x = x_difference(design, log_troops)
+    for bad in (
+        np.ones(design.n_battles + 1),
+        np.full(design.n_battles, 1.5),
+        np.full(design.n_battles, -0.1),
+        np.full(design.n_battles, np.nan),
+    ):
+        with pytest.raises(ValueError, match="loglik_weight"):
+            build_model(design, x, ModelPriors(), loglik_weight=bad)
+
+
+def _joint_inputs(design: object) -> tuple[np.ndarray, np.ndarray]:
+    n_sides = design.n_sides  # type: ignore[attr-defined]
+    mean = np.full(n_sides, 9.5)
+    sd = np.full(n_sides, 0.4)
+    mean[::3] = np.nan  # a mix of measured and unmeasured sides
+    sd[::3] = np.nan
+    return mean, sd
+
+
+def test_joint_loglik_weight_none_leaves_graph_unweighted() -> None:
+    sides, _ = _awkward_sides()
+    design = build_design(sides)
+    mean, sd = _joint_inputs(design)
+    plain = build_joint_latent_model(design, mean, sd, 1.0, ModelPriors())
+    ones = build_joint_latent_model(
+        design, mean, sd, 1.0, ModelPriors(), loglik_weight=np.ones(design.n_battles)
+    )
+
+    assert "data_loglik_weight" not in plain.named_vars
+    assert "data_loglik_weight" in ones.named_vars
+    assert [v.name for v in plain.free_RVs] == [v.name for v in ones.free_RVs]
+    assert [p.name for p in plain.potentials] == [p.name for p in ones.potentials]
+    point = _random_point(plain)
+    np.testing.assert_allclose(
+        float(plain.compile_logp()(point)), float(ones.compile_logp()(point)), rtol=1e-12
+    )
+
+
+def test_joint_loglik_weight_zero_removes_only_that_battles_term() -> None:
+    sides, _ = _awkward_sides()
+    design = build_design(sides)
+    mean, sd = _joint_inputs(design)
+    weight = np.ones(design.n_battles)
+    weight[:5] = 0.0
+    full = build_joint_latent_model(design, mean, sd, 1.0, ModelPriors())
+    masked = build_joint_latent_model(design, mean, sd, 1.0, ModelPriors(), loglik_weight=weight)
+    point = _random_point(full, seed=3)
+
+    sigma = np.exp(point["sigma_skill_log__"])
+    scores = assemble_side_scores(
+        design,
+        (sigma * point["z_skill"])[None],
+        np.array([sigma]),
+        point["z_side"][None],
+        np.array([point["mu_unknown"]]),
+        np.array([point["mu_unattributed"]]),
+    )[0]
+    mu, x_sd = joint_x_diff_prior(design, mean, sd, 1.0)
+    x = mu + x_sd * point["z_x"]
+    c1 = float(np.exp(point["log_c1"]))
+    c2 = c1 + float(np.exp(point["log_gap"]))
+    eta = linear_predictor(
+        design.side_a, design.side_b, scores, x, design.defender_diff, point["beta_force"], 0.0
+    )
+    pointwise = log_likelihood_pointwise(eta, design.k_lo, design.k_hi, c1, c2)
+
+    diff = float(full.compile_logp()(point)) - float(masked.compile_logp()(point))
+    np.testing.assert_allclose(diff, pointwise[:5].sum(), rtol=1e-8)
+    # The held-out battles keep their latent difference, which then samples its prior.
+    assert "x_diff_latent" in masked.named_vars and "z_x" in masked.named_vars
+
+
+def test_joint_loglik_weight_is_validated() -> None:
+    sides, _ = _awkward_sides()
+    design = build_design(sides)
+    mean, sd = _joint_inputs(design)
+    for bad in (
+        np.ones(design.n_battles + 1),
+        np.full(design.n_battles, 1.5),
+        np.full(design.n_battles, -0.1),
+        np.full(design.n_battles, np.nan),
+    ):
+        with pytest.raises(ValueError, match="loglik_weight"):
+            build_joint_latent_model(design, mean, sd, 1.0, ModelPriors(), loglik_weight=bad)

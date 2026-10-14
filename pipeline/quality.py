@@ -781,6 +781,96 @@ def _check_model_gate(
     )
 
 
+# diagnostics.converged is the string 'true'/'false' (combine_rounds) and
+# diagnostics.estimates_written a JSON boolean; ->> renders both as text. The
+# evaluate stage selects its target run with the same predicate.
+EVALUABLE_RUN_PREDICATE = (
+    "model_type = 'bradley_terry_hierarchical' "
+    "AND diagnostics ->> 'converged' = 'true' "
+    "AND diagnostics ->> 'estimates_written' = 'true'"
+)
+LATEST_EVALUABLE_RUN = text(f"SELECT MAX(run_id) FROM model_runs WHERE {EVALUABLE_RUN_PREDICATE}")
+
+
+def _stale_report_failure(report: Any, conn: Connection | None) -> str | None:
+    """Why an evaluation report no longer describes the latest model run, if so.
+
+    Args:
+        report: The parsed report.
+        conn: A database connection, or None to skip the comparison.
+
+    Returns:
+        The failure message, or None when the report is current or the
+        comparison could not be made.
+    """
+    if conn is None:
+        return None
+    try:
+        with conn.begin_nested():
+            latest = conn.execute(LATEST_EVALUABLE_RUN).scalar()
+    except Exception as exc:
+        logger.warning("evaluation_gate_run_lookup_failed", error=str(exc))
+        return None
+    evaluated = report.get("model_run_id") if isinstance(report, dict) else None
+    if evaluated is None or latest is None or str(evaluated) != str(latest):
+        return (
+            f"stale evaluation report: evaluated run {evaluated}, latest run {latest}; "
+            "re-run evaluate"
+        )
+    return None
+
+
+def _check_evaluation_gate(
+    name: str,
+    check: dict[str, Any],
+    severity: Severity,
+    conn: Connection | None,
+) -> QualityCheckResult:
+    """Report one gate recorded by the evaluate stage.
+
+    The evaluate stage records its gates in ``evaluation_report.json`` along
+    with the id of the model run it validated. A report for any run but the
+    newest converged one fails, so a stale evaluation cannot vouch for a newer
+    ranking.
+
+    Args:
+        name: The check's name, as declared in the agent spec.
+        check: The raw check dict; ``params.gate`` names the gate (default: the
+            check's own name) and ``params.report`` the report path.
+        severity: The severity to report the result at.
+        conn: A database connection used to find the newest converged run, or
+            None to skip the staleness comparison.
+
+    Returns:
+        The check's result. Never raises.
+    """
+    raw_params = check.get("params")
+    params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
+    path = Path(str(params.get("report", "data/processed/evaluation_report.json")))
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        report = None
+    stale = None if report is None else _stale_report_failure(report, conn)
+    if stale is not None:
+        return QualityCheckResult(
+            name=name,
+            passed=False,
+            severity=severity,
+            threshold=str(check.get("threshold", "")),
+            message=stale,
+        )
+    return _gate_result(
+        name,
+        check,
+        severity,
+        path,
+        str(params.get("gate", name)),
+        missing_hint="Run the evaluate stage first.",
+        absent_hint="the report was written without this gate; re-run evaluate.",
+    )
+
+
 MethodHandler = Callable[[str, dict[str, Any], Severity, "Connection | None"], QualityCheckResult]
 
 # A `method:` listed here is executed by its handler. Anything else falls
@@ -789,12 +879,14 @@ METHOD_HANDLERS: dict[str, MethodHandler] = {
     "diagnostics_json": _check_diagnostics_json,
     "imputation_gate": _check_imputation_gate,
     "model_gate": _check_model_gate,
+    "evaluation_gate": _check_evaluation_gate,
 }
 
 # Handler param -> stage spec param it must follow. A method listed here reads
 # its input from where the run wrote it, which the run's params decide.
 _SPEC_PARAM_BINDINGS: dict[str, dict[str, str]] = {
     "imputation_gate": {"scale": "scale", "root": "imputed_root"},
+    "evaluation_gate": {"report": "report_path"},
 }
 
 # Why each `method:` without a handler cannot run yet. Every method named in
@@ -816,9 +908,7 @@ UNIMPLEMENTED_METHODS: dict[str, str] = {
     "model_gate": (
         "Requires data/processed/model_diagnostics/run{N}/gate_report.json from the model stage"
     ),
-    "brier_score": "Requires held-out predictions from the evaluate stage",
-    "jaccard_overlap": "Requires sensitivity variant rankings from the evaluate stage",
-    "held_out_accuracy": "Requires the k-fold held-out predictions from the evaluate stage",
+    "evaluation_gate": ("Requires data/processed/evaluation_report.json from the evaluate stage"),
 }
 
 

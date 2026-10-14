@@ -1,0 +1,107 @@
+# Validation targets for the evaluate stage. These are sanity checks and
+# correlation targets, NOT ground truth: no external list is a ranking of
+# commanders by marginal wins above replacement.
+#
+# Generals are keyed by a short key and identified by Wikidata Q-id, because
+# names are ambiguous (Octavian is Augustus on Wikidata, "Caesar" has many
+# namesakes). Every Q-id was resolved live via the English Wikipedia title in
+# `enwiki` and checked against the Wikidata description (2026-10-14).
+# Re-verify with wbgetentities (sites=enwiki, titles=...) before editing.
+#
+# Both expert lists below are 19th-century and European in perspective, and
+# they share five names (Alexander, Hannibal, Caesar, Gustavus Adolphus,
+# Frederick), so they are not independent evidence.
+
+generals:
+  napoleon: {qid: Q517, enwiki: "Napoleon", label: "Napoleon"}
+  julius_caesar: {qid: Q1048, enwiki: "Julius Caesar", label: "Julius Caesar"}
+  khalid_ibn_al_walid: {qid: Q26918, enwiki: "Khalid ibn al-Walid", label: "Khalid ibn al-Walid"}
+  hannibal: {qid: Q36456, enwiki: "Hannibal", label: "Hannibal"}
+  grant: {qid: Q34836, enwiki: "Ulysses S. Grant", label: "Ulysses S. Grant"}
+  frederick_the_great: {qid: Q33550, enwiki: "Frederick the Great", label: "Frederick the Great"}
+  zhukov: {qid: Q124617, enwiki: "Georgy Zhukov", label: "Georgy Zhukov"}
+  alexander: {qid: Q8409, enwiki: "Alexander the Great", label: "Alexander the Great"}
+  augustus: {qid: Q1405, enwiki: "Augustus", label: "Augustus (Octavian)"}
+  yi_sun_sin: {qid: Q50184, enwiki: "Yi Sun-sin", label: "Yi Sun-sin"}
+  scipio_africanus: {qid: Q2253, enwiki: "Scipio Africanus", label: "Scipio Africanus"}
+  sharon: {qid: Q60206, enwiki: "Ariel Sharon", label: "Ariel Sharon"}
+  dayan: {qid: Q188783, enwiki: "Moshe Dayan", label: "Moshe Dayan"}
+  agrippa: {qid: Q48174, enwiki: "Marcus Vipsanius Agrippa", label: "Marcus Vipsanius Agrippa"}
+  belisarius: {qid: Q174943, enwiki: "Belisarius", label: "Belisarius"}
+  trajan: {qid: Q1425, enwiki: "Trajan", label: "Trajan"}
+  themistocles: {qid: Q179552, enwiki: "Themistocles", label: "Themistocles"}
+  subutai: {qid: Q162217, enwiki: "Subutai", label: "Subutai"}
+  patton: {qid: Q186492, enwiki: "George S. Patton", label: "George S. Patton"}
+  pyrrhus: {qid: Q172353, enwiki: "Pyrrhus of Epirus", label: "Pyrrhus of Epirus"}
+  rommel: {qid: Q14060, enwiki: "Erwin Rommel", label: "Erwin Rommel"}
+  robert_e_lee: {qid: Q165557, enwiki: "Robert E. Lee", label: "Robert E. Lee"}
+  justinian: {qid: Q41866, enwiki: "Justinian I", label: "Justinian I"}
+  gustavus_adolphus: {qid: Q52938, enwiki: "Gustavus Adolphus", label: "Gustavus Adolphus"}
+  turenne: {qid: Q303216, enwiki: "Henri de La Tour d'Auvergne, Viscount of Turenne", label: "Turenne"}
+  eugene_of_savoy: {qid: Q152428, enwiki: "Prince Eugene of Savoy", label: "Prince Eugene of Savoy"}
+
+# The single source of named checks; agents/evaluate.yaml points here.
+# `gated: false` checks are evaluated and reported but never fail the gate.
+# A gate on Napoleon's rank would validate the model against its most
+# contestable conclusion, and Alexander's rank rests on only 9 battles.
+rank_checks:
+  - {general: napoleon, rank_range: [1, 3], gated: false, note: "Widely cited as the strongest commander"}
+  - {general: alexander, rank_range: [1, 15], gated: false, note: "Rests on 9 battles"}
+
+# Attribution sanity: the tactical commander should outrank the nominal one.
+pairwise_checks:
+  - higher: agrippa
+    lower: augustus
+    note: "Octavian/Agrippa; Agrippa commanded at Actium and Naulochus. Arsht's own career-WAR ranking fails this (Augustus 9th, Agrippa 14th: Octavian is credited with 7 battles to Agrippa's 4). Passing requires attribution to move Actium and Naulochus off Octavian; it tests attribution, not a historical fact."
+
+# Generals who never took the field: correct attribution credits them with no
+# battles, so they must be absent from the ranking.
+uncredited_checks:
+  - {general: justinian, note: "never took the field; correct attribution gives him no credited battles"}
+
+reference_rankings:
+  - name: arsht_2019_subset
+    kind: ordered
+    source: "Ethan Arsht, Towards Data Science (2019); tests/fixtures/gold/arsht/career_totals.jsonl"
+    caveat: "Curated 22-general subset of Arsht's roster with values recomputed from his published per-battle WAR; positions are not Arsht's published ranks (e.g. Sharon and Dayan sit far lower in his full list). Use for rank correlation only."
+    # Ordered by recomputed arsht_war_total descending (list position, not published rank).
+    members:
+      - napoleon
+      - julius_caesar
+      - khalid_ibn_al_walid
+      - hannibal
+      - grant
+      - frederick_the_great
+      - zhukov
+      - alexander
+      - augustus
+      - yi_sun_sin
+      - scipio_africanus
+      - sharon
+      - dayan
+      - agrippa
+      - belisarius
+      - trajan
+      - themistocles
+      - subutai
+      - patton
+      - pyrrhus
+      - rommel
+      - robert_e_lee
+
+expert_lists:
+  # Napoleon's list of commanders whose campaigns to study (commonly given as
+  # his Maxim 78, St Helena), quoted by W. O'Connor Morris (1891) as an
+  # epigraph. Models of offensive war, not a ranking; Napoleon excludes himself.
+  - name: napoleon_great_captains
+    kind: unordered
+    source_url: "https://gutenberg.org/cache/epub/77267/pg77267-images.html"
+    source_quote: "Faites la guerre offensive comme Alexandre, Annibal, César, Gustave Adolphe, Turenne, le Prince Eugène et Frédéric; lisez, relisez l'histoire de leurs quatre vingt trois campagnes; modelez vous sur eux."
+    members: [alexander, hannibal, julius_caesar, gustavus_adolphus, turenne, eugene_of_savoy, frederick_the_great]
+  # The source is the subtitle of Dodge's 1889 lecture course, i.e. the six
+  # commanders he chose to lecture on, not a ranking.
+  - name: dodge_great_captains
+    kind: unordered
+    source_url: "https://gutenberg.org/cache/epub/71713/pg71713-images.html"
+    source_quote: "A course of six lectures showing the influence on the art of war of the campaigns of Alexander, Hannibal, Caesar, Gustavus Adolphus, Frederick, and Napoleon (T. A. Dodge, Great Captains, 1889)"
+    members: [alexander, hannibal, julius_caesar, gustavus_adolphus, frederick_the_great, napoleon]

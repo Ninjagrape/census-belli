@@ -245,8 +245,6 @@ def test_prose_check_without_method_fails_rather_than_passes() -> None:
     "method",
     [
         "posterior_check",
-        "brier_score",
-        "jaccard_overlap",
     ],
 )
 def test_unimplemented_methods_fail_visibly(method: str) -> None:
@@ -295,7 +293,7 @@ def test_has_blocking_failure_only_for_errors() -> None:
 def test_run_all_preserves_spec_order() -> None:
     checks = [
         {"name": "a", "check": "SELECT 1", "threshold": "= 1", "severity": "warning"},
-        {"name": "b", "method": "brier_score", "severity": "warning"},
+        {"name": "b", "method": "posterior_check", "severity": "warning"},
         {"name": "c", "check": "SELECT 1", "threshold": "= 1", "severity": "warning"},
     ]
     results = QualityRunner(StubConnection(value=1)).run_all(checks)
@@ -671,3 +669,125 @@ def test_imputation_gate_follows_the_spec_scale_and_root(tmp_path: Path) -> None
     )
 
     assert result.passed is True
+
+
+# ─── evaluation_gate method handler ──────────────────────────────────────────
+
+
+def _write_report(path: Path, run_id: Any, gates: list[dict[str, Any]]) -> None:
+    import json
+
+    path.write_text(json.dumps({"model_run_id": run_id, "gates": gates}), encoding="utf-8")
+
+
+def _evaluation_check(report: Path, gate: str = "held_out_accuracy") -> dict[str, Any]:
+    return {
+        "name": gate,
+        "method": "evaluation_gate",
+        "params": {"gate": gate, "report": str(report)},
+        "threshold": "> 0.55",
+        "severity": "warning",
+    }
+
+
+_ACCURACY_GATE = {
+    "name": "held_out_accuracy",
+    "passed": True,
+    "actual": 0.61,
+    "threshold": "> 0.55",
+    "message": "ok",
+}
+
+
+def test_evaluation_gate_passes_for_a_current_passing_report(tmp_path: Path) -> None:
+    report = tmp_path / "evaluation_report.json"
+    _write_report(report, 7, [_ACCURACY_GATE])
+    conn = DiagnosticsConnection([_DiagnosticsRow(7, None)])
+
+    result = QualityRunner(conn).run_one(_evaluation_check(report))
+
+    assert result.passed, result.message
+    assert result.actual_value == 0.61
+    assert conn.savepoints == 1
+
+
+def test_evaluation_gate_reports_a_failing_gate_with_its_message(tmp_path: Path) -> None:
+    report = tmp_path / "evaluation_report.json"
+    failing = {**_ACCURACY_GATE, "passed": False, "message": "accuracy 0.500 misses > 0.55"}
+    _write_report(report, 7, [failing])
+
+    result = QualityRunner(DiagnosticsConnection([_DiagnosticsRow(7, None)])).run_one(
+        _evaluation_check(report)
+    )
+
+    assert not result.passed
+    assert "accuracy 0.500" in result.message
+
+
+def test_evaluation_gate_fails_when_the_report_is_missing(tmp_path: Path) -> None:
+    result = QualityRunner(None).run_one(_evaluation_check(tmp_path / "absent.json"))
+
+    assert not result.passed
+    assert "Run the evaluate stage first" in result.message
+
+
+def test_evaluation_gate_fails_when_the_gate_is_absent_from_the_report(tmp_path: Path) -> None:
+    report = tmp_path / "evaluation_report.json"
+    _write_report(report, 7, [_ACCURACY_GATE])
+
+    result = QualityRunner(None).run_one(_evaluation_check(report, gate="calibration"))
+
+    assert not result.passed
+    assert "'calibration' is absent" in result.message
+
+
+def test_evaluation_gate_fails_a_report_for_an_older_run(tmp_path: Path) -> None:
+    report = tmp_path / "evaluation_report.json"
+    _write_report(report, 7, [_ACCURACY_GATE])
+    conn = DiagnosticsConnection([_DiagnosticsRow(9, None)])
+
+    result = QualityRunner(conn).run_one(_evaluation_check(report))
+
+    assert not result.passed
+    assert "stale evaluation report: evaluated run 7, latest run 9; re-run evaluate" in (
+        result.message
+    )
+
+
+def test_evaluation_gate_fails_a_report_without_a_run_id_when_connected(tmp_path: Path) -> None:
+    report = tmp_path / "evaluation_report.json"
+    _write_report(report, None, [_ACCURACY_GATE])
+
+    result = QualityRunner(DiagnosticsConnection([_DiagnosticsRow(9, None)])).run_one(
+        _evaluation_check(report)
+    )
+
+    assert not result.passed
+    assert "stale evaluation report" in result.message
+
+
+def test_evaluation_gate_skips_the_staleness_check_without_a_connection(tmp_path: Path) -> None:
+    report = tmp_path / "evaluation_report.json"
+    _write_report(report, 7, [_ACCURACY_GATE])
+
+    assert QualityRunner(None).run_one(_evaluation_check(report)).passed
+
+
+def test_evaluation_gate_does_not_raise_when_the_run_lookup_fails(tmp_path: Path) -> None:
+    report = tmp_path / "evaluation_report.json"
+    _write_report(report, 7, [_ACCURACY_GATE])
+    conn = StubConnection(raises=RuntimeError("connection lost"))
+
+    result = QualityRunner(conn).run_one(_evaluation_check(report))
+
+    assert result.passed, result.message
+
+
+def test_evaluation_gate_follows_the_spec_report_path(tmp_path: Path) -> None:
+    report = tmp_path / "evaluation_report.json"
+    _write_report(report, 7, [{**_ACCURACY_GATE, "passed": False}])
+    check = _evaluation_check(tmp_path / "elsewhere.json")
+
+    result = QualityRunner(None, {"report_path": str(report)}).run_one(check)
+
+    assert not result.passed

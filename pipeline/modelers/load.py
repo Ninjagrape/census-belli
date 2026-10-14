@@ -31,6 +31,7 @@ __all__ = [
     "ImputedRound",
     "check_round_provenance",
     "latest_written_imputation_run_id",
+    "load_battle_quality",
     "load_battle_types",
     "load_general_names",
     "load_log_troop_measurements",
@@ -54,7 +55,8 @@ _LOAD_SIDES = text(
 
 _LOAD_COMMANDERS = text(
     """
-    SELECT side_id, general_id, attribution_weight, attribution_method
+    SELECT side_id, general_id, attribution_weight, attribution_method,
+           CAST(command_role AS TEXT)
     FROM battle_commanders
     ORDER BY bc_id
     """
@@ -69,6 +71,9 @@ _LOAD_MEASUREMENTS = text(
 )
 
 _LOAD_TYPES = text("SELECT battle_id, CAST(battle_type AS TEXT) FROM battles")
+_LOAD_QUALITY = text(
+    "SELECT battle_id, data_quality_score FROM battles WHERE data_quality_score IS NOT NULL"
+)
 _LOAD_NAMES = text("SELECT general_id, canonical_name FROM generals")
 
 # diagnostics.written is a JSON boolean; ->> renders it as 'true'.
@@ -115,12 +120,13 @@ def load_side_inputs(conn: Any) -> list[SideInput]:
         One :class:`SideInput` per ``battle_sides`` row, ordered by side id.
     """
     by_side: dict[int, list[CommanderInput]] = defaultdict(list)
-    for side_id, general_id, weight, method in conn.execute(_LOAD_COMMANDERS).fetchall():
+    for side_id, general_id, weight, method, role in conn.execute(_LOAD_COMMANDERS).fetchall():
         by_side[int(side_id)].append(
             CommanderInput(
                 general_id=int(general_id),
                 attribution_weight=float("nan") if weight is None else float(weight),
                 attribution_method=_UNKNOWN_METHOD if method is None else str(method),
+                command_role=None if role is None else str(role),
             )
         )
     return [
@@ -178,6 +184,18 @@ def load_battle_types(conn: Any) -> dict[int, str | None]:
         ``battle_id -> battle_type`` text (None when unset).
     """
     return {int(b): None if t is None else str(t) for b, t in conn.execute(_LOAD_TYPES).fetchall()}
+
+
+def load_battle_quality(conn: Any) -> dict[int, float]:
+    """Data quality score per battle, for stratifying held-out accuracy.
+
+    Args:
+        conn: An open database connection.
+
+    Returns:
+        ``battle_id -> data_quality_score``; battles with a NULL score are absent.
+    """
+    return {int(b): float(q) for b, q in conn.execute(_LOAD_QUALITY).fetchall()}
 
 
 def load_general_names(conn: Any) -> dict[int, str]:
