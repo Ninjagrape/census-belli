@@ -12,9 +12,9 @@ Write or update tests for: $ARGUMENTS
    - Quality checks must be tested with data that passes and data that fails
 
 4. Create or update:
-   - tests/unit/test_$ARGUMENTS.py — pure function tests, mocked dependencies
-   - tests/integration/test_$ARGUMENTS.py — end-to-end with test DB and fixture data
-   - tests/fixtures/$ARGUMENTS/ — any fixture files needed (sample HTML, JSON responses, etc.)
+   - tests/unit/test_$ARGUMENTS.py: pure function tests, mocked dependencies
+   - tests/integration/test_$ARGUMENTS.py: end-to-end with test DB and fixture data
+   - tests/fixtures/$ARGUMENTS/: any fixture files needed (sample HTML, JSON responses, etc.)
 
 5. For fixture data:
    - Use real data from known battles (Actium, Austerlitz, Cannae are good reference battles)

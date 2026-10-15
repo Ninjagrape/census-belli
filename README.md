@@ -8,10 +8,10 @@ math proves it"](https://towardsdatascience.com/napoleon-was-the-best-general-ev
 which borrowed baseball's WAR framework for generals. This project keeps the
 framework and rebuilds the data and the statistics underneath it.
 
-> **Status: partially built.** Eight of nine pipeline stages are implemented.
-> All eight run end to end on a real 211-battle corpus, but with no LLM
-> extraction answered yet the model sees only 59 of those battles, and the
-> report stage that would produce a ranking does not exist yet. See
+> **Status: built, not yet trustworthy.** All nine pipeline stages are
+> implemented and run end to end on a real 211-article corpus, but with no LLM
+> extraction answered yet the model sees only 59 of 210 battles, and the report
+> stage marks its output provisional for that reason. See
 > [Project status](#project-status) before assuming any number here is real.
 > There is no published ranking, and there should not be one until the
 > [known limitations](#known-limitations) below are closed.
@@ -33,7 +33,7 @@ This project keeps that idea and changes almost everything underneath it:
 | **Skill** | Sum of outcome surpluses | Hierarchical Bayesian Bradley-Terry model on graded outcomes (decisive to indecisive), with skills shrunk towards a population and uncertainty carried through |
 | **WAR** | Realised: outcome minus expectation | Expected WAR against a 40th-percentile replacement commander, so a lucky 3-0 record does not read as certain greatness |
 | **Output** | A point score per general | A posterior per general with credible intervals; overlapping generals are reported as inseparable |
-| **Checking it** | — | Quality gates between every stage, parameter-recovery tests on synthetic data, a check that imputation is not feeding the model its own outcomes, held-out prediction and sensitivity analysis |
+| **Checking it** | Nothing beyond the fit | Quality gates between every stage, parameter-recovery tests on synthetic data, a check that imputation is not feeding the model its own outcomes, held-out prediction and sensitivity analysis |
 
 ## What problem this is trying to solve
 
@@ -50,8 +50,8 @@ difference.
 **The troop numbers are mostly wrong.** Ancient sources inflate, chroniclers
 copy each other, and modern estimates disagree by factors of three. Rather than
 picking one figure, every reported number is stored as its own row with its
-source, and a source-disagreement model estimates each source's bias — ancient
-authors get a prior that expects inflation — to produce a best estimate with a
+source, and a source-disagreement model estimates each source's bias (ancient
+authors get a prior that expects inflation) to produce a best estimate with a
 credible interval.
 
 **Missing data is not missing at random.** A battle with no recorded troop
@@ -87,10 +87,10 @@ corrupting what came after it.
 | 6 | `impute` | Multiple imputation for missing troop data | Built, runs on the real corpus |
 | 7 | `model` | Hierarchical Bayesian Bradley-Terry fit, WAR calculation | Built, runs on the real corpus (59 of 210 battles) |
 | 8 | `evaluate` | Held-out prediction, posterior predictive checks, sensitivity analysis | Built, runs on the real corpus |
-| 9 | `report` | Rankings with credible intervals, interactive explorer | Not built |
+| 9 | `report` | Rankings with credible intervals, interactive explorer | Built, runs on the real corpus (output marked provisional) |
 
-Between stages the orchestrator runs that stage's quality gates — real SQL
-against the database — and halts if an ERROR-severity gate fails.
+Between stages the orchestrator runs that stage's quality gates, real SQL
+against the database, and halts if an ERROR-severity gate fails.
 
 ## Getting started
 
@@ -115,7 +115,7 @@ cp .env.example .env
 | `LOG_LEVEL` | optional | `DEBUG`, `INFO` (default), `WARNING`, `ERROR` |
 
 `.env` is read on startup and never overrides a variable you have already
-exported. Save it as **UTF-8** — a PowerShell redirect writes UTF-16, which
+exported. Save it as **UTF-8**: a PowerShell redirect writes UTF-16, which
 most tooling cannot read.
 
 Create the database and apply the schema:
@@ -135,14 +135,14 @@ python -m pipeline.orchestrator --stages model --config config/model_default.yam
 ```
 
 A Docker Compose file is included for the database if you would rather not
-install PostgreSQL locally.
+install PostgreSQL locally. It has never been run, so treat it as a starting point.
 
 ## Development
 
 ```bash
 export DATABASE_URL="postgresql+psycopg://general_war:general_war@127.0.0.1:5432/general_war"
 
-ruff check pipeline/ tests/ alembic/
+ruff check pipeline/ tests/ scripts/ alembic/
 python -m mypy pipeline/          # strict
 python -m pytest tests/ -q
 pre-commit install
@@ -150,7 +150,7 @@ pre-commit install
 
 **Export `DATABASE_URL` before running the tests.** Without it the integration
 tests skip rather than fail, and a green run with skips looks almost identical
-to a green run without — which has twice hidden a real defect here. CI
+to a green run without, which has twice hidden a real defect here. CI
 provisions a PostgreSQL service and fails the build if anything skips.
 
 Some tests make real requests to Wikipedia and DBpedia. They are skipped unless
@@ -162,7 +162,7 @@ GENERAL_WAR_LIVE_CRAWL=1 python -m pytest tests/integration/test_crawl_live.py -
 
 They are worth running. Every systematic bug found in this project so far was
 found by pointing the code at something real, not by reading it and not by
-adding fixtures — including one that had silently disabled an entire data
+adding fixtures, including one that had silently disabled an entire data
 source across two stages, and one that labelled every naval battle a land
 engagement while 73 unit tests passed.
 
@@ -185,12 +185,13 @@ to end. Verified against live services: Wikipedia and DBpedia fetching and
 parsing, Wikidata SPARQL lookup, and one real LLM disambiguation call.
 
 Built and tested on fixtures and synthetic data, with parameter-recovery tests
-for the statistical parts: reconcile, classify, impute, model and evaluate. On
-a 211-article corpus (Ethan Arsht's battle list) every stage from crawl to
-evaluate runs through the command line and passes its error gates, but no LLM
-request has been answered yet, so command roles are unknown and the model
-covers only 59 of 210 battles. Its numbers are a check that the machinery
-works, not a result. Not yet built: report.
+for the statistical parts: reconcile, classify, impute, model, evaluate and
+report. On a 211-article corpus (Ethan Arsht's battle list) every stage from
+crawl to evaluate runs through the command line and passes its error gates, but
+no LLM request has been answered yet, so command roles are unknown and the
+model covers only 59 of 210 battles. Report runs too and correctly refuses to
+call its output publishable. Its numbers are a check that the machinery works,
+not a result.
 
 Not yet proven: a ranking from a corpus with its LLM extraction done, and most
 quality-gate thresholds, which have run against fixtures and this one corpus

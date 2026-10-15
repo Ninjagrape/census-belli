@@ -10,12 +10,14 @@ Built; every SQL write verified against Postgres. Decisions to keep:
 - [x] (pilot P2) fixed 2026-10-11: `write_battle` loop shares one transaction with no savepoint; one
       bad row aborts all later writes and the commit rolls back
 - [x] (pilot P3) fixed 2026-10-11: unparsed date strings reach date_start (56/211 fail: "212 BC",
-      "Spring 208 BC", "21–22 May 1809", O.S. brackets, AH dates)
+      "Spring 208 BC", "21-22 May 1809", O.S. brackets, AH dates)
 - [x] fixed 2026-10-12: (pilot) **next up**: arm-of-service and component figures stored as
       branch='total' (Cannae "25,000 Romans", Waterloo "7,232 gunners"); the main
       error left in reconcile and the one reports_honoured violation
-- [ ] (pilot) 22,591 requests for 211 battles; 11,337 citation_line_malformed
-      warnings; each re-run rewrites an identical 204 MB batch file
+- [x] fixed (ca9d804, 2026-10-12): (pilot) 11,337 citation_line_malformed warnings
+      (`splitlines()` split on NEL/LS/PS inside JSON); each re-run rewrote an identical
+      204 MB batch file (identical hash sets are now reused). 22,591 requests for 211
+      battles is the bill, not a bug
 - [ ] LLM extraction never run against a live key; fixture-tested only.
       Blocked on the free-tier quota (handover-log §15.7, 03-resolve.md).
 - [x] fixed 2026-10-12: (gap review A2) `no_empty_extractions` reads crawl_log.extraction_method /

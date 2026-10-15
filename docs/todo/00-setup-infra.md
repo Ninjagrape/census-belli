@@ -17,9 +17,10 @@ Standing rules worth knowing before changing these:
 - Postgres 15 runs natively; docker-compose.yml has never been run.
 
 ## Open
-- [ ] **.env holds only a now-unused GEMIINI_API_KEY**, no DATABASE_URL. Credentials
+- [ ] **.env holds only a now-unused GEMINI_API_KEY**, no DATABASE_URL. Credentials
       file, user to fix.
-- [ ] CI has never run: there is no git remote
+- [ ] CI results not checked: `origin` exists (PR #1 merged as 5d11e7a), but no
+      session has confirmed a green run on the current `main`
 - [ ] `pre-commit install` has not been run on this machine
 - [ ] Smoke-test the `llm_mode: api` path against a live Anthropic key (refusal +
       truncation branches). Harness: tests/integration/test_llm_live.py, gated on
@@ -40,6 +41,6 @@ Standing rules worth knowing before changing these:
       complete_with_warnings policy does not prevent the halt). Skip unbuilt
       stages loudly or leave them out of `all` until built
 - [ ] (gap review) no end-to-end integration test chains crawl through model
-- [ ] (gap review A18) unused deps (cmdstanpy, polars, click, tqdm, matplotlib,
-      likely SPARQLWrapper); numpy undeclared; llm_fallback_* and
+- [ ] (gap review A18) unused deps (cmdstanpy, polars, click, tqdm,
+      SPARQLWrapper; matplotlib is used by evaluate and report); numpy undeclared; llm_fallback_* and
       log_all_llm_calls are read by nothing

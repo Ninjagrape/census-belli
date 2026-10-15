@@ -15,7 +15,7 @@ Specifically, do not assert against these values in a unit test as though they
 were facts. They are useful as:
 
 1. a roster of battles and commanders with real coverage of hard cases
-2. a correlation target for the model stage -- our WAR should track his and
+2. a correlation target for the model stage: our WAR should track his and
    diverge in ways we can name
 3. a source of corpus-hygiene findings: where his battle titles redirect to
    campaigns, his corpus counted a campaign as a battle
@@ -25,7 +25,7 @@ were facts. They are useful as:
 - Built: 2026-09-23
 - Source: https://github.com/ethanarsht/military_rankings (per-general HTML pages)
 - Article: https://towardsdatascience.com/napoleon-was-the-best-general-ever-and-the-math-proves-it-86efed303eeb/
-- Rebuild with: `python -m scripts.arsht_reference --verify-titles`
+- Rebuild with: `python -m scripts.arsht_reference --verify-titles --with-infobox --write-seed`
 - Reviewed by: **not yet reviewed by a human**
 
 ## Contents
@@ -35,6 +35,7 @@ were facts. They are useful as:
 | `arsht_war.jsonl` | 226 | one row per (general, battle) with his WAR |
 | `battles.jsonl` | 212 | deduplicated battles with Wikipedia URLs |
 | `career_totals.jsonl` | 22 | his career WAR per general |
+| `arsht_infobox.jsonl` | 1043 | raw infobox strength text beside his parsed numbers, the one file extract can be diffed against |
 
 ## Roster, and why each name is in it
 

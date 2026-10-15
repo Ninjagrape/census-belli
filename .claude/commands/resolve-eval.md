@@ -2,7 +2,7 @@ Evaluate the resolve stage's deterministic matching against the hand-labelled go
 
 `$ARGUMENTS` may be `sweep` (run a threshold grid search), `check` (run at the current defaults), or empty for `check`.
 
-The resolve stage's two tunable parameters — `fuzzy_threshold` and `ambiguity_margin` — decide whether a mention links to a Wikidata entity, goes to the LLM, or becomes a new corpus-local identity. A wrong link (false merge) is undetectable downstream: two commanders' records pool, the model fits one skill parameter to two careers, and nothing in the ranking can see it. A missed link (false split) is visible — two near-identical names — and costs only statistical power.
+The resolve stage's two tunable parameters, `fuzzy_threshold` and `ambiguity_margin`, decide whether a mention links to a Wikidata entity, goes to the LLM, or becomes a new corpus-local identity. A wrong link (false merge) is undetectable downstream: two commanders' records pool, the model fits one skill parameter to two careers, and nothing in the ranking can see it. A missed link (false split) is visible, two near-identical names, and costs only statistical power.
 
 **This command spends zero LLM quota.** Groups that would go to the LLM are counted as `ambiguous` and reported as a projected cost column. The gold set includes cases labelled `ambiguous_ok` (Yi Sun-sin) that are correctly deferred; those are scored as correct when the matcher returns `ambiguous`.
 
@@ -48,7 +48,7 @@ Each gold mention carries an `expected_verdict`:
 Error categories, in order of severity:
 
 1. **Wrong link** (CRITICAL): linked to the wrong entity, or linked when expected new. This is a false merge. The number to minimise.
-2. **Missed link**: expected linked, got new. A false split — visible and fixable.
+2. **Missed link**: expected linked, got new. A false split: visible and fixable.
 3. **Unnecessary ambiguity**: expected linked, got ambiguous. Wastes LLM quota but produces the right answer if the model works.
 
 ## 4. Output
@@ -82,7 +82,7 @@ Each `ambiguous` decision at the recommended settings is one LLM call. Project:
 
 - At the gold set's ambiguity rate, how many calls per 1,000 commanders?
 - At the crawl target of 3,000 battles and ~2 commanders per side per battle, how many total LLM calls?
-- At the measured cost of $0.0014 per call (docs/handover-log.md 13.3), what is the projected LLM spend for the resolve stage?
+- How many LLM requests would the resolve stage send at these thresholds? In the default `llm_mode: offline` they cost subscription usage via `/process-llm-batch`, not API spend (the $0.0014 per call in handover-log §13.3 was a Gemini call; Gemini is removed).
 
 State the figure. It is the number that decides whether the disambiguation step is affordable.
 

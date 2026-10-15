@@ -17,11 +17,8 @@ Run the pipeline stage: $ARGUMENTS
    - If it's a data issue (missing inputs, bad data), report what's wrong and what needs to happen upstream
 
 4. If the stage succeeds:
-   - Run the quality checks manually to verify:
-     ```
-     python -m pipeline.quality_runner --stage $ARGUMENTS
-     ```
+   - The orchestrator has already run the stage's quality gates; to re-run them alone, use the `QualityRunner` snippet in `.claude/commands/data-audit.md` section 2
    - Report the quality check results
    - Summarise the output: how many records were produced, any warnings, what the next stage should expect
 
-5. If fixes were needed, do not commit; report them and suggest the message "fix: $ARGUMENTS stage — <brief description>" for the user to run.
+5. If fixes were needed, do not commit; report them and suggest the message "fix: $ARGUMENTS stage, <brief description>" for the user to run.

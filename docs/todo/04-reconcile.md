@@ -12,7 +12,7 @@ see handover-log §19-§21. Estimates are written only after convergence.
       two-Normal mixture (`likelihood_family: contaminated`), kept as an ablation only: on the
       corpus troops pi_contam was 0.02 and it did not fix the collapse. A one-sided component
       may still suit casualties (re-measure first, handover §7 step 3)
-- [x] fixed 2026-10-13: (pilot review) a range "X–Y" entered as two half-line censorings and,
+- [x] fixed 2026-10-13: (pilot review) a range "X-Y" entered as two half-line censorings and,
       on the corpus, drove infobox sigma to 1.4 and the collapse. Merged into one point row at
       sqrt(A·B) with range_var added (`merge_range_pairs`, handover §9.6)
 - [ ] (pilot review S3) a key's own effect should require co-reporting (other keys
@@ -26,7 +26,8 @@ see handover-log §19-§21. Estimates are written only after convergence.
 - [x] fixed 2026-10-12: Parameterise gate thresholds from the spec so integration can pass neutral_fit_converged (handover-log §21.5)
 - [ ] Width gates on the identified scale; n_identifying_sides (handover-log §20.10)
 - [ ] ExGaussian bound likelihood (handover-log §20.10)
-- [ ] Prior predictive check; per-side casualty ratio; InverseGamma(2,1) on variance
+- [ ] Prior predictive check; per-side casualty ratio; variance prior InverseGamma alpha 3
+      (currently 2, `precision_prior_alpha`)
 - [x] done 2026-10-13: Run on a real corpus (general_war_corpus2, CLI)
 - [x] fixed 2026-10-12: (gap review A11) data_era is centred over all dated rows but applied only to
       unlabelled rows (design.py / model.py); centre within the unlabelled rows

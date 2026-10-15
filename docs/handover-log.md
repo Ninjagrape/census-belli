@@ -3096,3 +3096,144 @@ New findings, in rough order of what they cost a real run:
 
 Also confirmed: every item already listed as open for reconcile, classify,
 impute and model is still open in code. None was quietly fixed.
+
+## 25. Real-corpus pilot, 2026-10-11 (was handover §11)
+
+The 211-battle Arsht seed run stage by stage via the CLI into database
+`general_war_corpus` (left in place, with `data/raw`, `data/processed`,
+`data/imputed` and three 204 MB extract batch files in `data/llm_requests`).
+No LLM request was answered. Where the CLI wrote nothing, a scratch driver
+passing `StageContext(db_conn=conn)` and wrapping each extract write in a
+savepoint was used to reach later stages; nothing from it is in the repo.
+P1-P4 were re-checked against the code and the database by the lead; the rest
+are the worker's observations, with evidence, not yet re-checked.
+
+**Blocking**
+
+- **P1. [fixed 2026-10-11] The orchestrator never passed a `StageContext`.** Fix: `_call_stage` passes one and commits after `run` returns (also on the offline halt), rolls back if it raises; reconcile, impute and model set `OWNS_DB_CONNECTION = True` and keep their own connection so a failed fit's run row survives. Test: `test_orchestrator_persistence.py`. Original finding: `run_stage` calls
+  `runner_module.run(spec)` (`orchestrator.py:169`). Extract logs
+  `extract_database_write_skipped` and writes 0 rows; resolve spends ~6 min on
+  SPARQL and writes 0 generals. Crawl, reconcile, classify, impute and model
+  open their own connection and are unaffected. Extract's LLM service also has
+  no connection, so no `llm_calls` audit trail.
+- **P2. [fixed] One bad row aborted all of extract's writes.** Fix: `write_battle_isolated` (savepoint per battle; a failed battle leaves a bare `needs_review` row), and the same in resolve's per-identity loop. Classify had no such loop. Original finding: `write_battle` shares one
+  transaction with no savepoint (`extract.py:686-693`): the first
+  `InvalidDatetimeFormat` turns the remaining 207 battles into
+  `InFailedSqlTransaction` and the commit rolls back. The comment there claims
+  the opposite. Check resolve and classify write loops for the same pattern.
+- **P3. [fixed] Unparsed date text reached `date_start`.** Fix: `pipeline/extractors/dates.py`, plus a guard in `store._upsert_battle`; 209 of 211 real infoboxes now parse (1982 Lebanon War has two incompatible spans, one infobox has no date). `c. 1200 BC` parses as year 1200 BC and loses the circa. Original finding: 56 of 211 battles (27%) fail
+  to insert, mostly ancient or multi-day: `"212 BC"`, `"Spring 208 BC"`,
+  `"21–22 May 1809"`, `"5–6 June 1967 ( 1967-06-05 – 1967-06-06 )"`,
+  `"15 November [ O.S. 3 November ] 1812 – ..."`, `"January 635 AD (13 AH)"`.
+  58 records have `date_precision` None. Losing them biases the corpus further
+  toward the modern era (already 121 of 155 written battles are 17th-20th c.).
+- **P4. [fixed; reviewed by `bayesian-model-reviewer`]** Cause:
+  per-source bias and noise were nested in battles (every infobox covers one
+  battle) and absorbed each battle's level; junk `total` rows inflated noise; a
+  Normal side prior against a t likelihood called large armies' reports
+  outliers. Fix: a source key gets its own effect only if it covers >= 3
+  battles (`min_battles_per_source_effect`), else type-level bias and sigma
+  (pooled keys write NULL bias); load-time plausibility filter
+  (`reconcilers/plausibility.py`); `z_side` Student-t (`side_prior_nu: 4`);
+  troop-unfillable sides judged on troop rows only and stale estimates
+  cleared; new gates `estimates_not_collapsed` (spread_ratio >= 0.25) and
+  `reports_honoured`. Corpus after the fix (run 12): rhat 1.007, ESS 699; log-sd
+  of estimates 0.51 (was 0.0117), corr with max report 0.76 (was 0.31); Kursk
+  Soviet 427,739 (25k-5.2M); stale and unfillable gates pass;
+  `reports_honoured` 1 of 39 (Waterloo French, component rows); impute not
+  re-run. Deferred review items are in `docs/todo/04-reconcile.md`.
+  Original finding: **Reconcile's real-data estimates ignored the reports.** Converged fit
+  (5000 draws; the default 1000 missed ESS 400 at 359.6), yet all 275 sides lie
+  in 33,798-37,171 (log-sd 0.0117): Kursk Soviet max report 2,500,000 gives
+  36,947; Actium Octavian (report 3,000) 35,069; Gaugamela Achaemenid
+  (1,000,000) 35,440. Corr(ln est, ln max report) 0.31. Every source is
+  `wikipedia_infobox` and 1728 of 1755 lineages are `regime_unlabelled`. The
+  per-side posterior sd (~0.26) is wide while the medians are near-identical,
+  which suggests side effects are shrunk to the corpus level or the likelihood
+  is mis-indexed; undiagnosed. Impute then finds 275 weak sides and 0 battles
+  to condition on (`impute_no_observed_sides`), so the model never runs.
+
+**Wrong output**
+
+- Extract stores sub-components as `branch='total'`: Cannae Rome has `Total:
+  86,400` plus "25,000 Romans", "30,000 allies" as separate totals; Carthage
+  likewise. Ranges become a lower and an upper bound row.
+- Resolve: Hannibal (25 mentions), Julius Caesar (9) and Alexander (4) are
+  `llm_deferred`, so Cannae and Gaugamela credit Hasdrubal or Parmenion. 13
+  well-known people got "no candidate returned" (Schwarzenberg, MacDonald,
+  Grouchy, Platov, Amr ibn al-As); Blücher failed the date gate. Luftwaffe,
+  Stavka and Army Group B became generals. Austerlitz's "Russian Empire" side
+  holds the Austrian commanders. Side polity strings like `"Octavian 's
+  forces"` (stray space).
+- Classify typed Marathon, Malvern Hill, Yom Kippur War and Operation Torch as
+  naval; `field` is never produced (133 of 155 `unknown`).
+- The seed includes wars, not battles ("1948 Arab–Israeli War", "Yom Kippur
+  War"). Trafalgar is not in it.
+- Model design on this data: 154 battles in scope, 108 with no outcome, 33
+  with no creditable side, **13 included, 13 generals**. 216 of 308 side
+  outcomes are blank, so outcome extraction is the next coverage limit after
+  attribution.
+
+**Gates and orchestration**
+
+- Crawl `min_battles_crawled` counts every 200 URL including citations (1986
+  here), so it measures citations, not battles. `wikidata_coverage` 0: a named
+  corpus fetches no Wikidata entities, `data/raw/wikidata` is empty.
+  Citation error rate 0.21 (doi.org 403 x114, 328 read timeouts).
+- The orchestrator's stage retry reruns a fixed-seed sampler, so a
+  non-converged reconcile fails identically twice and doubles the runtime.
+- Reconcile `unfillable_sides_are_logged` 16 while the stage logged 3
+  unfillable (naval-excluded reports likely); `ci_width_reasonable` returns
+  NULL. Classify `missing_data_all_logged` 30 (error). Impute's gates read
+  `data/imputed/neutral/gate_report.json` even under `scale=published`; model
+  rejects `scale=published`.
+- Extract: 11,337 `citation_line_malformed` warnings (cause not found); every
+  re-run writes a new full batch file with identical hashes; 35,277 deferred
+  calls dedupe to 22,591 requests, which is the real extract LLM bill for 211
+  battles (~107 per battle, far above §7's estimate).
+
+**Runtimes**: crawl 7,034 s; extract 128 s; resolve 353 s cold, 140 s with the
+SPARQL cache; reconcile 206 s per attempt at defaults, ~310 s at 5000 draws;
+impute (published) 82 s per attempt.
+
+## 26. Sweep of pilot and gap-review findings, 2026-10-12 (was handover §12)
+
+Seven parallel workers (one worktree and one scratch database each,
+`general_war_wt_*`), merged and committed. What a future session needs:
+
+- **Orchestrator**: `--continue-past-deferred` runs later stages on
+  deterministic data after an offline LLM deferral (exit code 3 at the end;
+  the result is provisional). A gate failure retries only with
+  `retry_policy.retry_on_gate_failure: true` (crawl only); reconcile, impute
+  and model have `max_stage_retries: 0` (fixed seed; model retries
+  non-convergence itself, reconcile and impute do not). `--stages all` skips
+  unbuilt stages. Gate thresholds may say `{params.<name>}`; a missing param
+  fails the check. `imputation_gate` reads the run's `params.scale`.
+- **Crawl**: gates read a marker row `crawl-plan://battle-articles?targets=..&fetched=..&entities=..&floor=..`
+  (http_status 0) written to crawl_log at the end of each run; error-rate SQL
+  excludes it. Named corpora fetch each article's Wikidata entity via
+  `Special:EntityData` (robots allows it), Q-id read from the article HTML.
+- **Extract**: arm-of-service figures get their branch, contingents/nationalities
+  `other`; a side with only components gets one derived total marked
+  `is_lower_bound`, `page_or_section='infobox:derived_total'`. Victor matching
+  uses demonym stems plus a small table, still exactly-one-side. Battles are
+  keyed by `battles.source_slug` (the crawl filename stem), so same-name
+  battles stay apart. Offline batch files with identical hash sets are reused.
+  Circa dates are not flagged (`c. 1200 BC` reads as exact) - open.
+- **Resolve**: non-person filter by name pattern and P31; title/particle
+  stripping and a search fallback for zero-candidate names (fixture-tested
+  only, not live); generals get born/died and `*_year_astronomical` columns.
+- **Classify**: `battles.wikipedia_url` (Wikidata/DBpedia form) never matched
+  crawl's hashed filenames, so no article had ever been read; lookup now uses
+  `source_slug`, then title. Naval needs ship vocabulary to dominate. An
+  existing non-`unknown` battle_type is never rewritten, so reset it before
+  re-running classify on an old database. `is_defender` is set only for
+  "Siege of X" where one side names X.
+- **Reconcile**: `data_era` is centred over the unlabelled rows it applies to
+  (reviewed, approved); a non-finite rhat/ESS fails the write gate; withheld
+  sides are logged; `ci_width_reasonable` and the singleton gate measure
+  multi-claim and single-claim sides by `est_troops_method`.
+- **Model**: `scale=published` runs write model types with a `_published`
+  suffix so the neutral ranking stays `MAX(run_id)` of the plain type.
+- **Parallel workers**: give each its own database; three workers once picked
+  the same Alembic revision id, so check `alembic heads` after any merge.

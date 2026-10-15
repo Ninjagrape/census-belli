@@ -7,12 +7,12 @@
 Then:
 
 - **If the user asks for something specific, do that.** Their request always wins over the resumption below.
-- **If the user asks you to continue, resume, or says nothing specific**, pick up at the next unfinished step in `handover.md` §7 and start work. Say which step you are starting and why, then begin — do not re-plan what is already planned there.
+- **If the user asks you to continue, resume, or says nothing specific**, pick up at the next unfinished step in `handover.md` §7 and start work. Say which step you are starting and why, then begin; do not re-plan what is already planned there.
 
 Two rules that override the momentum to just keep building:
 
-1. **Verify before trusting.** Run the three commands in `handover.md` §1 and confirm the state matches before building on it. Files change between sessions, sometimes from other agents working in parallel.
-2. **Never report a stage green on unit tests alone.** Most verification gates in this project need a live Postgres. Say explicitly what you verified and what you could not. A passing fixture suite has already hidden a systematic bug that would have corrupted the published ranking — see `handover.md` §4.
+1. **Verify before trusting.** Run the verification commands in `handover.md` §1 and confirm the state matches before building on it. Files change between sessions, sometimes from other agents working in parallel.
+2. **Never report a stage green on unit tests alone.** Most verification gates in this project need a live Postgres. Say explicitly what you verified and what you could not. A passing fixture suite has already hidden a systematic bug that would have corrupted the published ranking (see `handover.md` §4).
 
 Before you finish a session, update `handover.md` so the next one starts where you stopped.
 
@@ -62,19 +62,19 @@ A data pipeline and Bayesian modelling system that ranks military commanders thr
 
 ## Architecture
 
-The project is an **agentic pipeline** with discrete stages. Each stage has a defined agent prompt in `agents/`, a runner script in `pipeline/`, and input/output contracts. Stages run sequentially but are idempotent, so any stage can be re-run without corrupting downstream data.
+The project is an **agentic pipeline** with discrete stages. Each stage has a defined agent prompt in `agents/`, a runner in `pipeline/stages/`, and input/output contracts. Stages run sequentially but are idempotent, so any stage can be re-run without corrupting downstream data.
 
 ### Pipeline Stages (in order)
 
-1. **crawl** — Fetch Wikipedia battle lists, individual battle articles, Wikidata, DBpedia, and citation URLs.
-2. **extract** — Parse infoboxes, run LLM-assisted extraction on article text, pull structured data from Wikidata/DBpedia.
-3. **resolve** — Entity resolution: link generals and battles to canonical Wikidata IDs, deduplicate, merge aliases.
-4. **reconcile** — Run source-disagreement model on troop/casualty reports, compute best estimates with confidence intervals.
-5. **classify** — Classify command roles and hierarchy for each battle-commander pair. Classify missingness types for missing fields.
-6. **impute** — Multiple imputation for missing troop data using era/polity priors.
-7. **model** — Fit the Bayesian Bradley-Terry hierarchical model in PyMC/Stan.
-8. **evaluate** — Held-out prediction, posterior predictive checks, sensitivity analysis.
-9. **report** — Generate rankings with credible intervals, comparison visualisations, and the interactive explorer.
+1. **crawl**: Fetch Wikipedia battle lists, individual battle articles, Wikidata, DBpedia, and citation URLs.
+2. **extract**: Parse infoboxes, run LLM-assisted extraction on article text, pull structured data from Wikidata/DBpedia.
+3. **resolve**: Entity resolution: link generals and battles to canonical Wikidata IDs, deduplicate, merge aliases.
+4. **reconcile**: Run source-disagreement model on troop/casualty reports, compute best estimates with confidence intervals.
+5. **classify**: Classify command roles and hierarchy for each battle-commander pair. Classify missingness types for missing fields.
+6. **impute**: Multiple imputation for missing troop data using era/polity priors.
+7. **model**: Fit the Bayesian Bradley-Terry hierarchical model in PyMC.
+8. **evaluate**: Held-out prediction, posterior predictive checks, sensitivity analysis.
+9. **report**: Generate rankings with credible intervals, comparison visualisations, and the interactive explorer.
 
 ### Agent System
 
@@ -82,7 +82,7 @@ Each pipeline stage is defined by an agent spec in `agents/<stage>.yaml`. The sp
 - `description`: what this stage does
 - `inputs`: what files/tables it reads
 - `outputs`: what files/tables it writes
-- `prompt`: the system prompt for the LLM agent when it needs to make extraction or classification decisions
+- `prompt`: the system prompt for the LLM agent when it needs to make extraction or classification decisions (`null` for deterministic and statistical stages; classify uses `command_role_prompt` and `missingness_prompt` instead)
 - `tools`: which tools/functions the agent can call
 - `quality_checks`: assertions that must pass before the stage is considered complete
 - `retry_policy`: how to handle failures
@@ -95,9 +95,9 @@ The orchestrator in `pipeline/orchestrator.py` runs stages in sequence, checks q
 - **Database**: PostgreSQL 15+ (schema in `config/schema.sql`)
 - **Web scraping**: httpx + beautifulsoup4 + mwparserfromhell (for MediaWiki templates)
 - **LLM extraction**: offline-first. Each stage names its model in `agents/<stage>.yaml` (`claude-haiku-5-5` for extract and resolve, `claude-sonnet-5-5` for classify). With `llm_mode: offline` (the default) a stage answers from the `llm_calls` cache, writes uncached requests to `data/llm_requests/<stage>_<ts>.jsonl` and stops the pipeline; `/process-llm-batch` answers the file with `llm-batch-worker` subagents on the subscription's usage limits, then the stage is re-run. `llm_mode: api` sends the same requests to the Anthropic API and shares the cache
-- **Entity resolution**: Wikidata SPARQL via `SPARQLWrapper`
-- **Bayesian modelling**: PyMC 5.x (primary), CmdStanPy as fallback
-- **Data processing**: pandas, polars
+- **Entity resolution**: Wikidata SPARQL over httpx (`pipeline/crawlers/wikidata.py`)
+- **Bayesian modelling**: PyMC 5.x, sampled with nutpie
+- **Data processing**: pandas, numpy
 - **Visualisation**: plotly, matplotlib
 - **Testing**: pytest
 

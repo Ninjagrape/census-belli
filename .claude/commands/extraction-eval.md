@@ -2,7 +2,7 @@ Evaluate the LLM extraction and classification prompts against hand-labelled gro
 
 `$ARGUMENTS` may be `extract`, `classify`, or empty for both. Add `--baseline` to overwrite the stored baseline after a deliberate improvement.
 
-The extract stage will make tens of thousands of `claude-sonnet-4-6` calls. Without this harness the only way to know whether a prompt edit helped or hurt is to run the whole corpus and eyeball the result. This command makes a prompt change measurable in about twenty calls.
+The extract stage will make tens of thousands of `claude-haiku-5-5` calls. Without this harness the only way to know whether a prompt edit helped or hurt is to run the whole corpus and eyeball the result. This command makes a prompt change measurable in about twenty calls.
 
 ## 1. Check the gold set exists
 
@@ -16,7 +16,7 @@ tests/fixtures/gold/
   MANIFEST.md                  what each fixture is for and who labelled it
 ```
 
-If `tests/fixtures/gold/` is missing or empty, stop and build it first — see section 6. Do not fabricate ground truth to make the command run.
+If `tests/fixtures/gold/` is missing or empty, stop and build it first (see section 6). Do not fabricate ground truth to make the command run.
 
 ## 2. Run the prompts
 
@@ -25,9 +25,9 @@ Load the prompt from the spec rather than hardcoding it, so the harness always t
 - `agents/extract.yaml` → `prompt.system`, `prompt.user_template`, `prompt.output_schema`
 - `agents/classify.yaml` → `command_role_prompt` and `missingness_prompt`
 
-Use `pipeline/llm.py` once it exists, so retry, logging, and cost accounting match production. Temperature 0 for both, per the spec params and the CLAUDE.md convention.
+Use `LLMService` from the `pipeline/llm` package, so retry, logging, and cost accounting match production. `claude-haiku-5-5` cannot take temperature 0, so determinism rests on the structured-output constraint; note this when comparing runs.
 
-Run every fixture. Cache responses keyed by `(prompt_hash, fixture_slug)` in `tests/fixtures/gold/.cache/` so re-running after an unrelated code change costs nothing — a changed prompt changes the hash and forces a real call.
+Run every fixture. Cache responses keyed by `(prompt_hash, fixture_slug)` in `tests/fixtures/gold/.cache/` so re-running after an unrelated code change costs nothing; a changed prompt changes the hash and forces a real call.
 
 ## 3. Score
 
@@ -40,7 +40,7 @@ Report per field, not just an aggregate. An aggregate hides the fact that comman
 | `commanders[].name` | precision / recall, matched after normalising case, diacritics, and regnal numbers |
 | `commanders[].apparent_role` | accuracy over correctly matched names, plus a confusion matrix |
 | `troop_reports[].value` | share within ±10% of the label, and share within ±50% |
-| `troop_reports[].scope` | accuracy, plus the predicted distribution — flag if `engaged` exceeds 80% |
+| `troop_reports[].scope` | accuracy, plus the predicted distribution; flag if `engaged` exceeds 80% |
 | `troop_reports[].is_estimate` / `is_upper_bound` / `is_lower_bound` | precision / recall each |
 | `casualty_reports[].value` | share within ±10% |
 | `outcome.outcome_level` | accuracy, plus confusion matrix |
@@ -57,7 +57,7 @@ Report per field, not just an aggregate. An aggregate hides the fact that comman
 | `attribution_weight` | mean absolute error against the label |
 | weights sum to ~1.0 | share of sides within 0.15, mirroring the `attribution_weights_sum` gate |
 | `missingness_class` | accuracy over the 3-value enum |
-| `needs_review` | precision / recall — over-flagging is as costly as under-flagging |
+| `needs_review` | precision / recall; over-flagging is as costly as under-flagging |
 
 Report the named cases individually, since they are the ones the project is judged on: Actium (Agrippa `field_commander` with weight > 0.7, Octavian `sovereign`), Cannae (Varro and Paullus split), any D-Day fixture (Eisenhower `supreme_commander`).
 
@@ -67,13 +67,13 @@ Load `tests/fixtures/gold/baseline_scores.json` and diff every metric. Report im
 
 **Fail loudly on regression.** Any metric dropping more than 2 percentage points is a regression: name it, say which prompt changed, and recommend reverting unless the drop is a deliberate trade. Exit non-zero so this can gate CI.
 
-With `--baseline`, overwrite the file — but only after showing the diff and stating what improved. Record the prompt hashes alongside the scores so a baseline can always be traced to the prompt that produced it.
+With `--baseline`, overwrite the file, but only after showing the diff and stating what improved. Record the prompt hashes alongside the scores so a baseline can always be traced to the prompt that produced it.
 
 ## 5. Cost
 
 Report for the fixture run: total input tokens, output tokens, call count, and estimated cost.
 
-Then extrapolate. Read `SELECT COUNT(*) FROM battles` if the database is up, else use the crawl target of 3,000 from `agents/crawl.yaml`'s `min_battles_crawled`, and project the full-corpus cost at the observed per-battle token rate. Account for `agents/extract.yaml`'s `batch_size: 50` and for long articles being chunked into several passages — the per-battle call count is not 1.
+Then extrapolate. Read `SELECT COUNT(*) FROM battles` if the database is up, else use the crawl target of 3,000 from `agents/crawl.yaml`'s `min_battle_articles`, and project the full-corpus cost at the observed per-battle token rate. Account for `agents/extract.yaml`'s `batch_size: 50` and for long articles being chunked into several passages, the per-battle call count is not 1.
 
 State the figure plainly. It is the number that decides whether a prompt change is affordable to deploy.
 
@@ -104,7 +104,7 @@ If the fixtures do not exist, this is the real work and should be done as its ow
 | `normandy-1944` | supreme versus field command; the Eisenhower case |
 | `unknown-troops-case` | a real battle where one side's numbers are entirely absent, to test that missingness is logged rather than guessed |
 
-For each: snapshot the article HTML so results stay reproducible when Wikipedia changes, then hand-label the expected output against the schemas in `agents/extract.yaml` and `agents/classify.yaml`. Record in `MANIFEST.md` who labelled it, when, and which sources they consulted — a gold set whose provenance is unknown is not gold.
+For each: snapshot the article HTML so results stay reproducible when Wikipedia changes, then hand-label the expected output against the schemas in `agents/extract.yaml` and `agents/classify.yaml`. Record in `MANIFEST.md` who labelled it, when, and which sources they consulted: a gold set whose provenance is unknown is not gold.
 
 Where scholarship genuinely disagrees, label the range and score a prediction inside it as correct. Do not encode a single contested number as truth.
 

@@ -9,27 +9,13 @@ wrong; session narratives, changed-file lists and commit messages do not belong
 here.
 
 `docs/handover-log.md` is the full session-by-session history up to
-2026-10-10. Code comments cite its section numbers ("handover-log §16.1").
+2026-10-12 (§25 is the real-corpus pilot, §26 the sweep that fixed it). Code comments cite its section numbers ("handover-log §16.1").
 Do not read it by default; open the cited section when a comment points there.
 
-Last updated: 2026-10-14. Committed through 3f01939 (evaluate stage). The real
-corpus passes crawl through evaluate on the CLI (model on 59 of 210 battles
-until classify's LLM slice runs).
-
-**Evaluate is committed** (3f01939). Contract in `agents/evaluate.yaml`; code in
-`pipeline/stages/evaluate.py` and `pipeline/evaluators/`; named checks in
-`config/expert_rankings.yaml` (Q-ids looked up live, reviewed by
-`historiography-reviewer`); statistics reviewed by `bayesian-model-reviewer`
-(B1 and S1-S6 applied, see §9.10).
-
-**Report is built (uncommitted, 2026-10-14)** and runs on the corpus via the
-CLI. Code in `pipeline/stages/report.py` and `pipeline/reporters/`; outputs in
-`data/processed/report/` (rankings.csv/json, explorer.html, report.md,
-figures/, manifest.json). Gate fixes committed in 7d9ba5e. Design decisions are
-in §9.11. Reviewed (python-reviewer, `bayesian-model-reviewer` on the overlap
-flag) and fixed; integration test `tests/integration/test_report.py` (10).
-Full non-model suite 2026-10-14: 1639 passed, 0 skipped, then 6 more unit
-tests (evaluate gate severities) passed. Ready to commit.
+Last updated: 2026-10-15 (documentation audit). `main` is committed through
+6c91f1a (report stage). The real corpus
+passes crawl through evaluate on the CLI (model on 59 of 210 battles until
+classify's LLM slice runs).
 
 ---
 
@@ -45,11 +31,10 @@ tests (evaluate gate severities) passed. Ready to commit.
 | impute | yes | **yes** (integration suite) | **passes** at 2000 draws / 1500 tune (max rhat 1.0092 vs 1.01: thin margin) |
 | model | yes | on fixtures | **passes** at 3000 draws (run 54: rhat 1.004, ESS 1445); 59 of 210 battles included; 4 warning gates (§7 step 1) |
 | evaluate | yes | **yes** (integration 12, model CV 4) | **runs, 4 of 5 gates pass** (2026-10-14, model run 54): held-out accuracy 0.70, Brier 0.222; named_checks not_evaluable |
-| report | yes (uncommitted) | **yes** (integration 10, seeded run, no fit) | **runs, all gates pass except `exclusion_concentration`** (by design: output marked provisional, exit 1); 3 headline generals, 58 below `min_battles` |
+| report | yes (6c91f1a) | **yes** (integration 10, seeded run, no fit) | **runs, all gates pass except `exclusion_concentration`** (by design: output marked provisional, exit 1); 3 headline generals, 58 below `min_battles` |
 
-Counts on 2026-10-13 (uncommitted tree): non-model suite 1392 passed, 0
-skipped (before the last small fixes; unit 1182, reconcile+impute integration
-38 re-run after them). Model suite per file: impute_recovery 5, model_recovery
+Counts on `main` at 6c91f1a (2026-10-14): non-model suite 1645 passed, 0
+skipped, ~17.5 min. Model suite per file (2026-10-13): impute_recovery 5, model_recovery
 6, reconcile_contamination 3, reconcile_neutral 5, reconcile_recovery 17 + 1
 xfailed (~11 min alone). Run the model files one per command; a single
 `tests/model` run exceeds a 10-minute tool timeout.
@@ -59,8 +44,8 @@ xfailed (~11 min alone). Run the model files one per command; a single
 ```bash
 export DATABASE_URL="postgresql+psycopg://general_war:general_war@127.0.0.1:5432/general_war"
 ruff check pipeline/ tests/ scripts/ alembic/   # expect: All checks passed
-python -m mypy pipeline/                         # expect: Success, 131 source files (strict)
-python -m pytest tests/ -q -m "not live and not model"   # expect: 0 failed, 0 skipped (~1395 passed)
+python -m mypy pipeline/                         # expect: Success, 147 source files (strict)
+python -m pytest tests/ -q -m "not live and not model"   # expect: 0 failed, 0 skipped (~1645 passed)
 PYTHONIOENCODING=utf-8 alembic heads             # expect: one head, a7b8c9d0e1f2
 python -m pytest tests/model -m model            # recovery suites; slow (~15 min)
 ```
@@ -126,9 +111,9 @@ with no LLM and leaves ambiguous groups `unresolved`.
 its own SAVEPOINT. When a gate fails, **check whether the spec is wrong before
 assuming the code is**: several gates have measured tables their stage never
 writes (see §4). `method:` checks dispatch through `METHOD_HANDLERS`
-(`diagnostics_json`, `imputation_gate`, `model_gate`); an unregistered method
-reports "not implemented" rather than passing. Evaluate's gates use
-`evaluation_gate`: it reads `evaluation_report.json` and fails as stale when
+(`diagnostics_json`, `imputation_gate`, `model_gate`, `evaluation_gate`); an
+unregistered method reports "not implemented" rather than passing.
+`evaluation_gate` reads `evaluation_report.json` and fails as stale when
 the report's `model_run_id` is not the newest converged pooled run.
 
 `pipeline/quality.py`'s `Connection` protocol has **two** test doubles:
@@ -142,6 +127,15 @@ calls `check_conforms()` on import so a bad signature fails before the pipeline
 starts. `retry_policy.on_failure: continue_with_logging` does not halt the
 pipeline; `pause_and_alert` and `complete_with_warnings` do
 (`StageResult.halts_pipeline`).
+
+`--continue-past-deferred` runs later stages on deterministic data after an
+offline LLM deferral (exit code 3 at the end; the result is provisional). A
+gate failure retries only with `retry_policy.retry_on_gate_failure: true`
+(crawl only); reconcile, impute and model have `max_stage_retries: 0` (fixed
+seed; model retries non-convergence itself, reconcile and impute do not).
+`--stages all` skips unbuilt stages. Gate thresholds may say
+`{params.<name>}`; a missing param fails the check. `imputation_gate` reads
+the run's `params.scale`.
 
 ### 3.4 Schema changes go in two places
 
@@ -182,10 +176,10 @@ floor. Recurring classes, with the log section that records each:
 - **Clean diagnostics, prior-only posterior.** A parameter the data cannot
   identify samples at rhat 1.00 and returns its prior (log §19.8-19.9). Check
   prior-to-posterior contraction, not just rhat. The pilot's reconcile did this
-  for every side at once (§11, P4).
+  for every side at once (log §25, P4).
 - **Tests that hand the stage what the CLI does not.** Integration tests pass a
   `StageContext` with a connection; the orchestrator passes none, so extract and
-  resolve wrote nothing from the CLI while every test was green (§11, P1).
+  resolve wrote nothing from the CLI while every test was green (log §25, P1).
   Verify a stage through `python -m pipeline.orchestrator`, not only pytest.
 
 ---
@@ -238,6 +232,9 @@ floor. Recurring classes, with the log section that records each:
 - **Workers editing `agents/*.yaml` during a test run break that run**: stages
   read their spec at runtime. Never overlap a code-editing worker with a
   verification run on the same tree.
+- **Parallel workers** each get their own database (`general_war_wt_*`).
+  Three workers once picked the same Alembic revision id, so check
+  `alembic heads` after any merge.
 - Auto-mode's permission classifier may block a subagent from connecting to
   `general_war_corpus2`; ask the user rather than routing the work through
   another agent.
@@ -255,8 +252,8 @@ floor. Recurring classes, with the log section that records each:
 
 ## 7. Next steps, in order
 
-0. Done: the 2026-10-13 reconcile fix is committed (a89f377, 85de7e8); CI not
-   yet checked. **Do not lower `min_spread_ratio`** (§9.6).
+**Do not lower `min_spread_ratio`** (§9.6).
+
 1. **Model stage on the corpus passes its error gates** (2026-10-13, 3000
    draws in `config/model_default.yaml`, was 1500: ESS 660 < 800). Warnings to
    work through: `circularity_check` (joint latent beta_force gap 0.276 vs
@@ -290,15 +287,14 @@ floor. Recurring classes, with the log section that records each:
    errors on the 87% singleton sides are not detectable by the model. Impute
    passes rhat 1.0092 against 1.01 on hierarchical scales `tau_p`, `tau_c`;
    another corpus may need more draws.
-4. **Report**: built, verified, uncommitted (commit it). Open: the model-side
-   WAR interval and P(adjacent order) (§9.11, deferred by the user). A real
-   ranking needs step 2 first. Evaluate open items: the calibration
+4. **Report**: committed (6c91f1a). The model-side WAR interval and
+   P(adjacent order) (§9.11) are built on `wip/outstanding`, not yet on
+   `main`. A real ranking needs step 2 first. Evaluate open items: the calibration
    gate sits on the imputed CV arm (§9.10); the +/-1 sd `g_unlabelled`
-   sensitivity is not built (needs reconcile regime draws).
+   sensitivity is on `wip/outstanding` (d91dcbc).
 5. Full-pipeline integration test on fixtures (crawl through model).
 
 Say explicitly what was and was not verified against a database.
-
 
 ---
 
@@ -317,7 +313,7 @@ Say explicitly what was and was not verified against a database.
 - **Stage inspector**: `streamlit run scripts/inspector_app.py`, read-only by
   construction (every connection sets `default_transaction_read_only`), safe to
   point at a corpus database. DB from `INSPECT_DATABASE_URL`, else
-  `DATABASE_URL`. The Model page is still a placeholder (gap review A16).
+  `DATABASE_URL`.
 
 ---
 
@@ -334,6 +330,11 @@ is in the log section cited.
 - Named corpora come from `wikipedia_battle_articles:` in the seed file. An
   evaluation corpus names no list pages or SPARQL queries, so its membership
   cannot drift with Wikipedia edits.
+- Gates read a marker row
+  `crawl-plan://battle-articles?targets=..&fetched=..&entities=..&floor=..`
+  (http_status 0) written to crawl_log at the end of each run; error-rate SQL
+  excludes it. Named corpora fetch each article's Wikidata entity via
+  `Special:EntityData` (robots allows it), Q-id read from the article HTML.
 
 ### 9.2 Extract
 
@@ -346,6 +347,13 @@ is in the log section cited.
   unordered lists, and a commander on the wrong side is an error the model
   cannot see. They go to notes, "unassigned to sides". Infobox wikitext is the
   only source of side assignment.
+- Arm-of-service figures get their branch, contingents/nationalities `other`;
+  a side with only components gets one derived total marked `is_lower_bound`,
+  `page_or_section='infobox:derived_total'`. Victor matching uses demonym
+  stems plus a small table, still exactly-one-side.
+- Battles are keyed by `battles.source_slug` (the crawl filename stem), so
+  same-name battles stay apart. Offline batch files with identical hash sets
+  are reused.
 
 ### 9.3 Resolve
 
@@ -376,6 +384,9 @@ is in the log section cited.
   usually the sole candidate, which skips the ambiguity margin and auto-links at
   ~0.62 confidence where evidence is weakest, and live probes are noisy. Measure
   the residual class with a gold set first.
+- Non-person filter by name pattern and P31; title/particle stripping and a
+  search fallback for zero-candidate names (fixture-tested only, not live).
+  Generals get born/died and `*_year_astronomical` columns.
 
 ### 9.4 LLM routing (offline-first)
 
@@ -488,6 +499,10 @@ is in the log section cited.
   run's `started_at`); impute loads `neutral_draws_run{latest written run}.npz`
   and refuses a file from another database. Run ids are per database and the
   test and corpus databases share `data/processed/reconcile/`.
+- `data_era` is centred over the unlabelled rows it applies to; a non-finite
+  rhat/ESS fails the write gate; withheld sides are logged;
+  `ci_width_reasonable` and the singleton gate measure multi-claim and
+  single-claim sides by `est_troops_method`.
 
 ### 9.7 Classify
 
@@ -507,6 +522,11 @@ is in the log section cited.
   exists.
 - Missing covariates are classified **MAR**, not MCAR: missingness plausibly
   tracks documentation level.
+- Articles are found by `source_slug`, then title (`battles.wikipedia_url`
+  never matched crawl's hashed filenames). An existing non-`unknown`
+  battle_type is never rewritten, so reset it before re-running classify on an
+  old database. `is_defender` is set only for "Siege of X" where one side
+  names X.
 
 ### 9.8 Impute
 
@@ -545,6 +565,8 @@ is in the log section cited.
 - One fit per imputed round; mixture pooling; stored sd is Rubin's `sqrt(T)`.
   Every round must converge (one retry) or nothing is written. The pooled
   `bradley_terry_hierarchical` row is written last.
+- `scale=published` runs write model types with a `_published` suffix, so the
+  neutral ranking stays `MAX(run_id)` of the plain type.
 - The circularity comparator is a joint latent fit on per-battle `x_diff`, so
   absolute era levels cannot leak in as fake force ratios.
 - **Disclosures the ranking must carry**: cross-era comparison rests on the
@@ -618,7 +640,8 @@ is in the log section cited.
   stores no WAR interval or WAR draws. Exported as `war_normal_approx_lo/hi`,
   disclosed in every output. `bayesian-model-reviewer` (2026-10-14) judged it a
   poor proxy for ordering: generals' WAR is correlated (shared replacement
-  level, shared battles) and skewed. **Agreed follow-up (user's call, deferred)**:
+  level, shared battles) and skewed. **Follow-up, built on `wip/outstanding`
+  (998f8e6), not yet on `main`**:
   in `pool_reductions` (`summarise.py`, `war_by_round` is already there) store
   `war_ci_lo/hi` via `widen_interval` like skill, and `p_above_next_rank` =
   mean over pooled draws of WAR_i > WAR_next; persist WAR draws in
@@ -634,7 +657,7 @@ is in the log section cited.
 
 Built and verified against a real Postgres: crawl, extract, resolve, and
 reconcile, classify, impute, model and evaluate on fixtures. The recovery
-suites pass on synthetic data. The real-corpus pilot (§11) showed that
+suites pass on synthetic data. The real-corpus pilot (log §25) showed that
 "verified against a database" meant "verified when a test passes the
 connection in". On the real corpus (`general_war_corpus2`) crawl through model
 pass their error gates through the CLI (§1), and evaluate runs with 4 of 5
@@ -643,155 +666,10 @@ gates passing, but every LLM request is still deferred, so the model sees 59 of
 
 Not proven: any real corpus producing a ranking, the offline batch path on a real
 request file (`/process-llm-batch` has never run), any billed API call
-(refusal and truncation branches untested), CI (no git remote), and every gate threshold,
-which has only run against empty or fixture databases, apart from the pilot's
-(§11). The gold sets are agent-built and unreviewed by a human. Evaluate runs
+(refusal and truncation branches untested), CI on the current `main`
+(`origin` exists; no session has checked a run), and every gate threshold,
+which has only run against fixture databases and the real corpus (§1). The gold sets are agent-built and unreviewed by a human. Evaluate runs
 on the corpus (§9.10) but the model covers 59 of 210 battles, so its numbers
 are a mechanics check. Report runs on the corpus and correctly refuses to call
 its output publishable (`exclusion_concentration`), so there is no published
 ranking.
-
----
-
-## 11. Real-corpus pilot, 2026-10-11
-
-The 211-battle Arsht seed run stage by stage via the CLI into database
-`general_war_corpus` (left in place, with `data/raw`, `data/processed`,
-`data/imputed` and three 204 MB extract batch files in `data/llm_requests`).
-No LLM request was answered. Where the CLI wrote nothing, a scratch driver
-passing `StageContext(db_conn=conn)` and wrapping each extract write in a
-savepoint was used to reach later stages; nothing from it is in the repo.
-P1-P4 were re-checked against the code and the database by the lead; the rest
-are the worker's observations, with evidence, not yet re-checked.
-
-**Blocking**
-
-- **P1. [fixed 2026-10-11] The orchestrator never passed a `StageContext`.** Fix: `_call_stage` passes one and commits after `run` returns (also on the offline halt), rolls back if it raises; reconcile, impute and model set `OWNS_DB_CONNECTION = True` and keep their own connection so a failed fit's run row survives. Test: `test_orchestrator_persistence.py`. Original finding: `run_stage` calls
-  `runner_module.run(spec)` (`orchestrator.py:169`). Extract logs
-  `extract_database_write_skipped` and writes 0 rows; resolve spends ~6 min on
-  SPARQL and writes 0 generals. Crawl, reconcile, classify, impute and model
-  open their own connection and are unaffected. Extract's LLM service also has
-  no connection, so no `llm_calls` audit trail.
-- **P2. [fixed] One bad row aborted all of extract's writes.** Fix: `write_battle_isolated` (savepoint per battle; a failed battle leaves a bare `needs_review` row), and the same in resolve's per-identity loop. Classify had no such loop. Original finding: `write_battle` shares one
-  transaction with no savepoint (`extract.py:686-693`): the first
-  `InvalidDatetimeFormat` turns the remaining 207 battles into
-  `InFailedSqlTransaction` and the commit rolls back. The comment there claims
-  the opposite. Check resolve and classify write loops for the same pattern.
-- **P3. [fixed] Unparsed date text reached `date_start`.** Fix: `pipeline/extractors/dates.py`, plus a guard in `store._upsert_battle`; 209 of 211 real infoboxes now parse (1982 Lebanon War has two incompatible spans, one infobox has no date). `c. 1200 BC` parses as year 1200 BC and loses the circa. Original finding: 56 of 211 battles (27%) fail
-  to insert, mostly ancient or multi-day: `"212 BC"`, `"Spring 208 BC"`,
-  `"21–22 May 1809"`, `"5–6 June 1967 ( 1967-06-05 – 1967-06-06 )"`,
-  `"15 November [ O.S. 3 November ] 1812 – ..."`, `"January 635 AD (13 AH)"`.
-  58 records have `date_precision` None. Losing them biases the corpus further
-  toward the modern era (already 121 of 155 written battles are 17th-20th c.).
-- **P4. [fixed; reviewed by `bayesian-model-reviewer`]** Cause:
-  per-source bias and noise were nested in battles (every infobox covers one
-  battle) and absorbed each battle's level; junk `total` rows inflated noise; a
-  Normal side prior against a t likelihood called large armies' reports
-  outliers. Fix: a source key gets its own effect only if it covers >= 3
-  battles (`min_battles_per_source_effect`), else type-level bias and sigma
-  (pooled keys write NULL bias); load-time plausibility filter
-  (`reconcilers/plausibility.py`); `z_side` Student-t (`side_prior_nu: 4`);
-  troop-unfillable sides judged on troop rows only and stale estimates
-  cleared; new gates `estimates_not_collapsed` (spread_ratio >= 0.25) and
-  `reports_honoured`. Corpus after the fix (run 12): rhat 1.007, ESS 699; log-sd
-  of estimates 0.51 (was 0.0117), corr with max report 0.76 (was 0.31); Kursk
-  Soviet 427,739 (25k-5.2M); stale and unfillable gates pass;
-  `reports_honoured` 1 of 39 (Waterloo French, component rows); impute not
-  re-run. Deferred review items are in `docs/todo/04-reconcile.md`.
-  Original finding: **Reconcile's real-data estimates ignored the reports.** Converged fit
-  (5000 draws; the default 1000 missed ESS 400 at 359.6), yet all 275 sides lie
-  in 33,798-37,171 (log-sd 0.0117): Kursk Soviet max report 2,500,000 gives
-  36,947; Actium Octavian (report 3,000) 35,069; Gaugamela Achaemenid
-  (1,000,000) 35,440. Corr(ln est, ln max report) 0.31. Every source is
-  `wikipedia_infobox` and 1728 of 1755 lineages are `regime_unlabelled`. The
-  per-side posterior sd (~0.26) is wide while the medians are near-identical,
-  which suggests side effects are shrunk to the corpus level or the likelihood
-  is mis-indexed; undiagnosed. Impute then finds 275 weak sides and 0 battles
-  to condition on (`impute_no_observed_sides`), so the model never runs.
-
-**Wrong output**
-
-- Extract stores sub-components as `branch='total'`: Cannae Rome has `Total:
-  86,400` plus "25,000 Romans", "30,000 allies" as separate totals; Carthage
-  likewise. Ranges become a lower and an upper bound row.
-- Resolve: Hannibal (25 mentions), Julius Caesar (9) and Alexander (4) are
-  `llm_deferred`, so Cannae and Gaugamela credit Hasdrubal or Parmenion. 13
-  well-known people got "no candidate returned" (Schwarzenberg, MacDonald,
-  Grouchy, Platov, Amr ibn al-As); Blücher failed the date gate. Luftwaffe,
-  Stavka and Army Group B became generals. Austerlitz's "Russian Empire" side
-  holds the Austrian commanders. Side polity strings like `"Octavian 's
-  forces"` (stray space).
-- Classify typed Marathon, Malvern Hill, Yom Kippur War and Operation Torch as
-  naval; `field` is never produced (133 of 155 `unknown`).
-- The seed includes wars, not battles ("1948 Arab–Israeli War", "Yom Kippur
-  War"). Trafalgar is not in it.
-- Model design on this data: 154 battles in scope, 108 with no outcome, 33
-  with no creditable side, **13 included, 13 generals**. 216 of 308 side
-  outcomes are blank, so outcome extraction is the next coverage limit after
-  attribution.
-
-**Gates and orchestration**
-
-- Crawl `min_battles_crawled` counts every 200 URL including citations (1986
-  here), so it measures citations, not battles. `wikidata_coverage` 0: a named
-  corpus fetches no Wikidata entities, `data/raw/wikidata` is empty.
-  Citation error rate 0.21 (doi.org 403 x114, 328 read timeouts).
-- The orchestrator's stage retry reruns a fixed-seed sampler, so a
-  non-converged reconcile fails identically twice and doubles the runtime.
-- Reconcile `unfillable_sides_are_logged` 16 while the stage logged 3
-  unfillable (naval-excluded reports likely); `ci_width_reasonable` returns
-  NULL. Classify `missing_data_all_logged` 30 (error). Impute's gates read
-  `data/imputed/neutral/gate_report.json` even under `scale=published`; model
-  rejects `scale=published`.
-- Extract: 11,337 `citation_line_malformed` warnings (cause not found); every
-  re-run writes a new full batch file with identical hashes; 35,277 deferred
-  calls dedupe to 22,591 requests, which is the real extract LLM bill for 211
-  battles (~107 per battle, far above §7's estimate).
-
-**Runtimes**: crawl 7,034 s; extract 128 s; resolve 353 s cold, 140 s with the
-SPARQL cache; reconcile 206 s per attempt at defaults, ~310 s at 5000 draws;
-impute (published) 82 s per attempt.
-
----
-
-## 12. Sweep of pilot and gap-review findings, 2026-10-12
-
-Seven parallel workers (one worktree and one scratch database each,
-`general_war_wt_*`), merged and committed. What a future session needs:
-
-- **Orchestrator**: `--continue-past-deferred` runs later stages on
-  deterministic data after an offline LLM deferral (exit code 3 at the end;
-  the result is provisional). A gate failure retries only with
-  `retry_policy.retry_on_gate_failure: true` (crawl only); reconcile, impute
-  and model have `max_stage_retries: 0` (fixed seed; model retries
-  non-convergence itself, reconcile and impute do not). `--stages all` skips
-  unbuilt stages. Gate thresholds may say `{params.<name>}`; a missing param
-  fails the check. `imputation_gate` reads the run's `params.scale`.
-- **Crawl**: gates read a marker row `crawl-plan://battle-articles?targets=..&fetched=..&entities=..&floor=..`
-  (http_status 0) written to crawl_log at the end of each run; error-rate SQL
-  excludes it. Named corpora fetch each article's Wikidata entity via
-  `Special:EntityData` (robots allows it), Q-id read from the article HTML.
-- **Extract**: arm-of-service figures get their branch, contingents/nationalities
-  `other`; a side with only components gets one derived total marked
-  `is_lower_bound`, `page_or_section='infobox:derived_total'`. Victor matching
-  uses demonym stems plus a small table, still exactly-one-side. Battles are
-  keyed by `battles.source_slug` (the crawl filename stem), so same-name
-  battles stay apart. Offline batch files with identical hash sets are reused.
-  Circa dates are not flagged (`c. 1200 BC` reads as exact) - open.
-- **Resolve**: non-person filter by name pattern and P31; title/particle
-  stripping and a search fallback for zero-candidate names (fixture-tested
-  only, not live); generals get born/died and `*_year_astronomical` columns.
-- **Classify**: `battles.wikipedia_url` (Wikidata/DBpedia form) never matched
-  crawl's hashed filenames, so no article had ever been read; lookup now uses
-  `source_slug`, then title. Naval needs ship vocabulary to dominate. An
-  existing non-`unknown` battle_type is never rewritten, so reset it before
-  re-running classify on an old database. `is_defender` is set only for
-  "Siege of X" where one side names X.
-- **Reconcile**: `data_era` is centred over the unlabelled rows it applies to
-  (reviewed, approved); a non-finite rhat/ESS fails the write gate; withheld
-  sides are logged; `ci_width_reasonable` and the singleton gate measure
-  multi-claim and single-claim sides by `est_troops_method`.
-- **Model**: `scale=published` runs write model types with a `_published`
-  suffix so the neutral ranking stays `MAX(run_id)` of the plain type.
-- **Parallel workers**: give each its own database; three workers once picked
-  the same Alembic revision id, so check `alembic heads` after any merge.

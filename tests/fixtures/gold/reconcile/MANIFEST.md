@@ -35,7 +35,7 @@ By quantity: 42 troops rows, 3 casualties rows (Cannae, Trasimene, Towton). The 
 
 By side role: 21 `enemy_of_author`, 16 `own_side_of_author`, 8 `neutral`.
 
-Faithful rows, defined here as `|log_ratio| < 0.3`: 11 of 45. Six are classical (Cannae troops, Raphia, Pharsalus, Chaeronea, Cynoscephalae, Trasimene casualties), four are 18th-century staff returns (Rossbach, Valmy, Austerlitz, Leuthen), and one is colonial-era (Omdurman). East Asia contributes none. Several rows sit just outside this band and are worth knowing about: Magnesia (0.336), Vienna 1683 (0.357), Naseby (0.375), and the Fall of Constantinople defenders (-0.342, discussed under limitations below) all cluster close to the 0.3 line, so the faithful count is sensitive to exactly where that line is drawn. It is a bucketing device for this manifest, not a boundary the fitted mixture itself uses; the mixture below assigns responsibility continuously.
+Faithful rows, defined here as `|log_ratio| < 0.3`: 11 of 45. Six are classical (Cannae troops, Raphia, Pharsalus, Chaeronea, Cynoscephalae, Trasimene casualties), four are 18th- and early 19th-century staff returns (Rossbach, Leuthen, Valmy, Austerlitz), and one is colonial-era (Omdurman). East Asia contributes none. Several rows sit just outside this band and are worth knowing about: Magnesia (0.336), Vienna 1683 (0.357), Naseby (0.375), and the Fall of Constantinople defenders (-0.342, discussed under limitations below) all cluster close to the 0.3 line, so the faithful count is sensitive to exactly where that line is drawn. It is a bucketing device for this manifest, not a boundary the fitted mixture itself uses; the mixture below assigns responsibility continuously.
 
 ## The measured result
 

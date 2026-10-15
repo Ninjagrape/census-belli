@@ -8,10 +8,11 @@ First slice built (handover-log §20.3, §21). Rules to keep:
 
 - [ ] LLM missingness classification for rows the heuristics leave unclassified
 - [ ] Run the pending multi-commander sides through /process-llm-batch
-- [ ] Per-side defender flag (agents/model.yaml needs it; nothing records it) -- handover-log §20.5
+- [ ] Per-side defender flag beyond sieges: `classifiers/defender.py` sets `is_defender`
+      only for "Siege of X" (handover-log §20.5)
 - [ ] Infobox commander order is lost (the reference file is alphabetical, bc_id is
       insert order); carry infobox and unresolved counts into SideGroup (#8)
-- [ ] Non-person "commanders" (Army Group B, 1st Ukrainian Front): filter in resolve (#9)
+- [x] fixed 2026-10-12: Non-person "commanders" (Army Group B, 1st Ukrainian Front): filter in resolve (#9)
 - [ ] Few-shot prompt cases: Actium, Munda, Mutina, Chaeronea, Salamis, Mongols, Moltke (#10)
 - [ ] Siege per side (siege_defensive), and a campaign/operation type (#12)
 - [ ] Missingness: casualty-specific flags, post-1914 regime suppression rule (#13)
