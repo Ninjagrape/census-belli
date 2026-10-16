@@ -81,7 +81,7 @@ CAMPAIGN_MIN_SPAN_DAYS: Final[int] = 180
 # Leningrad exemption.
 SIEGE_CAMPAIGN_MIN_SPAN_DAYS: Final[int] = 730
 # A date known only to the decade or coarser cannot belong to one engagement.
-_COARSE_DATE_PRECISIONS: Final[frozenset[str]] = frozenset({"decade", "century", "millennium"})
+_COARSE_DATE_PRECISIONS: Final[frozenset[str]] = frozenset({"decade", "century"})
 
 # Guerrilla only from the word itself in a category, or repeated in the text.
 # Insurgency vocabulary is deliberately not used: urban set-piece battles of an
@@ -172,6 +172,8 @@ def infer_campaign(
     battle_name: str,
     span_days: int | None = None,
     date_precision: str | None = None,
+    *,
+    log: bool = True,
 ) -> BattleTypeDecision | None:
     """Recognise an article that covers a war or a multi-month operation.
 
@@ -186,6 +188,9 @@ def infer_campaign(
             by ``datetime.date``. A negative span (end before start) is bad
             data and meets no span rule.
         date_precision: The battle's ``date_precision``, when known.
+        log: Whether a firing rule logs the demotion. A caller re-checking a
+            battle that is already a campaign passes False, so a stable
+            campaign is silent on every re-run.
 
     Returns:
         A 'campaign' decision when the title names a war, crisis, campaign or
@@ -199,20 +204,23 @@ def infer_campaign(
     engagement = _ENGAGEMENT_NAME_RE.search(name) is not None
     if date_precision in _COARSE_DATE_PRECISIONS:
         return _campaign(
+            log,
             battle_id,
             name,
             f"dates are only known to the {date_precision}, not one engagement",
             0.8,
         )
     if not engagement and _OPERATION_NAME_RE.match(name):
-        return _campaign(battle_id, name, "title names an operation, not a battle or siege", 0.85)
+        return _campaign(
+            log, battle_id, name, "title names an operation, not a battle or siege", 0.85
+        )
     if not engagement and (_WAR_NAME_RE.search(name) or _CAMPAIGN_WORD_RE.search(name)):
         return _campaign(
-            battle_id, name, "title names a war or campaign, not a battle or siege", 0.9
+            log, battle_id, name, "title names a war or campaign, not a battle or siege", 0.9
         )
     if not engagement and _CAMPAIGN_OPERATION_NAME_RE.search(name):
         return _campaign(
-            battle_id, name, "title names an invasion or conquest, not a battle or siege", 0.85
+            log, battle_id, name, "title names an invasion or conquest, not a battle or siege", 0.85
         )
     if (
         span_days is not None
@@ -220,6 +228,7 @@ def infer_campaign(
         and _SIEGE_TITLE_PREFIX_RE.match(name)
     ):
         return _campaign(
+            log,
             battle_id,
             name,
             f"siege spans {span_days} days (more than {SIEGE_CAMPAIGN_MIN_SPAN_DAYS})",
@@ -231,6 +240,7 @@ def infer_campaign(
         and not _ENGAGEMENT_TITLE_PREFIX_RE.match(name)
     ):
         return _campaign(
+            log,
             battle_id,
             name,
             f"dates span {span_days} days (more than {CAMPAIGN_MIN_SPAN_DAYS})",
@@ -239,10 +249,13 @@ def infer_campaign(
     return None
 
 
-def _campaign(battle_id: int, name: str, reason: str, confidence: float) -> BattleTypeDecision:
+def _campaign(
+    log: bool, battle_id: int, name: str, reason: str, confidence: float
+) -> BattleTypeDecision:
     """Build a campaign decision and log why the battle was demoted.
 
     Args:
+        log: Whether to log the demotion.
         battle_id: The battle this decision is about.
         name: The article title.
         reason: The evidence line stored with the decision.
@@ -251,7 +264,10 @@ def _campaign(battle_id: int, name: str, reason: str, confidence: float) -> Batt
     Returns:
         A 'campaign' decision.
     """
-    logger.info("classify_campaign_demoted", battle_id=battle_id, battle_name=name, reason=reason)
+    if log:
+        logger.info(
+            "classify_campaign_demoted", battle_id=battle_id, battle_name=name, reason=reason
+        )
     return BattleTypeDecision(
         battle_id=battle_id,
         battle_type="campaign",

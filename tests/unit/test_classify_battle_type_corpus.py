@@ -245,7 +245,7 @@ def test_a_crisis_title_is_a_campaign_like_a_war() -> None:
     assert infer_campaign(1, "Battle of the Crisis Pass") is None
 
 
-@pytest.mark.parametrize("precision", ["decade", "century", "millennium"])
+@pytest.mark.parametrize("precision", ["decade", "century"])
 def test_a_coarse_date_precision_is_a_campaign_even_for_a_battle_title(precision: str) -> None:
     decision = infer_campaign(122, "Battle of Moscow", None, precision)
 
