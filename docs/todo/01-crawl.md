@@ -11,7 +11,7 @@ naval regression against live HTML.
       arsht pilot halts on it. Parameterise per corpus or downgrade for named corpora
 - [x] fixed 2026-10-12: (gap review A5) `SqlCrawlLog.flush` swallows insert errors with no rollback;
       one failure aborts every later flush on Postgres
-- [ ] (gap review A6) crawl stores rendered HTML only, so extract's preferred
+- [x] done 2026-10-15: crawl saves .wikitext via /wiki/<title>?action=raw (robots-allowed): (gap review A6) crawl stores rendered HTML only, so extract's preferred
       `.wikitext` template path never runs on a real crawl
-- [ ] (gap review) `external_datasets` (COW) in sources_seed.yaml never read;
+- [x] done 2026-10-15: stanza removed; citation_depth must be 0 or 1: (gap review) `external_datasets` (COW) in sources_seed.yaml never read;
       `citation_depth` > 1 behaves as 1

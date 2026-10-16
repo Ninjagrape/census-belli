@@ -4,5 +4,5 @@ replaces the MICE/PMM in the original spec. Only the neutral scale writes
 missing_data_log.
 
 - [x] done 2026-10-13: Run on a real corpus (general_war_corpus2; max rhat 1.0092, thin margin)
-- [ ] Propagate reconcile's shared measurement error: export the neutral fit's regime draws (g_unlabelled, a_era) in neutral_draws_run*.npz and carry them through the rounds, so battles in the mixed regime share their error instead of being drawn independently (beta_force uncertainty is understated until then)
+- [x] done 2026-10-15, with m0 co-movement after review: Propagate reconcile's shared measurement error: export the neutral fit's regime draws (g_unlabelled, a_era) in neutral_draws_run*.npz and carry them through the rounds, so battles in the mixed regime share their error instead of being drawn independently (beta_force uncertainty is understated until then)
 - [x] fixed 2026-10-12: (pilot) gates read neutral/gate_report.json under scale=published

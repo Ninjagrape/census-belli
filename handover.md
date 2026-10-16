@@ -8,16 +8,18 @@ a decision or footgun here only if a future session would otherwise get it
 wrong; session narratives, changed-file lists and commit messages do not belong
 here.
 
-`docs/handover-log.md` is the full session-by-session history up to
-2026-10-12 (§25 is the real-corpus pilot, §26 the sweep that fixed it). Code comments cite its section numbers ("handover-log §16.1").
-Do not read it by default; open the cited section when a comment points there.
+`docs/handover-log.md` is the full session-by-session history (§25 the
+real-corpus pilot, §26 the sweep that fixed it, §27 the 2026-10-14..16
+"fix all outstanding items" sessions with every worker's verified numbers).
+Code comments cite its section numbers ("handover-log §16.1"). Do not read it
+by default; open the cited section when a comment points there.
 
-Last updated: 2026-10-15 (documentation audit). `main` is committed through
-6c91f1a (report stage). The real corpus
-passes crawl through evaluate on the CLI (model on 59 of 210 battles until
-classify's LLM slice runs).
-
----
+Last updated: 2026-10-16. `main` is committed through 015bed7 plus the docs
+commit after it: every code item from `docs/todo/` that needed no user
+decision is built, reviewed by `bayesian-model-reviewer` (three passes) and
+`historiography-reviewer` (classify), and verified. On the corpus, crawl,
+extract and resolve have run on the new code; classify's LLM batch and the
+refit from reconcile onward have not (§7).
 
 ## 1. Current state
 
@@ -33,10 +35,20 @@ classify's LLM slice runs).
 | evaluate | yes | **yes** (integration 12, model CV 4) | **runs, 4 of 5 gates pass** (2026-10-14, model run 54): held-out accuracy 0.70, Brier 0.222; named_checks not_evaluable |
 | report | yes (6c91f1a) | **yes** (integration 10, seeded run, no fit) | **runs, all gates pass except `exclusion_concentration`** (by design: output marked provisional, exit 1); 3 headline generals, 58 below `min_battles` |
 
-Counts on `main` at 6c91f1a (2026-10-14): non-model suite 1645 passed, 0
-skipped, ~17.5 min. Model suite per file (2026-10-13): impute_recovery 5, model_recovery
-6, reconcile_contamination 3, reconcile_neutral 5, reconcile_recovery 17 + 1
-xfailed (~11 min alone). Run the model files one per command; a single
+The table's corpus column predates 2026-10-16. Corpus state now
+(`general_war_corpus2`, stamped Alembic `b8c9d0e1f2a3`): extract 236 battles,
+1305 troop reports, 1613 commander mentions; resolve 727 linked, 163 new,
+112 unresolved with 70 requests deferred; classify 562 requests deferred
+(stale until resolve's 70 are answered). Reconcile onward still hold the
+2026-10-14 runs on the old code.
+
+Counts last measured by the lead (2026-10-15, before the final resolve,
+extract and reconcile fixes, each worker-verified since; handover-log §27):
+non-model suite 1984 passed, 0 skipped, ~17 min; model files evaluate_cv 4,
+impute_recovery 5, model_recovery 7, reconcile_contamination 3,
+reconcile_neutral 5 (3 after the final cleanup), reconcile_recovery 18-20 + 1
+strict xfail. **Re-run the full suite on `main` first** (it has not been run
+on the final tree as one). Run the model files one per command; a single
 `tests/model` run exceeds a 10-minute tool timeout.
 
 **Verify before trusting this file:**
@@ -44,10 +56,10 @@ xfailed (~11 min alone). Run the model files one per command; a single
 ```bash
 export DATABASE_URL="postgresql+psycopg://general_war:general_war@127.0.0.1:5432/general_war"
 ruff check pipeline/ tests/ scripts/ alembic/   # expect: All checks passed
-python -m mypy pipeline/                         # expect: Success, 147 source files (strict)
-python -m pytest tests/ -q -m "not live and not model"   # expect: 0 failed, 0 skipped (~1645 passed)
-PYTHONIOENCODING=utf-8 alembic heads             # expect: one head, a7b8c9d0e1f2
-python -m pytest tests/model -m model            # recovery suites; slow (~15 min)
+python -m mypy pipeline/                         # expect: Success, 151 source files (strict)
+python -m pytest tests/ -q -m "not live and not model"   # expect: 0 failed, 0 skipped (~2050 passed)
+PYTHONIOENCODING=utf-8 alembic heads             # expect: one head, b8c9d0e1f2a3
+python -m pytest tests/model/<file>.py -m model  # one file per command; ~30 min in total
 ```
 
 Without `DATABASE_URL` the integration tests skip rather than fail, and a green
@@ -238,6 +250,22 @@ floor. Recurring classes, with the log section that records each:
 - Auto-mode's permission classifier may block a subagent from connecting to
   `general_war_corpus2`; ask the user rather than routing the work through
   another agent.
+- **Agent `isolation: worktree` branches from `origin/main`**, which can lag
+  local `main`. For parallel workers, create worktrees yourself from the right
+  base (`git worktree add -b wip/<name> .claude/worktrees/w-<name> <base>`)
+  and point workers at them. Auto mode refuses copying uncommitted diffs
+  between worktrees; commit to a local throwaway branch instead (the user
+  approved this for 2026-10-14..16).
+- A worktree has no `data/`. A directory junction to the main `data/` works,
+  but **remove it (`cmd /c rmdir`) before `git worktree remove`**.
+- A database built by `apply_schema()` has no `alembic_version`, so
+  `alembic upgrade head` replays every migration from the baseline. They are
+  guarded and converge, but check the data after (`general_war_corpus2` was
+  fine and is now stamped).
+- Never poll another task's output with a shell `until ...; sleep` loop: if
+  that task dies the loop runs forever. Rely on completion notifications.
+- An `llm-batch-worker` can stall on a slow API ("no progress for 600s");
+  relaunch that chunk, `split --skip-answered` makes it safe.
 - `claude-haiku-5-5` thinks unless told not to (handled by the
   `thinking_on_by_default` trait) and cannot take temperature 0.
 
@@ -252,47 +280,45 @@ floor. Recurring classes, with the log section that records each:
 
 ## 7. Next steps, in order
 
-**Do not lower `min_spread_ratio`** (§9.6).
-
-1. **Model stage on the corpus passes its error gates** (2026-10-13, 3000
-   draws in `config/model_default.yaml`, was 1500: ESS 660 < 800). Warnings to
-   work through: `circularity_check` (joint latent beta_force gap 0.276 vs
-   limit 0.224; skill Spearman 1.000, top-50 overlap 46), `top_generals_cross_component`
-   (46 of the top 50 outside the largest component, so their level rests on
-   the shared prior), `exclusion_concentration`, `exclusions_reported`.
-   The corpus model includes only 59 of 210 battles: 77 have no
-   creditable side (every multi-commander side is `default_split` until
-   classify's LLM slice runs) and 74 no outcome. Treat any corpus ranking as a
-   mechanics check, not a result, until step 2 is done.
-2. **Answer the deferred LLM batches** (`data/llm_requests/extract_20261012T095006Z.jsonl`,
-   14,944 requests; `resolve_20261012T095357Z.jsonl`, 146) with
-   `/process-llm-batch`, starting with resolve (small, and it unblocks Hannibal,
-   Caesar, Alexander). Pilot extract on ~10 battles first and measure requests
-   per session. 19,790 of the remaining extract passages are `web_secondary`
-   citations (~94 per battle); whether to keep them is an open cost decision.
-   Then classify's LLM slice (roles; until it runs every multi-commander side is
-   `default_split` and credits nobody).
-3. **Reconcile and impute open items** (`docs/todo/04-reconcile.md`,
-   `06-impute.md`), above all propagating the shared reconcile error into impute.
-   From 2026-10-13: the 6 low-precision troop sides (59, 176, 287, 371, 373,
-   411) are the implausible figures ("2.3M", "3.8M", "754", "300", campaign
-   totals), so the MCSE flag is acting as a scope-error detector; audit them
-   with side 419 (battle 236, four ranges and three points of different scopes)
-   and sides 217, 274, 420 (campaign totals above 1M) at extract. Six-Day War,
-   Yom Kippur War and the 1982 Lebanon War are wars in the battle corpus.
-   Casualties: re-measure pi_contam under `contaminated` now that ranges merge
-   (0.41 before) before reading it as killed/wounded/captured scope variety;
-   a one-sided scope component and a casualty-scope design column are the
-   candidates. Singletons now follow their own report (slope 0.54), so scope
-   errors on the 87% singleton sides are not detectable by the model. Impute
-   passes rhat 1.0092 against 1.01 on hierarchical scales `tau_p`, `tau_c`;
-   another corpus may need more draws.
-4. **Report**: committed (6c91f1a). The model-side WAR interval and
-   P(adjacent order) (§9.11) are built on `wip/outstanding`, not yet on
-   `main`. A real ranking needs step 2 first. Evaluate open items: the calibration
-   gate sits on the imputed CV arm (§9.10); the +/-1 sd `g_unlabelled`
-   sensitivity is on `wip/outstanding` (d91dcbc).
-5. Full-pipeline integration test on fixtures (crawl through model).
+1. **Verify `main`** with the §1 commands, including every model file (the
+   final tree has not been run as one suite).
+2. **Corpus, resolve batch**: `/process-llm-batch
+   data/llm_requests/resolve_20261016T013713Z.jsonl` (70 requests, 5 Haiku
+   chunks; relaunch any chunk whose worker reports "no progress for 600s").
+   Then `python -m pipeline.orchestrator --stages resolve,classify
+   --continue-past-deferred` against `general_war_corpus2`, logging to
+   `data/logs/`. Resolve should defer 0; it is idempotent since 72e86c3.
+3. **Classify batch**: `/process-llm-batch` on the classify file step 2
+   writes (~38 Sonnet chunks, the largest spend left; ask the user's usage
+   first, they cap a session at 70%). Older `classify_*.jsonl` files are
+   stale. Then classify again.
+4. **Investigate classify's `battles_typed: 0`** on the corpus before
+   trusting it: campaign typing should fire on the Six-Day, Yom Kippur and
+   1982 Lebanon wars; an existing non-`unknown` type is never rewritten, so
+   old types from the 2026-10-12 run may be blocking it.
+5. **Refit**: reconcile, impute, model, evaluate, report on the corpus.
+   Reconcile now defaults to ExGaussian bounds and IG(3, 4/3) noise, so
+   compare against run 7's numbers (§1) before reading the ranking. Check the
+   new diagnostics: identified widths, `prior_predictive(_neutral)`,
+   impute's `loading_gap_vs_design`, the model's `defender_term` and
+   `force_groups`.
+6. **Open, not decided** (each needs data or a user call):
+   - Bayesian review leftovers: L8 (`z_skill` carries the common shift that
+     raw skill was dropped from the convergence gate for); L-h (count sides
+     whose weak classification differs between raw and residual covariance
+     on the corpus).
+   - Resolve: stray modern years in groups (Caesar's includes 1948,
+     Hannibal's 2015, likely access dates) keep modern namesakes through the
+     date gate; Lefebvre, Moreau, Bernadotte, Bülow and Wŏn Kyun are not
+     returned by exact label lookup (label search, deferred by §9.3 until a
+     gold set exists); `resolvers/mentions.py` uses `part_of[0]`, which can
+     be a Q-id, as war context.
+   - Model: the recovery Spearman margin is thin (worst 0.825 vs 0.8 over
+     4 seeds); the joint-latent comparator's beta_force sits ~0.15 below truth
+     at 400 battles per era.
+   - The user's calls, unchanged: extract's 14,705 deferred requests and the
+     web_secondary keep/cut decision, the calibration gate's arm, the gold
+     sets, CI on the `origin` remote, the billed API smoke test.
 
 Say explicitly what was and was not verified against a database.
 
@@ -387,6 +413,17 @@ is in the log section cited.
 - Non-person filter by name pattern and P31; title/particle stripping and a
   search fallback for zero-candidate names (fixture-tested only, not live).
   Generals get born/died and `*_year_astronomical` columns.
+- **Candidates are date-gated and ranked before the prompt cap of 8**
+  (`rank_for_prompt`: exact name, date-confirmed, score, sitelinks, Q-id).
+  Capping in the endpoint's Q-id order dropped Julius Caesar and Hannibal
+  Barca from their own lists (log §27).
+- **Prompts must be byte-stable**: the request hash is the cache key, and
+  SPARQL `GROUP_CONCAT` order is arbitrary, so multi-valued fields are sorted
+  before rendering. Unsorted, resolve never converged across re-runs. Resolve
+  renders with `render_template` (single braces); classify uses `str.format`.
+- An LLM `UNCERTAIN` (or a Q-id not offered) is method `llm_uncertain` and the
+  corpus-local general carries `UNCERTAIN_SPLIT_NOTE`; `no_duplicate_generals`
+  excludes those deliberate splits (they count in the warning instead).
 
 ### 9.4 LLM routing (offline-first)
 
@@ -471,9 +508,31 @@ is in the log section cited.
   intervals to pass a gate.
 - The absolute level is set by `b_type`'s zero-sum, so adding a source type
   shifts every absolute figure. It cancels in ratios.
-- One-sided-bound sides are labelled `bound_only`. Pure censoring is too weak
-  for them (the recovery ablation is an xfail); `pm.ExGaussian` is the
-  principled replacement.
+- One-sided-bound sides are labelled `bound_only`. **Lone bounds use
+  `bound_likelihood: exgaussian` by default** (2026-10-16): "up to X" is log y
+  = eta + noise + Exp, "at least X" mirrored; one shared lambda per direction,
+  Gaussian tails (less robust to a mis-extracted bound than the Student-t
+  points). Recovery RMSE 0.30 vs censored 2.14 (lower bounds), 0.33 vs 1.92
+  (upper). `censored` stays an option; the strict xfail ablation and
+  `test_unmerged_range_pairs_inflate_sigma` pin it.
+- Noise prior `sigma_sq_type ~ InverseGamma(3, 4/3)`: finite variance, mode
+  of the old IG(2, 1). IG(3, 2) (mean-preserving) over-shrank two-report
+  sides.
+- A source key has its own effect only if it **co-reports** with another key
+  in >= `min_battles_per_source_effect` battles (S3); tau_u/tau_sigma are
+  hierarchical only with >= 5 own-effect keys (N1); in a type mixing own and
+  pooled keys the deviations are plain Normal and b_type is settled by the
+  deviation prior, so the absolute level depends softly on tau_u's prior
+  (S4; no own-effect keys on the current corpus). A period mean and `a_era`
+  are not separately identified on unlabelled rows (N3).
+- Casualty component ratios vary by side: a non-centred effect per
+  (side, non-reference level).
+- Diagnostics: identified-scale widths use each side's own precision-weighted
+  offset; `n_identifying_sides` counts sides linking a regime to the anchor's
+  connected component; prior predictive checks on the published and neutral
+  fits (a sampler failure fails the warning gate). The neutral npz carries
+  `g_unlabelled`, `a_era`, `offset_bar`, `m0` draws and per-side era and
+  unlabelled share for impute.
 - **A stated range is one point, not two bounds** (2026-10-13). Loading
   "A–B" as a lower and an upper censored row let sigma grow for free (each
   censored probability tends to 0.5 as sigma grows, with no -log sigma term)
@@ -518,15 +577,26 @@ is in the log section cited.
 - `battle_type`: naval from categories, naval troop branches or ship vocabulary
   (bare "squadron" is not enough); siege from name or category; `field` only
   when an article was read with no other signal, otherwise `unknown`. Sieges
-  are written `siege_offensive` + `fortified = TRUE` until a per-side siege flag
-  exists.
+  are written `siege_offensive` + `fortified = TRUE`; `siege_defensive` is never
+  produced, the per-side `is_defender` carries who was besieged. `campaign`
+  (title "War" without Battle/Siege, "Invasion of", "Conquest of", or a span
+  over 180 days unless the title is "Battle of"/"Siege of") wins over every
+  type and is excluded by the model. `amphibious` and `guerrilla` need a lead
+  mention plus density. Terrain is rule-based with false-positive guards.
+- The role prompt carries infobox order, unresolved-commander counts and seven
+  few-shots reviewed by `historiography-reviewer` (alternating consuls are
+  equal co-field commanders). The LLM also answers per-side `is_defender`,
+  written only where the siege-title rule left NULL.
+- Missingness: casualties missing while troops are present is its own rule
+  (MNAR for the loser); a polity-anchored list of 20th-century authoritarian
+  wartime states makes their missing figures MNAR; rows the rules leave
+  unclassified go to the LLM (offline).
 - Missing covariates are classified **MAR**, not MCAR: missingness plausibly
   tracks documentation level.
 - Articles are found by `source_slug`, then title (`battles.wikipedia_url`
   never matched crawl's hashed filenames). An existing non-`unknown`
   battle_type is never rewritten, so reset it before re-running classify on an
-  old database. `is_defender` is set only for "Siege of X" where one side
-  names X.
+  old database (this may be why the 2026-10-16 corpus run typed 0 battles).
 
 ### 9.8 Impute
 
@@ -543,6 +613,14 @@ is in the log section cited.
 - `scale: neutral` is primary and the only scale that writes
   `missing_data_log`; `published` is a sensitivity run. Primary is MAR;
   `mnar_delta` serves evaluate's sensitivity grid. Stale draws files are refused.
+- **Reconcile's shared error is propagated** (2026-10-15): side draws are
+  regressed on theta = (g_unlabelled, a_era); battles are built from the
+  residuals, and each round shifts every likelihood mean by its loading times
+  one stratified (Latin hypercube) theta draw shared by all battles. The
+  shift is carried back through the prior division **with m0's co-movement**
+  (m0 = corpus_level - offset_bar moves with g): B + P^-1 (B - 1 c')/s0^2.
+  Imputed and weak sides co-move through a per-era loading table. Weakness is
+  judged on the raw covariance, so the switch never changes the missing set.
 - Imputing troops as latents inside the Bradley-Terry model is the fully
   congenial alternative; it departs from the spec and is the user's call.
 
@@ -550,7 +628,10 @@ is in the log section cited.
 
 `agents/model.yaml` and `config/model_default.yaml` carry the rationale.
 
-- Two-sided battles only (3+ excluded and counted). Side A is the lower
+- Two-sided battles, plus 3+ side battles whose outcomes split cleanly into
+  two camps (merged; an unnamed member's troop share is a latent component,
+  not credit for named allies); others are excluded and counted, as are
+  `campaign` battles. Side A is the lower
   `side_id`, so **orientation must carry no information**: ordinal logit with
   symmetric cutpoints, and when the two sides' grades disagree the outcome is
   interval-censored. Battle-level terms (`beta_type`, era, terrain) are dropped
@@ -569,9 +650,15 @@ is in the log section cited.
   neutral ranking stays `MAX(run_id)` of the plain type.
 - The circularity comparator is a joint latent fit on per-battle `x_diff`, so
   absolute era levels cannot leak in as fake force ratios.
+- Defender term beta_def * (d_A - d_B), with complement-fill when one side is
+  flagged, built only with >= 10 battles known. `beta_force` is the **land**
+  slope; naval/aerial get a fixed offset `delta_water_air` (a two-group
+  hierarchy left beta_force prior-dominated and loosened the circularity
+  gate). WAR keeps the side's posture and slope. Convergence is gated on
+  `z_skill` and centred skill, not raw skill.
 - **Disclosures the ranking must carry**: cross-era comparison rests on the
   shared skill prior (the comparison graph is disconnected); technology is not
-  modelled; naval and aerial share one population and slope; `total_war` is
+  modelled; naval and aerial share one skill population; `total_war` is
   volume-weighted, so a coverage gap by era is a rank gap; attribution weights
   are fixed data.
 
@@ -636,17 +723,12 @@ is in the log section cited.
   (`export_matches_db`, `evaluation_current`) in evaluate's gate format, read by
   the existing `evaluation_gate` handler through spec param `report_path`, so a
   manifest for an older run fails as stale.
-- **Rank overlap is approximate**: `total_war +/- z*war_sd`, because the model
-  stores no WAR interval or WAR draws. Exported as `war_normal_approx_lo/hi`,
-  disclosed in every output. `bayesian-model-reviewer` (2026-10-14) judged it a
-  poor proxy for ordering: generals' WAR is correlated (shared replacement
-  level, shared battles) and skewed. **Follow-up, built on `wip/outstanding`
-  (998f8e6), not yet on `main`**:
-  in `pool_reductions` (`summarise.py`, `war_by_round` is already there) store
-  `war_ci_lo/hi` via `widen_interval` like skill, and `p_above_next_rank` =
-  mean over pooled draws of WAR_i > WAR_next; persist WAR draws in
-  `pooled_draws.npz`; same in `summarise_single`. Migration + schema.sql,
-  model re-review, corpus refit; then report drops the approximation.
+- **Rank overlap uses the model's WAR draws**: `war_ci_lo/hi` (pooled, widened
+  by Rubin's T like skill) and P(above the next **headline** general),
+  recomputed by report from `pooled_draws.npz`'s `war_draws` over the
+  eligible ordering (unwidened mixture draws, disclosed). The old
+  `total_war +/- z*war_sd` approximation is a fallback for runs without them,
+  disclosed only then.
 - No Jinja (not a declared dependency): `string.Template`. Names from Wikipedia
   are inlined as JSON with `<`, `>`, `&` escaped and rendered via `textContent`.
 - `explorer.html` is ~4.9 MB, almost all inlined plotly.js, so it works offline.
@@ -664,8 +746,13 @@ pass their error gates through the CLI (§1), and evaluate runs with 4 of 5
 gates passing, but every LLM request is still deferred, so the model sees 59 of
 210 battles.
 
-Not proven: any real corpus producing a ranking, the offline batch path on a real
-request file (`/process-llm-batch` has never run), any billed API call
+The offline batch path now works on real request files: resolve's batches
+(140, 88 and follow-ups) were answered by `/process-llm-batch`, imported and
+served from the cache, and resolve converges on the corpus. Everything built
+2026-10-14..16 is tested on fixtures and synthetic data, not yet on a corpus
+refit from reconcile onward.
+
+Not proven: any real corpus producing a ranking, classify's LLM batch, any billed API call
 (refusal and truncation branches untested), CI on the current `main`
 (`origin` exists; no session has checked a run), and every gate threshold,
 which has only run against fixture databases and the real corpus (§1). The gold sets are agent-built and unreviewed by a human. Evaluate runs

@@ -21,9 +21,9 @@
 - [x] Static report output (markdown + figures for the README/blog)
 - [x] CSV/JSON export of final rankings
 - [x] Integration test `tests/integration/test_report.py` (seeded run, no fit)
-- [ ] Rank overlap uses total_war +/- z*war_sd (normal approximation, exported as
+- [x] done 2026-10-16: war_ci_lo/hi and P(above next headline general) from pooled WAR draws: Rank overlap uses total_war +/- z*war_sd (normal approximation, exported as
       war_normal_approx_lo/hi, disclosed). Deferred by the user: model writes war_ci_lo/hi and
       P(rank i above next) from pooled WAR draws (handover §9.11); schema change + model re-run
 - [x] Explorer polish: empty space under the overlap chart; low-contrast chart text in dark mode
-- [ ] Evaluate's report omits gate severity; report reads it from agents/evaluate.yaml. Cleaner:
+- [x] done 2026-10-15: evaluate writes severity: Evaluate's report omits gate severity; report reads it from agents/evaluate.yaml. Cleaner:
       evaluate writes `severity` into each gate entry

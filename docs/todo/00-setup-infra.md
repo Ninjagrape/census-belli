@@ -30,7 +30,7 @@ Standing rules worth knowing before changing these:
       thresholds not
 - [ ] tests/fixtures/gold/: 20 hand-labelled battles for /extraction-eval
       (also unblocks /test-stage extract and classify)
-- [ ] Implement evaluate's non-SQL quality check methods (brier_score,
+- [x] done 2026-10-15: evaluation_gate covers them; posterior_check removed: Implement evaluate's non-SQL quality check methods (brier_score,
       jaccard_overlap, held_out_accuracy). posterior_check is unused and can be dropped.
 - [x] (pilot P1) fixed 2026-10-11: orchestrator `run_stage` calls `run(spec)` with no StageContext, so
       extract and resolve write nothing from the CLI. Pass a context with the
@@ -41,6 +41,6 @@ Standing rules worth knowing before changing these:
       complete_with_warnings policy does not prevent the halt). Skip unbuilt
       stages loudly or leave them out of `all` until built
 - [ ] (gap review) no end-to-end integration test chains crawl through model
-- [ ] (gap review A18) unused deps (cmdstanpy, polars, click, tqdm,
+- [x] done 2026-10-15: cmdstanpy, SPARQLWrapper, polars, click, tqdm removed; numpy declared; lock regenerated: (gap review A18) unused deps (cmdstanpy, polars, click, tqdm,
       SPARQLWrapper; matplotlib is used by evaluate and report); numpy undeclared; llm_fallback_* and
       log_all_llm_calls are read by nothing

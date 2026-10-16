@@ -24,10 +24,10 @@ Built; every SQL write verified against Postgres. Decisions to keep:
       fields_extracted, which nothing writes, so it can never fail. Rewrite it
 - [x] fixed 2026-10-12: (gap review A4) battles are looked up by name with LIMIT 1 here and in resolve's
       `load_battle_index`; same-name battles collapse. Key on slug or source URL
-- [ ] (gap review A3) `part_of` is extracted but no wars/campaigns rows are written,
+- [x] done 2026-10-14: wars/campaigns rows and battle links written: (gap review A3) `part_of` is extracted but no wars/campaigns rows are written,
       so battles.war_id / campaign_id are always NULL
 - [x] fixed 2026-10-12: (gap review A7) a `--limit` run rewrites data/processed/*.jsonl with a subset
 - [x] fixed 2026-10-12: (gap review) llm_calls.battle_id always NULL (battle_id not passed to the LLM pass);
       sources.url holds local file paths for infobox/wikidata/dbpedia sources
-- [ ] Circa dates carry no flag: "c. 1200 BC" reads as exact; "1-3 May c. 1450 BC" gives a wrong range; "late 1250s BC", "1805 or 1806" return None
+- [x] done 2026-10-14: battles.date_circa: Circa dates carry no flag: "c. 1200 BC" reads as exact; "1-3 May c. 1450 BC" gives a wrong range; "late 1250s BC", "1805 or 1806" return None
 - [ ] 19,790 web_secondary citation passages (~94 per battle) remain after dedupe (projected 76 requests per battle); keep or cut is a cost decision

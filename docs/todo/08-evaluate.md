@@ -3,7 +3,7 @@
 - [x] Brier score / calibration plot (favourite frame; side A wins 79% on the corpus)
 - [x] Posterior predictive checks (by era, battle type, per-general win rate)
 - [x] Sensitivity analysis runner
-  - [ ] g_unlabelled +/- 1 sd sensitivity on the neutral estimates (bounds the shared reconcile error impute does not propagate, see agents/impute.yaml); needs reconcile regime draws exported
+  - [x] done 2026-10-15: regime_shift variants (impute now also propagates the shared error): g_unlabelled +/- 1 sd sensitivity on the neutral estimates (bounds the shared reconcile error impute does not propagate, see agents/impute.yaml); needs reconcile regime draws exported
   - [x] Refit with each variant from agents/evaluate.yaml
   - [x] New variants from the model review: exclude_extreme_ratio, three_level_outcome, realised_war ranking, equal_attribution consuming default_split sides at 1/n
 - [x] Sensitivity refits must not take MAX(run_id) away from the published run (evaluate writes no model_runs rows)

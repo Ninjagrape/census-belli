@@ -256,4 +256,4 @@ retry_policy:
     - "Increase sampler.draws and sampler.tune in config/model_default.yaml"
     - "Look for near-separation: generals with 0% or 100% win rate and few battles"
     - "Check components.json for a weakly connected component"
-    - "Switch to CmdStanPy with adapt_delta=0.95"
+    - "Raise sampler.retry_target_accept above 0.95 (CmdStanPy is no longer a dependency)"
