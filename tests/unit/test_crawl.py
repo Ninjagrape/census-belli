@@ -1457,3 +1457,147 @@ def test_project_spec_floor_defaults_to_thousands() -> None:
     spec = yaml.safe_load(Path("agents/crawl.yaml").read_text(encoding="utf-8"))
 
     assert crawl_stage.CrawlParams.from_spec(spec).min_battle_articles == 3000
+
+
+@pytest.mark.parametrize("depth", [2, 3, -1, 0.5, "1", True, None])
+def test_citation_depth_other_than_zero_or_one_is_rejected(tmp_path: Path, depth: Any) -> None:
+    """Deeper hops are not implemented, so they fail instead of acting as 1."""
+    with pytest.raises(crawl_stage.CrawlConfigError, match="citation_depth"):
+        crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path, citation_depth=depth))
+
+
+@pytest.mark.parametrize("depth", [0, 1])
+def test_citation_depth_zero_and_one_are_accepted(tmp_path: Path, depth: int) -> None:
+    params = crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path, citation_depth=depth))
+
+    assert params.citation_depth == depth
+
+
+def test_fetch_wikitext_defaults_to_true(tmp_path: Path) -> None:
+    assert crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path)).fetch_wikitext is True
+    off = crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path, fetch_wikitext=False))
+    assert off.fetch_wikitext is False
+
+
+def test_wikitext_url_uses_the_robots_allowed_wiki_path() -> None:
+    url = "https://en.wikipedia.org/wiki/Battle_of_Cannae"
+
+    assert wikipedia.wikitext_url(url) == f"{url}?action=raw"
+    assert wikipedia.wikitext_url(f"{url}?x=1") == f"{url}?x=1&action=raw"
+
+
+WIKITEXT_BODY = "{{Infobox military conflict\n| conflict = Battle of Cannae\n}}"
+
+
+def wikitext_handler() -> Any:
+    """Serve the crawl fixtures plus wikitext for ``?action=raw``, as Wikipedia does."""
+    base = crawl_handler()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "en.wikipedia.org" and request.url.params.get("action") == "raw":
+            base.seen.append(str(request.url))
+            return httpx.Response(200, text=WIKITEXT_BODY)
+        return base(request)  # type: ignore[no-any-return]
+
+    handler.seen = base.seen  # type: ignore[attr-defined]
+    return handler
+
+
+@sync
+async def test_crawl_stores_wikitext_beside_the_html(tmp_path: Path) -> None:
+    """Each fetched article gets a same-stem .wikitext file for extract to prefer."""
+    write_seed(tmp_path)
+    params = crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path))
+    params.paths.ensure()
+    handler = wikitext_handler()
+
+    async with make_client(handler) as client:
+        summary = await crawl_stage.crawl(
+            params,
+            seeds.load_seeds(params.seed_path),
+            state.CrawlState(),
+            InMemoryCrawlLog(),
+            client=client,
+            limit=2,
+        )
+
+    htmls = sorted(params.paths.battles_html.glob("*.html"))
+    wikitexts = sorted(params.paths.battles_html.glob("*.wikitext"))
+    assert summary.wikitext_fetched == 2
+    assert summary.failures == 0
+    assert [p.stem for p in wikitexts] == [p.stem for p in htmls]
+    assert all(p.read_text(encoding="utf-8") == WIKITEXT_BODY for p in wikitexts)
+    assert not any("/w/" in url for url in handler.seen if "wikipedia.org" in url)
+
+
+@sync
+async def test_a_second_run_does_not_refetch_wikitext(tmp_path: Path) -> None:
+    write_seed(tmp_path)
+    params = crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path))
+    params.paths.ensure()
+    loaded = seeds.load_seeds(params.seed_path)
+    crawl_state = state.CrawlState()
+    handler = wikitext_handler()
+
+    async with make_client(handler) as client:
+        await crawl_stage.crawl(
+            params, loaded, crawl_state, InMemoryCrawlLog(), client=client, limit=2
+        )
+        first = sum("action=raw" in url for url in handler.seen)
+        second = await crawl_stage.crawl(
+            params, loaded, crawl_state, InMemoryCrawlLog(), client=client, limit=0
+        )
+
+    assert first == 2
+    assert second.wikitext_fetched == 0
+    assert sum("action=raw" in url for url in handler.seen) == 2
+
+
+@sync
+async def test_wikitext_is_not_fetched_when_disabled(tmp_path: Path) -> None:
+    write_seed(tmp_path)
+    params = crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path, fetch_wikitext=False))
+    params.paths.ensure()
+    handler = wikitext_handler()
+
+    async with make_client(handler) as client:
+        summary = await crawl_stage.crawl(
+            params,
+            seeds.load_seeds(params.seed_path),
+            state.CrawlState(),
+            InMemoryCrawlLog(),
+            client=client,
+            limit=1,
+        )
+
+    assert summary.wikitext_fetched == 0
+    assert not list(params.paths.battles_html.glob("*.wikitext"))
+    assert not any("action=raw" in url for url in handler.seen)
+
+
+@sync
+async def test_a_failed_wikitext_fetch_leaves_the_html_usable(tmp_path: Path) -> None:
+    write_seed(tmp_path)
+    params = crawl_stage.CrawlParams.from_spec(crawl_spec(tmp_path, max_retries=0))
+    params.paths.ensure()
+    base = crawl_handler()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("action") == "raw":
+            return httpx.Response(404, text="gone")
+        return base(request)  # type: ignore[no-any-return]
+
+    async with make_client(handler) as client:
+        summary = await crawl_stage.crawl(
+            params,
+            seeds.load_seeds(params.seed_path),
+            state.CrawlState(),
+            InMemoryCrawlLog(),
+            client=client,
+            limit=1,
+        )
+
+    assert summary.battles_fetched == 1
+    assert summary.wikitext_fetched == 0
+    assert len(list(params.paths.battles_html.glob("*.html"))) == 1
+    assert not list(params.paths.battles_html.glob("*.wikitext"))

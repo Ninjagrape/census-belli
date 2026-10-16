@@ -161,7 +161,11 @@ class CrawlParams:
         respect_robots: Whether robots.txt is consulted.
         user_agent: Sent on every request.
         citation_allow_domains: Domains whose citations may be fetched.
-        citation_depth: Hops from a battle article. 0 disables citations.
+        citation_depth: 0 disables citations; 1 fetches the allow-listed
+            citations of each battle article. Deeper hops are not implemented
+            and are rejected.
+        fetch_wikitext: Whether to fetch each article's wikitext beside its
+            HTML, so extract reads infobox templates instead of rendered HTML.
         fetch_dbpedia: Whether to fetch the DBpedia twin of each article.
         fetch_battle_entities: Whether to fetch each article's own Wikidata
             item.
@@ -182,6 +186,7 @@ class CrawlParams:
     user_agent: str
     citation_allow_domains: tuple[str, ...]
     citation_depth: int
+    fetch_wikitext: bool
     fetch_dbpedia: bool
     fetch_battle_entities: bool
     max_wikidata_entities: int
@@ -234,7 +239,8 @@ class CrawlParams:
             respect_robots=bool(params["respect_robots"]),
             user_agent=user_agent,
             citation_allow_domains=tuple(allow_domains),
-            citation_depth=int(params.get("citation_depth", 1)),
+            citation_depth=_citation_depth(params.get("citation_depth", 1)),
+            fetch_wikitext=bool(params.get("fetch_wikitext", True)),
             fetch_dbpedia=bool(params.get("fetch_dbpedia", True)),
             fetch_battle_entities=bool(params.get("fetch_battle_entities", True)),
             max_wikidata_entities=int(
@@ -302,6 +308,28 @@ def _as_int(params: dict[str, Any], key: str) -> int:
     return int(_as_float(params, key))
 
 
+def _citation_depth(value: Any) -> int:
+    """Validate the ``citation_depth`` param.
+
+    Args:
+        value: The raw param value.
+
+    Returns:
+        0 or 1.
+
+    Raises:
+        CrawlConfigError: For anything else. The crawler only follows citations
+            one hop from a battle article, so a larger depth would silently
+            behave as 1.
+    """
+    if isinstance(value, bool) or value not in (0, 1):
+        raise CrawlConfigError(
+            f"citation_depth must be 0 (no citations) or 1 (one hop); got {value!r}. "
+            "Deeper citation hops are not implemented."
+        )
+    return int(value)
+
+
 @dataclass
 class CrawlSummary:
     """What a crawl run accomplished.
@@ -315,6 +343,7 @@ class CrawlSummary:
         dbpedia_fetched: DBpedia resources fetched.
         wikidata_queries: SPARQL queries that returned results.
         wikidata_entities: Wikidata entity documents fetched.
+        wikitext_fetched: Article wikitext sources fetched this run.
         battle_entities: Battle articles whose own Wikidata item is on disk
             after this run, fetched now or earlier.
         failures: Fetch attempts that yielded no usable body.
@@ -329,6 +358,7 @@ class CrawlSummary:
     wikidata_queries: int = 0
     wikidata_entities: int = 0
     battle_entities: int = 0
+    wikitext_fetched: int = 0
     failures: int = 0
     failed_urls: list[str] = field(default_factory=list)
 
@@ -348,6 +378,7 @@ class CrawlSummary:
             "wikidata_queries": self.wikidata_queries,
             "wikidata_entities": self.wikidata_entities,
             "battle_entities": self.battle_entities,
+            "wikitext_fetched": self.wikitext_fetched,
             "failures": self.failures,
         }
 
@@ -541,6 +572,46 @@ async def _crawl_battles(
             save_state(state, params.paths.state_file)
             writer.flush()
             logger.info("crawl_progress", done=index, of=len(pending), **summary.as_log_fields())
+
+
+async def _crawl_wikitext(
+    fetcher: Fetcher,
+    params: CrawlParams,
+    state: CrawlState,
+    writer: CrawlLogWriter,
+    summary: CrawlSummary,
+    limit: int | None,
+) -> None:
+    """Fetch the wikitext of every fetched battle article that lacks it.
+
+    A separate pass, like the entity pass, so articles fetched by an earlier run
+    (HTML only) are back-filled. A failed wikitext fetch costs the article
+    nothing: extract falls back to its HTML.
+
+    Args:
+        fetcher: The configured fetcher.
+        params: Validated stage params.
+        state: Resume state, updated in place.
+        writer: The crawl_log sink.
+        summary: Counters for this run.
+        limit: Fetch at most this many wikitext sources this run.
+    """
+    fetched_now = 0
+    for battle_url in state.battle_urls:
+        if not state.is_fetched(battle_url):
+            continue
+        if state.is_fetched(wikipedia_mod.wikitext_url(battle_url)):
+            continue
+        if limit is not None and fetched_now >= limit:
+            break
+        result = await wikipedia_mod.fetch_wikitext(fetcher, battle_url)
+        if _record(writer, state, summary, result) and result.text is not None:
+            wikipedia_mod.write_wikitext(params.paths.battles_html, battle_url, result.text)
+            fetched_now += 1
+            if fetched_now % _STATE_SAVE_EVERY == 0:
+                save_state(state, params.paths.state_file)
+    summary.wikitext_fetched = fetched_now
+    logger.info("wikitext_done", fetched=fetched_now)
 
 
 async def _crawl_battle_entities(
@@ -752,6 +823,10 @@ async def crawl(
 
         await _crawl_battles(fetcher, params, state, writer, summary, limit)
         save_state(state, params.paths.state_file)
+
+        if params.fetch_wikitext:
+            await _crawl_wikitext(fetcher, params, state, writer, summary, limit)
+            save_state(state, params.paths.state_file)
 
         if params.fetch_battle_entities:
             await _crawl_battle_entities(fetcher, params, state, writer, summary, limit)

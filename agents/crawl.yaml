@@ -9,7 +9,7 @@ inputs:
   - data/raw/crawl_state.json       # resume state from previous run (if any)
 
 outputs:
-  - data/raw/battles_html/          # one .html per battle article
+  - data/raw/battles_html/          # one .html per battle article, plus .wikitext
   - data/raw/wikidata/              # one .json per Wikidata entity
   - data/raw/dbpedia/               # one .json per DBpedia resource
   - data/raw/citations/             # fetched citation URLs, keyed by battle
@@ -32,8 +32,15 @@ params:
   backoff_base: 2.0
   respect_robots: true
   user_agent: "GeneralWAR/0.1 (academic research; contact@example.com)"
-  # crawl depth: how many citation hops from a battle article
+  # Citation hops from a battle article. Only 0 (no citations) and 1 (the
+  # allow-listed citations of each article) are implemented; any other value is
+  # rejected at param parsing rather than silently behaving as 1.
   citation_depth: 1
+  # Fetch each article's wikitext beside its HTML (*.wikitext in battles_html/)
+  # from /wiki/<title>?action=raw. robots.txt disallows /w/ and /api/ for all
+  # agents but allows /wiki/, so this goes through the robots-checked fetch.
+  # Extract prefers the .wikitext sibling when present.
+  fetch_wikitext: true
   # Fewest battle articles a list-page crawl must fetch (min_battles_crawled).
   # Not applied to a named corpus (wikipedia_battle_articles with no lists).
   min_battle_articles: 3000

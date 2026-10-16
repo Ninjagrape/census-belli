@@ -1,4 +1,6 @@
 # Seed URLs for the crawl stage.
+# External structured datasets (e.g. Correlates of War) are out of scope for v1;
+# nothing reads them, so they are not listed here.
 # These are the Wikipedia "Lists of battles" category pages that serve as
 # the entry point for discovering individual battle articles.
 
@@ -66,16 +68,3 @@ wikidata_queries:
       SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul" . }
     }
     LIMIT 100000
-
-# Structured external datasets to ingest
-external_datasets:
-  # Correlates of War project
-  - name: cow_interstate_wars
-    url: https://correlatesofwar.org/data-sets/COW-war/
-    format: csv
-    notes: "Interstate wars 1816-2007; provides belligerent troop counts"
-
-  # Wikipedia category pages for additional coverage
-  - name: wikipedia_sieges
-    url: https://en.wikipedia.org/wiki/Category:Sieges
-    type: category_crawl

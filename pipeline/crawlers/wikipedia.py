@@ -32,12 +32,15 @@ __all__ = [
     "dedupe_key",
     "dedupe_urls",
     "fetch_article",
+    "fetch_wikitext",
     "is_battle_title",
     "normalise_url",
     "parse_battle_links",
     "read_article",
     "title_from_url",
+    "wikitext_url",
     "write_article",
+    "write_wikitext",
 ]
 
 logger = structlog.get_logger()
@@ -334,6 +337,66 @@ async def fetch_article(fetcher: Fetcher, url: str) -> FetchResult:
     if not result.ok:
         logger.info("article_fetch_failed", url=url, status=result.status, error=result.error)
     return result
+
+
+def wikitext_url(article_url: str) -> str:
+    """Return the URL that serves an article's raw wikitext.
+
+    ``/wiki/<title>?action=raw`` is used rather than ``/w/index.php`` or the
+    Action API because robots.txt disallows ``/w/`` and ``/api/`` for all
+    agents, while ``/wiki/`` paths are allowed, so the ordinary robots-checked
+    fetch applies.
+
+    Args:
+        article_url: The article URL.
+
+    Returns:
+        The article URL with ``action=raw`` appended.
+    """
+    separator = "&" if "?" in article_url else "?"
+    return f"{article_url}{separator}action=raw"
+
+
+async def fetch_wikitext(fetcher: Fetcher, article_url: str) -> FetchResult:
+    """Fetch one article's wikitext, honouring robots.txt and rate limits.
+
+    Args:
+        fetcher: The configured fetcher.
+        article_url: The article URL.
+
+    Returns:
+        The fetch result, successful or not.
+    """
+    result = await fetcher.fetch(wikitext_url(article_url))
+    if not result.ok:
+        logger.info(
+            "wikitext_fetch_failed", url=article_url, status=result.status, error=result.error
+        )
+    return result
+
+
+def write_wikitext(directory: Path | str, url: str, wikitext: str) -> Path:
+    """Write an article's wikitext beside its HTML.
+
+    The filename shares the HTML's stem, which is how extract pairs them and
+    prefers the ``.wikitext`` sibling.
+
+    Args:
+        directory: Target directory, created if absent.
+        url: The article URL (not the ``action=raw`` URL).
+        wikitext: The raw wikitext.
+
+    Returns:
+        The path written.
+
+    Raises:
+        OSError: If the file cannot be written.
+    """
+    target = Path(directory)
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / article_filename(url, suffix=".wikitext")
+    path.write_text(wikitext, encoding="utf-8")
+    return path
 
 
 def write_article(directory: Path | str, url: str, html: str) -> Path:
