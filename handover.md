@@ -10,16 +10,16 @@ here.
 
 `docs/handover-log.md` is the full session-by-session history (§25 the
 real-corpus pilot, §26 the sweep that fixed it, §27 the 2026-10-14..16
-"fix all outstanding items" sessions with every worker's verified numbers).
+"fix all outstanding items" sessions with every worker's verified numbers,
+§28 the 2026-10-16 corpus repair and classify batch).
 Code comments cite its section numbers ("handover-log §16.1"). Do not read it
 by default; open the cited section when a comment points there.
 
-Last updated: 2026-10-16. `main` is committed through 015bed7 plus the docs
-commit after it: every code item from `docs/todo/` that needed no user
-decision is built, reviewed by `bayesian-model-reviewer` (three passes) and
-`historiography-reviewer` (classify), and verified. On the corpus, crawl,
-extract and resolve have run on the new code; classify's LLM batch and the
-refit from reconcile onward have not (§7).
+Last updated: 2026-10-16 (evening). `main` holds the 2026-10-16 corpus-repair
+commit (fixes A-E in §7). On the corpus, extract through impute have run on
+it and the classify LLM batch is answered; a `historiography-reviewer` pass
+then found the corpus **not fit for a refit** (§7). The next session builds
+the Phase 1 root-cause fixes and the Phase 2 overrides file.
 
 ## 1. Current state
 
@@ -36,20 +36,22 @@ refit from reconcile onward have not (§7).
 | report | yes (6c91f1a) | **yes** (integration 10, seeded run, no fit) | **runs, all gates pass except `exclusion_concentration`** (by design: output marked provisional, exit 1); 3 headline generals, 58 below `min_battles` |
 
 The table's corpus column predates 2026-10-16. Corpus state now
-(`general_war_corpus2`, stamped Alembic `b8c9d0e1f2a3`): extract 236 battles,
-1305 troop reports, 1613 commander mentions; resolve 727 linked, 163 new,
-112 unresolved with 70 requests deferred; classify 562 requests deferred
-(stale until resolve's 70 are answered). Reconcile onward still hold the
-2026-10-14 runs on the old code.
+(`general_war_corpus2`, Alembic `c9d0e1f2a3b4`): 236 battles, 210 with exactly
+2 sides (26 are 0-side shells, see §7); resolve 784 linked, 43 unresolved,
+0 deferred; reconcile passes every error gate (spread 0.65; warnings:
+prior_predictive 0.062 vs 0.05, calibration set empty); classify 0 deferred,
+attribution llm 267 sides / rule_single 133 / default_split 17; impute run 57
+(rhat 1.004, ESS 1375, 156 of 420 sides imputed). A model fit was started on
+this state as a diagnostic only (`data/logs/corpus2_model_20261016.log`); its
+ranking is not valid (§7).
 
-Counts last measured by the lead (2026-10-15, before the final resolve,
-extract and reconcile fixes, each worker-verified since; handover-log §27):
-non-model suite 1984 passed, 0 skipped, ~17 min; model files evaluate_cv 4,
-impute_recovery 5, model_recovery 7, reconcile_contamination 3,
-reconcile_neutral 5 (3 after the final cleanup), reconcile_recovery 18-20 + 1
-strict xfail. **Re-run the full suite on `main` first** (it has not been run
-on the final tree as one). Run the model files one per command; a single
-`tests/model` run exceeds a 10-minute tool timeout.
+Counts last measured by the lead (2026-10-16, `main` with fixes A-E):
+non-model suite **2071 passed, 0 skipped**, ~12-18 min
+(`data/logs/main_nonmodel_suite_20261016e.log`); model files (measured before
+A-E, which touch none of them) evaluate_cv 4, impute_recovery 5,
+model_recovery 7, reconcile_contamination 3, reconcile_neutral 5,
+reconcile_recovery 19 + 1 strict xfail. Run the model files one per command;
+a single `tests/model` run exceeds a 10-minute tool timeout.
 
 **Verify before trusting this file:**
 
@@ -262,6 +264,10 @@ floor. Recurring classes, with the log section that records each:
   `alembic upgrade head` replays every migration from the baseline. They are
   guarded and converge, but check the data after (`general_war_corpus2` was
   fine and is now stamped).
+- **Re-running a corpus stage means re-running everything after it, in
+  order: extract, resolve, reconcile, classify, impute.** Extract rewrites
+  sides and missing_data_log; classify without a fresh reconcile logs false
+  troop gaps (2026-10-16, fixes B and D).
 - Never poll another task's output with a shell `until ...; sleep` loop: if
   that task dies the loop runs forever. Rely on completion notifications.
 - An `llm-batch-worker` can stall on a slow API ("no progress for 600s");
@@ -280,29 +286,108 @@ floor. Recurring classes, with the log section that records each:
 
 ## 7. Next steps, in order
 
-1. **Verify `main`** with the §1 commands, including every model file (the
-   final tree has not been run as one suite).
-2. **Corpus, resolve batch**: `/process-llm-batch
-   data/llm_requests/resolve_20261016T013713Z.jsonl` (70 requests, 5 Haiku
-   chunks; relaunch any chunk whose worker reports "no progress for 600s").
-   Then `python -m pipeline.orchestrator --stages resolve,classify
-   --continue-past-deferred` against `general_war_corpus2`, logging to
-   `data/logs/`. Resolve should defer 0; it is idempotent since 72e86c3.
-3. **Classify batch**: `/process-llm-batch` on the classify file step 2
-   writes (~38 Sonnet chunks, the largest spend left; ask the user's usage
-   first, they cap a session at 70%). Older `classify_*.jsonl` files are
-   stale. Then classify again.
-4. **Investigate classify's `battles_typed: 0`** on the corpus before
-   trusting it: campaign typing should fire on the Six-Day, Yom Kippur and
-   1982 Lebanon wars; an existing non-`unknown` type is never rewritten, so
-   old types from the 2026-10-12 run may be blocking it.
-5. **Refit**: reconcile, impute, model, evaluate, report on the corpus.
-   Reconcile now defaults to ExGaussian bounds and IG(3, 4/3) noise, so
-   compare against run 7's numbers (§1) before reading the ranking. Check the
-   new diagnostics: identified widths, `prior_predictive(_neutral)`,
-   impute's `loading_gap_vs_design`, the model's `defender_term` and
-   `force_groups`.
-6. **Open, not decided** (each needs data or a user call):
+**2026-10-16 fixes, committed** (each reviewed, tested, suite green):
+- **A. battle_type provenance**: `battles.battle_type_source`
+  ('extract'|'classify', migration `c9d0e1f2a3b4`). Classify's "inferred"
+  note used to live in `missing_data_log`, which extract rewrites per battle,
+  so rule types froze. No backfill: a pre-existing rule type with NULL source
+  is never revisited (reset it to 'unknown'). Populated covariate rows that
+  extract re-logs are marked observed and kept out of missingness requests
+  (stage and offline export share one helper).
+- **B. stale `battle_sides`**: extract keyed sides by label and never deleted
+  old ones (69 of 210 corpus battles had 3-6 sides; **the 2026-10-14 refit ran
+  on this**). Extract now deletes a battle's sides it did not write this run,
+  with dependents, only when it wrote >= 1 side; keeps a stale side holding
+  `llm_extraction` rows while an LLM pass is deferred; never adopts a QID
+  owned by another slug; skips cleanup for a battle written twice in one run.
+  A relabel deletes resolve's links on that side: **re-run resolve onward
+  after extract.**
+- **C. orphan generals**: resolve prunes generals no row references, as its
+  last write before the gates.
+- **D. stage order**: **extract, resolve, reconcile, classify.** Classify run
+  without a fresh reconcile logs `troop_total` "no reconciled troop estimate"
+  on every side whose estimate went missing (impute selects targets from this
+  log). Reconcile now deletes those classify rows for sides it estimates.
+- **E. DBpedia dates**: `dbp:date` can be a citation's archive date
+  (Herdonia 210 BC became 2015-12-19) or lose the era (Dyrrhachium 48 BC
+  became 1948). The merger rejects a DBpedia date more than a year from the
+  infobox's, and replaces any chosen date that contradicts an explicit year in
+  the title.
+
+Corpus snapshot from before the side repair:
+`data/backups/general_war_corpus2_20261016_pre_side_repair.dump`. Classify
+batch `classify_20261016T062311Z` (399/400) and the follow-ups are imported;
+every stage answers from the cache.
+
+**`historiography-reviewer` verdict on the classified corpus: not fit for a
+refit.** Attribution logic is mostly sound; the data feeding it is not. The
+user chose: root-cause fixes first (Phase 1), then a reviewed overrides file
+for what remains (Phase 2), then refit.
+
+1. **Phase 1, root causes** (independent; parallel workers in their own
+   worktrees from `main`, each with its own database; §5):
+   - **R1 outcomes (largest)**: 70 of 204 decided non-campaign battles have no
+     outcome on either side and are dropped (`battles_no_outcome`): Waterloo
+     168, Leipzig 104, Borodino 38, Jena 94, Acre 216, Gettysburg 78,
+     Chancellorsville 56, Fredericksburg 71, Shiloh 145, Issus 93, Granicus
+     183, Chaeronea 50, Marathon 113, Artemisium 22, Second El Alamein 211.
+     Napoleon loses 15 battles (5 defeats), Lee about 15. Cause: infobox
+     result text ("Coalition victory", "Union victory") is not mapped onto
+     side labels ("United States"). Decided: deterministic mapping (polity
+     aliases, coalition/allied/union terms, named belligerents) in extract,
+     then a targeted offline Sonnet request for battles still without an
+     outcome (new request kind, a few dozen requests via
+     `/process-llm-batch`). The user ruled out answering extract's 14,705
+     deferred requests for this.
+   - **R2 resolve lifespan guard**: reject a mention whose battle year is
+     after the person's death or before birth+15, per mention, and split a
+     name group whose years exceed one lifetime. Would catch 13 of 17 date
+     conflicts: Munda 45 BC linked to Pompey the Great (d. 48 BC); Ticinus
+     157 side 282 Scipio Nasica Q453860 (b. 228 BC) at 1.0 for P. Cornelius
+     Scipio cos. 218; Trebia 195 side 351 Sempronius Tuditanus for Ti.
+     Sempronius Longus; "Charles of Lorraine" Q3659993 (1684-1751) at
+     Chotusitz 58, Soor 149, Prague 177 for Charles Alexander (1712-80);
+     Bellegarde Q110721608 (b. 1798) at Aspern and Wagram; Prince Henry
+     Q457386 (b. 1747) at Prague; Yi Okki at Noryang. Also the group-years
+     issue in step 4 (Caesar's group includes 1948, Hannibal's 2015).
+   - **R3 campaign typing**: Operation Overlord 207, Barbarossa 206,
+     Bagration 205, Battle of Moscow 122 (precision 'decade'), Siege of
+     Leningrad 223 (Zhukov 0.35 "victory"), Operation Torch 208, Suez Crisis
+     234 are typed as battles; possibly Siege of Tobruk 228, Siege of Corinth
+     219. Rules to add, each tested against this list: "Operation X" titles,
+     a siege spanning over a year, decade-or-coarser date precision.
+2. **Phase 2, `config/overrides.yaml`** (design: versioned, reviewed, applied
+   by the owning stage with `extraction_method`/`attribution_method`
+   'manual', survives re-runs, every entry cites a source), for what Phase 1
+   leaves: inverted outcomes Thebes 156 (Alexander charged a loss) and
+   Toulon 229 (Royalist victory); New Carthage 128 Mago Barca Q335604 (wrong
+   Mago); merges Scipio Africanus (Q2253 holds only Baecula, no-QID
+   "Publius Cornelius Scipio" holds New Carthage, Ilipa, Great Plains, Zama),
+   Daun (3 rows), Charles Alexander; wrong side Al-Qa'qa at Zumail 175,
+   Ariobarzanes at Issus, "Jena" as a general at Jena-Auerstedt; Artaphernes
+   the elder at Marathon (0.45); attribution Actium side 11 (Agrippa 0.60 vs
+   the 0.7 expert check, Octavian 0.2) and Bulge 180 (Eisenhower top at 0.28;
+   should be supreme_commander at low weight). Re-check after Phase 1 which
+   remain.
+3. **Refit** in stage order (extract, resolve, reconcile, classify with any
+   new batch, impute, model, evaluate, report); `historiography-reviewer`
+   again before reading the ranking; `bayesian-model-reviewer` on reconcile's
+   prior_predictive warning and on whether shrinkage over-pools (step 4).
+4. **Open, not decided** (each needs data or a user call):
+   - From the 2026-10-16 historiography review, to document or decide:
+     troop scope is effectively constant (1303 of 1305 reports 'engaged'; the
+     context strings are infobox fragments); reconcile compresses force
+     ratios (small sides x1.5-4.5, e.g. Uhud Muslims 754 to 2679; sides over
+     150k halved, Berlin 2.3M to 454k; Marathon Persians 68k against a modern
+     20-25k), which undercredits underdog wins; 405 of 553 credited generals
+     have one decided battle and 12 have six or more; `polity` equals
+     `side_label` on all 420 sides (107 unstandardised strings); parse errors
+     ("2.6-2.9 million" read as 3, "40-45,000" as 40); 21 duplicate battle
+     pairs are each a 0-side shell holding the QID plus the real row without
+     one (one article crawled under two slug hashes): not double counted, but
+     the real rows lost their QIDs (Arsht join, named checks); 17 sides stay
+     default_split because answers broke the rank-0 rule (14) or dropped a
+     duplicated infobox name (3).
    - Bayesian review leftovers: L8 (`z_skill` carries the common shift that
      raw skill was dropped from the convergence gate for); L-h (count sides
      whose weak classification differs between raw and residual covariance
@@ -737,26 +822,20 @@ is in the log section cited.
 
 ## 10. Honest status
 
-Built and verified against a real Postgres: crawl, extract, resolve, and
-reconcile, classify, impute, model and evaluate on fixtures. The recovery
-suites pass on synthetic data. The real-corpus pilot (log §25) showed that
-"verified against a database" meant "verified when a test passes the
-connection in". On the real corpus (`general_war_corpus2`) crawl through model
-pass their error gates through the CLI (§1), and evaluate runs with 4 of 5
-gates passing, but every LLM request is still deferred, so the model sees 59 of
-210 battles.
+Built and verified against a real Postgres: every stage, through the CLI on
+the real corpus (`general_war_corpus2`) from crawl to impute on 2026-10-16,
+with the classify and resolve LLM batches answered offline and served from the
+cache. The recovery suites pass on synthetic data.
 
-The offline batch path now works on real request files: resolve's batches
-(140, 88 and follow-ups) were answered by `/process-llm-batch`, imported and
-served from the cache, and resolve converges on the corpus. Everything built
-2026-10-14..16 is tested on fixtures and synthetic data, not yet on a corpus
-refit from reconcile onward.
+The 2026-10-16 work showed the corpus data, not the model, is the binding
+constraint: re-runs had silently duplicated sides and frozen battle types
+(fixed), and a domain review found a third of decided battles without an
+outcome, namesake misattributions at full weight, and wars typed as battles
+(§7, open). Until Phase 1 and 2 land there is no valid ranking; the
+2026-10-14 numbers ran on duplicated sides and should not be cited.
 
-Not proven: any real corpus producing a ranking, classify's LLM batch, any billed API call
-(refusal and truncation branches untested), CI on the current `main`
-(`origin` exists; no session has checked a run), and every gate threshold,
-which has only run against fixture databases and the real corpus (§1). The gold sets are agent-built and unreviewed by a human. Evaluate runs
-on the corpus (§9.10) but the model covers 59 of 210 battles, so its numbers
-are a mechanics check. Report runs on the corpus and correctly refuses to call
-its output publishable (`exclusion_concentration`), so there is no published
-ranking.
+Not proven: any real corpus producing a publishable ranking, any billed API
+call (refusal and truncation branches untested), CI on the current `main`
+(`origin` exists; no session has checked a run), and every gate threshold
+beyond fixtures and this corpus. The gold sets are agent-built and unreviewed
+by a human.
