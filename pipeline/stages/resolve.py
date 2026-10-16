@@ -84,6 +84,7 @@ from pipeline.resolvers.candidates import (
     DEFAULT_MAX_NAMES_PER_GROUP,
     candidate_keys,
 )
+from pipeline.resolvers.names import clean_surface, name_keys
 from pipeline.stages.base import StageContext, StageOutcome
 
 __all__ = ["LazyService", "resolve_groups", "run"]
@@ -381,6 +382,35 @@ def _split_decision(group: MentionGroup, decision: Decision) -> Decision:
     )
 
 
+def _part_of(group: MentionGroup, mentions: list[Mention], **changes: Any) -> MentionGroup:
+    """Make a split part carry only its own mentions' names.
+
+    Args:
+        group: The group being split.
+        mentions: The mentions this part keeps.
+        **changes: Further fields to replace on the part.
+
+    Returns:
+        A copy of ``group`` whose ``surface_forms`` and ``keys`` come from
+        ``mentions`` alone, so a general linked to one part is not given the
+        other part's name forms as aliases. ``display_name`` is left alone:
+        the LLM prompt is rendered from it and must stay byte-stable.
+    """
+    forms = {clean_surface(m.name) or m.name.strip() for m in mentions}
+    keys: list[str] = []
+    for mention in mentions:
+        for key in name_keys(mention.name):
+            if key not in keys:
+                keys.append(key)
+    return replace(
+        group,
+        mentions=mentions,
+        surface_forms=sorted(forms),
+        keys=tuple(keys) or group.keys,
+        **changes,
+    )
+
+
 def _split_lifetimes(groups: list[MentionGroup]) -> list[MentionGroup]:
     """Separate a name's mentions that are further apart than one career.
 
@@ -404,12 +434,12 @@ def _split_lifetimes(groups: list[MentionGroup]) -> list[MentionGroup]:
             years = _battle_years(mentions)
             reason = f"lifetime split of {group.display_name!r}: battles {years[0]}..{years[-1]}"
             if index == largest:
-                part = replace(group, mentions=mentions, split_reason=reason)
+                part = _part_of(group, mentions, split_reason=reason)
             else:
-                part = replace(
+                part = _part_of(
                     group,
+                    mentions,
                     key=f"{group.key}#era{index + 1}",
-                    mentions=mentions,
                     split_from=group.key,
                     split_reason=reason,
                 )
@@ -491,27 +521,54 @@ class _GroupResolver:
             mentions=len(detached),
             reason="battle outside the candidate's command window",
         )
-        if depth >= _MAX_SPLIT_DEPTH:
-            logger.warning("resolve_split_depth_exhausted", group=group.key, qid=candidate.qid)
-            return
-
         sub_key = f"{group.key}#not-{candidate.qid}"
-        subgroup = replace(
+        subgroup = _part_of(
             group,
+            detached,
             key=sub_key,
-            mentions=detached,
             confidence=0.0,
             method="new_entity",
             split_from=group.split_from or group.key,
             split_reason=reason,
         )
-        self.groups[index] = replace(group, mentions=kept)
+        self.groups[index] = _part_of(group, kept)
+        if depth >= _MAX_SPLIT_DEPTH:
+            # Still detached, so the namesake's mentions do not stay linked to
+            # the candidate; no further search is made for them.
+            logger.warning("resolve_split_depth_exhausted", group=group.key, qid=candidate.qid)
+            exhausted = Decision(
+                status="new",
+                canonical_name=subgroup.display_name,
+                method="new_entity",
+                reasoning="split depth exhausted",
+            )
+            self.decisions[sub_key] = _split_decision(subgroup, exhausted)
+            self.groups.append(subgroup)
+            return
         self._excluded[sub_key] = self._excluded.get(group.key, frozenset()) | {candidate.qid}
         self._depth[sub_key] = depth + 1
         self.groups.append(subgroup)
 
+    def final_decision(self, group: MentionGroup, decision: Decision) -> Decision:
+        """Pass a final decision through the split-off rule.
+
+        Args:
+            group: The group the decision is for.
+            decision: Its final decision, from the matcher or the LLM.
+
+        Returns:
+            ``split_unmatched`` for a split-off group that came out ``new``
+            by any route; every other decision unchanged. A corpus-local
+            general for a split-off part would merge back by name.
+        """
+        if group.split_from and decision.status == "new":
+            return _split_decision(group, decision)
+        return decision
+
     def _decide(self, index: int) -> None:
         group = self.groups[index]
+        if group.key in self.decisions:
+            return
         if not group.split_from and is_placeholder(group.display_name):
             self.decisions[group.key] = _placeholder_decision(group)
             return
@@ -524,11 +581,9 @@ class _GroupResolver:
         found = [c for c in self.source.search(group) if c.qid not in excluded]
         self.candidates[group.key] = found
         decision = match_group(group, found, threshold=self.threshold, margin=self.margin)
-        if decision.status == "new":
-            if group.split_from:
-                decision = _split_decision(group, decision)
-            else:
-                decision = _refuse_non_person(group, found, decision, self.source)
+        if decision.status == "new" and not group.split_from:
+            decision = _refuse_non_person(group, found, decision, self.source)
+        decision = self.final_decision(group, decision)
         self.decisions[group.key] = decision
         self.guard(index)
 
@@ -600,15 +655,18 @@ def resolve_groups(
             else:
                 counts.llm_calls += 1
                 before = len(groups)
-                decisions[group.key] = disambiguate(
+                decisions[group.key] = resolver.final_decision(
                     group,
-                    # Date-gated and ranked: the prompt shows only the first few, and
-                    # source order cut Caesar and Hannibal from their own lists.
-                    rank_for_prompt(group, resolver.candidates.get(group.key, [])),
-                    client,
-                    system=system,
-                    template=template,
-                    schema=schema or {},
+                    disambiguate(
+                        group,
+                        # Date-gated and ranked: the prompt shows only the first few, and
+                        # source order cut Caesar and Hannibal from their own lists.
+                        rank_for_prompt(group, resolver.candidates.get(group.key, [])),
+                        client,
+                        system=system,
+                        template=template,
+                        schema=schema or {},
+                    ),
                 )
                 resolver.guard(index)
                 resolver.decide_from(before)

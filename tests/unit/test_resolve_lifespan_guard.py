@@ -12,6 +12,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+import pytest
+
 from pipeline.config import load_agent_spec
 from pipeline.resolvers import (
     Candidate,
@@ -26,7 +28,13 @@ from pipeline.resolvers import (
 )
 from pipeline.resolvers.disambiguate import prompt_parts
 from pipeline.resolvers.records import BattleContext
-from pipeline.stages.resolve import LazyService, resolve_groups
+from pipeline.stages.resolve import (
+    _MAX_SPLIT_DEPTH,
+    LazyService,
+    _build_identities,
+    _GroupResolver,
+    resolve_groups,
+)
 from tests.unit.test_resolve import _StubService
 
 # sha256 of the user prompt the code rendered before the guard existed, for the
@@ -274,3 +282,78 @@ def test_a_group_that_is_not_split_renders_the_same_prompt_as_before() -> None:
     prompt = _unsplit_group_prompt()
 
     assert hashlib.sha256(prompt.encode()).hexdigest() == _PRE_GUARD_PROMPT_SHA256
+
+
+def _two_era_candidates() -> list[Candidate]:
+    return [
+        Candidate(
+            qid="Q1", label="Jan Novak", aliases=("Novak",), birth_year=1680, death_year=1740
+        ),
+        Candidate(
+            qid="Q2", label="Jan Novak", aliases=("Novak",), birth_year=1690, death_year=1750
+        ),
+        Candidate(
+            qid="Q3", label="Jan Novak", aliases=("Novak",), birth_year=1860, death_year=1920
+        ),
+        Candidate(
+            qid="Q4", label="Jan Novak", aliases=("Novak",), birth_year=1870, death_year=1930
+        ),
+    ]
+
+
+@pytest.mark.parametrize("answer", ["NEW_ENTITY", "UNCERTAIN", "Q999"])
+def test_a_split_off_group_the_llm_calls_new_is_left_unresolved(answer: str) -> None:
+    mentions = [_mention("Jan Novak", "B1", 1700), _mention("Jan Novak", "B2", 1900)]
+    stub = _StubService({"match": answer, "confidence": 0.5})
+
+    groups, decisions = _resolve(mentions, _two_era_candidates(), stub)
+
+    split = [g for g in groups if g.split_from]
+    assert len(split) == 1
+    assert any("B2" in call for call in stub.calls)
+    assert decisions[split[0].key].status == "unresolved"
+    assert decisions[split[0].key].method == "split_unmatched"
+
+
+def test_the_depth_cap_still_detaches_the_mentions_outside_the_window() -> None:
+    mentions = [
+        _mention("Pompey", "Battle of Pharsalus", -47),
+        _mention("Pompey", "Battle of Munda", -44),
+    ]
+    pompey = Candidate(qid="Q1347", label="Pompey", birth_year=-105, death_year=-47)
+    groups = group_mentions(mentions)
+    resolver = _GroupResolver(groups, _Source([pompey]), threshold=85.0, margin=6.0)
+    resolver._depth[groups[0].key] = _MAX_SPLIT_DEPTH
+    resolver.decide_from(0)
+
+    detached = [g for g in groups if g.split_from]
+    assert [m.battle_name for g in detached for m in g.mentions] == ["Battle of Munda"]
+    assert resolver.decisions[detached[0].key].method == "split_unmatched"
+    assert resolver.decisions[groups[0].key].status == "linked"
+    assert [m.battle_name for m in groups[0].mentions] == ["Battle of Pharsalus"]
+
+
+def test_a_detached_part_does_not_lend_its_surface_forms_to_the_kept_general() -> None:
+    pompey = Candidate(qid="Q1347", label="Pompey", birth_year=-105, death_year=-47)
+    mentions = [
+        _mention("Pompey", "Battle of Pharsalus", -47),
+        _mention("Gnaeus Pompeius Junior", "Battle of Munda", -44),
+    ]
+    groups = group_mentions(mentions)
+    # One shared group, as a loose name key would build it.
+    merged = groups[0]
+    if len(groups) > 1:
+        merged.mentions.extend(groups[1].mentions)
+        merged.surface_forms = sorted({*merged.surface_forms, *groups[1].surface_forms})
+        merged.keys = (*merged.keys, *groups[1].keys)
+        groups = [merged]
+    resolver = _GroupResolver(groups, _Source([pompey]), threshold=85.0, margin=6.0)
+    resolver.decide_from(0)
+
+    kept = groups[0]
+    detached = next(g for g in groups if g.split_from)
+    identities = _build_identities(groups, resolver.decisions)
+
+    assert detached.surface_forms == ["Gnaeus Pompeius Junior"]
+    assert "Gnaeus Pompeius Junior" not in kept.surface_forms
+    assert all("Gnaeus Pompeius Junior" not in identity.aliases for identity in identities)
