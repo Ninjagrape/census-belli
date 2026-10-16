@@ -40,6 +40,7 @@ METHODS: Final[tuple[str, ...]] = (
     "llm_disambiguation",  # the deterministic steps left it ambiguous
     "llm_uncertain",  # the LLM answered UNCERTAIN: kept as a separate corpus-local identity
     "new_entity",  # no viable candidate; a corpus-local identity
+    "split_unmatched",  # a split-off part of a name found no candidate; left unresolved
     "placeholder",  # the mention names nobody ("Unknown", "various")
     "non_person",  # the mention names an organisation, formation or place, not a person
     "llm_failed",  # the disambiguation call did not return usable data
@@ -167,6 +168,10 @@ class MentionGroup:
             ``battle_commanders`` row should carry the confidence of the
             decision that put it there, not of its strongest sibling.
         method: How that decision was reached.
+        split_from: The key of the group this one was split from, empty for a
+            group that was not split off. A split-off part is never given a
+            corpus-local general: that would merge back by name.
+        split_reason: Why the split happened, for the resolution log.
     """
 
     key: str
@@ -176,6 +181,8 @@ class MentionGroup:
     mentions: list[Mention] = field(default_factory=list)
     confidence: float = 0.0
     method: str = "new_entity"
+    split_from: str = ""
+    split_reason: str = ""
 
     @property
     def years(self) -> list[int]:

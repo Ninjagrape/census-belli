@@ -31,6 +31,7 @@ import asyncio
 import json
 import statistics
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Final
 
@@ -53,6 +54,7 @@ from pipeline.resolvers import (
     NullCandidateSource,
     PrefetchedCandidateSource,
     ResolveCounts,
+    career_clusters,
     collect_query_names,
     disambiguate,
     fetch_candidates,
@@ -68,6 +70,7 @@ from pipeline.resolvers import (
     match_against_identities,
     match_group,
     non_person_reason,
+    partition_by_lifespan,
     prompt_parts,
     rank_for_prompt,
     remove_orphan_generals,
@@ -341,6 +344,193 @@ def _refuse_non_person(
     return _non_person_decision(group, f"is the name of a non-human Wikidata item ({kind})")
 
 
+# Detached mentions are matched again on their own years. Each round must be
+# viable for a candidate the previous rounds were not, so this ends on its own;
+# the bound is a backstop against a candidate source that misbehaves.
+_MAX_SPLIT_DEPTH: Final[int] = 4
+
+
+def _battle_years(mentions: list[Mention]) -> list[int]:
+    """Distinct astronomical years of the dated mentions, ascending."""
+    return sorted({m.context.year for m in mentions if m.context and m.context.year is not None})
+
+
+def _split_decision(group: MentionGroup, decision: Decision) -> Decision:
+    """Leave a split-off part with no candidate unresolved, never a new general.
+
+    Args:
+        group: A group split off from a larger one.
+        decision: The matcher's ``new`` decision for it.
+
+    Returns:
+        An unresolved decision. ``_upsert_general`` finds a corpus-local
+        general by name, so a new entity for the detached part would be
+        written onto the same row as its namesake and the split undone.
+        Handover 9.3 prefers a visible split to an invisible merge.
+    """
+    return Decision(
+        status="unresolved",
+        canonical_name=group.display_name,
+        method="split_unmatched",
+        score=decision.score,
+        runner_up=decision.runner_up,
+        candidates_considered=decision.candidates_considered,
+        reasoning=f"{group.split_reason}; no candidate fits these battles ({decision.reasoning})",
+    )
+
+
+def _split_lifetimes(groups: list[MentionGroup]) -> list[MentionGroup]:
+    """Separate a name's mentions that are further apart than one career.
+
+    Args:
+        groups: The grouped mentions.
+
+    Returns:
+        The groups with each over-long one replaced by its clusters. The
+        largest cluster keeps the group's key and the others take
+        ``<key>#era<n>``. A group that does not split is returned as the same
+        object, so its prompt and request hash are unchanged.
+    """
+    result: list[MentionGroup] = []
+    for group in groups:
+        clusters = career_clusters(group.mentions)
+        if len(clusters) == 1:
+            result.append(group)
+            continue
+        largest = max(range(len(clusters)), key=lambda i: (len(clusters[i]), -i))
+        for index, mentions in enumerate(clusters):
+            years = _battle_years(mentions)
+            reason = f"lifetime split of {group.display_name!r}: battles {years[0]}..{years[-1]}"
+            if index == largest:
+                part = replace(group, mentions=mentions, split_reason=reason)
+            else:
+                part = replace(
+                    group,
+                    key=f"{group.key}#era{index + 1}",
+                    mentions=mentions,
+                    split_from=group.key,
+                    split_reason=reason,
+                )
+            logger.info(
+                "resolve_group_split",
+                group=group.display_name,
+                part=part.key,
+                mentions=len(mentions),
+                years=years,
+                reason="dated battles further apart than one career",
+            )
+            result.append(part)
+    return result
+
+
+class _GroupResolver:
+    """Matches groups, and re-matches the mentions a lifespan check detaches.
+
+    Holds the per-run state ``resolve_groups`` threads between its passes. The
+    group list is extended in place, so the caller sees every subgroup.
+    """
+
+    def __init__(
+        self,
+        groups: list[MentionGroup],
+        source: CandidateSource,
+        *,
+        threshold: float,
+        margin: float,
+    ) -> None:
+        self.groups = groups
+        self.source = source
+        self.threshold = threshold
+        self.margin = margin
+        self.decisions: dict[str, Decision] = {}
+        self.candidates: dict[str, list[Candidate]] = {}
+        self._excluded: dict[str, frozenset[str]] = {}
+        self._depth: dict[str, int] = {}
+
+    def decide_from(self, start: int) -> None:
+        """Run the deterministic match on every group from ``start`` on.
+
+        Args:
+            start: Index of the first group not yet matched. Groups that a
+                guard appends while this runs are matched too.
+        """
+        index = start
+        while index < len(self.groups):
+            self._decide(index)
+            index += 1
+
+    def guard(self, index: int) -> None:
+        """Detach the mentions a linked candidate could not have commanded in.
+
+        Args:
+            index: Position of a group whose final decision is in place.
+        """
+        group = self.groups[index]
+        decision = self.decisions[group.key]
+        candidate = decision.candidate
+        if decision.status != "linked" or candidate is None:
+            return
+        kept, detached = partition_by_lifespan(group.mentions, candidate)
+        if not detached:
+            return
+
+        depth = self._depth.get(group.key, 0)
+        years = _battle_years(detached)
+        reason = (
+            f"lifespan guard: {candidate.label} ({candidate.qid}, "
+            f"{candidate.birth_year}..{candidate.death_year}) cannot have commanded "
+            f"in {years}"
+        )
+        logger.info(
+            "resolve_mentions_detached",
+            group=group.display_name,
+            qid=candidate.qid,
+            years=years,
+            mentions=len(detached),
+            reason="battle outside the candidate's command window",
+        )
+        if depth >= _MAX_SPLIT_DEPTH:
+            logger.warning("resolve_split_depth_exhausted", group=group.key, qid=candidate.qid)
+            return
+
+        sub_key = f"{group.key}#not-{candidate.qid}"
+        subgroup = replace(
+            group,
+            key=sub_key,
+            mentions=detached,
+            confidence=0.0,
+            method="new_entity",
+            split_from=group.split_from or group.key,
+            split_reason=reason,
+        )
+        self.groups[index] = replace(group, mentions=kept)
+        self._excluded[sub_key] = self._excluded.get(group.key, frozenset()) | {candidate.qid}
+        self._depth[sub_key] = depth + 1
+        self.groups.append(subgroup)
+
+    def _decide(self, index: int) -> None:
+        group = self.groups[index]
+        if not group.split_from and is_placeholder(group.display_name):
+            self.decisions[group.key] = _placeholder_decision(group)
+            return
+        reason = None if group.split_from else non_person_reason(group.display_name)
+        if reason is not None:
+            self.decisions[group.key] = _non_person_decision(group, reason)
+            return
+
+        excluded = self._excluded.get(group.key, frozenset())
+        found = [c for c in self.source.search(group) if c.qid not in excluded]
+        self.candidates[group.key] = found
+        decision = match_group(group, found, threshold=self.threshold, margin=self.margin)
+        if decision.status == "new":
+            if group.split_from:
+                decision = _split_decision(group, decision)
+            else:
+                decision = _refuse_non_person(group, found, decision, self.source)
+        self.decisions[group.key] = decision
+        self.guard(index)
+
+
 def resolve_groups(
     groups: list[MentionGroup],
     source: CandidateSource,
@@ -355,8 +545,14 @@ def resolve_groups(
 ) -> dict[str, Decision]:
     """Decide what every group refers to.
 
+    Two guards run around the matcher. Before it, a name whose dated battles
+    are further apart than one career is split into clusters. After it, every
+    mention of a linked group whose battle falls outside the candidate's
+    command window is detached and matched again on its own years. Both edit
+    ``groups`` in place; the caller must use the list afterwards.
+
     Args:
-        groups: The grouped mentions.
+        groups: The grouped mentions. Replaced in place by the split groups.
         source: Where Wikidata candidates come from.
         service: The stage's deferred LLM service, or None to skip the LLM
             step entirely. It is only built if a group needs it.
@@ -370,23 +566,10 @@ def resolve_groups(
     Returns:
         A final decision per group, keyed by group key.
     """
-    decisions: dict[str, Decision] = {}
-    candidates_by_group: dict[str, list[Candidate]] = {}
-
-    for group in groups:
-        if is_placeholder(group.display_name):
-            decisions[group.key] = _placeholder_decision(group)
-            continue
-        reason = non_person_reason(group.display_name)
-        if reason is not None:
-            decisions[group.key] = _non_person_decision(group, reason)
-            continue
-        found = source.search(group)
-        candidates_by_group[group.key] = found
-        decision = match_group(group, found, threshold=threshold, margin=margin)
-        if decision.status == "new":
-            decision = _refuse_non_person(group, found, decision, source)
-        decisions[group.key] = decision
+    groups[:] = _split_lifetimes(groups)
+    resolver = _GroupResolver(groups, source, threshold=threshold, margin=margin)
+    resolver.decide_from(0)
+    decisions = resolver.decisions
 
     # Step 2, second half: a bare surname Wikidata did not answer for often
     # belongs to somebody this corpus has already pinned to an entity. Only
@@ -404,25 +587,30 @@ def resolve_groups(
             if attached is not None:
                 decisions[group.key] = attached
 
-    for group in groups:
+    index = 0
+    while index < len(groups):
+        group = groups[index]
         decision = decisions[group.key]
-        if decision.status != "ambiguous":
-            continue
-        client = service.get() if service is not None else None
-        if client is None:
-            decisions[group.key] = _stranded_decision(group, decision)
-            continue
-        counts.llm_calls += 1
-        decisions[group.key] = disambiguate(
-            group,
-            # Date-gated and ranked: the prompt shows only the first few, and
-            # source order cut Caesar and Hannibal from their own prompts.
-            rank_for_prompt(group, candidates_by_group.get(group.key, [])),
-            client,
-            system=system,
-            template=template,
-            schema=schema or {},
-        )
+        if decision.status == "ambiguous":
+            client = service.get() if service is not None else None
+            if client is None:
+                decisions[group.key] = _stranded_decision(group, decision)
+            else:
+                counts.llm_calls += 1
+                before = len(groups)
+                decisions[group.key] = disambiguate(
+                    group,
+                    # Date-gated and ranked: the prompt shows only the first few, and
+                    # source order cut Caesar and Hannibal from their own lists.
+                    rank_for_prompt(group, resolver.candidates.get(group.key, [])),
+                    client,
+                    system=system,
+                    template=template,
+                    schema=schema or {},
+                )
+                resolver.guard(index)
+                resolver.decide_from(before)
+        index += 1
 
     for group in groups:
         decision = decisions[group.key]
@@ -449,6 +637,11 @@ def _log_row(group: MentionGroup, decision: Decision, general_id: int | None) ->
     Returns:
         A JSON-serialisable mapping.
     """
+    split = (
+        {"split_from": group.split_from, "split_reason": group.split_reason}
+        if group.split_from or group.split_reason
+        else {}
+    )
     return {
         "group_key": group.key,
         "display_name": group.display_name,
@@ -466,6 +659,7 @@ def _log_row(group: MentionGroup, decision: Decision, general_id: int | None) ->
         "candidates_considered": decision.candidates_considered,
         "reasoning": decision.reasoning,
         "general_id": general_id,
+        **split,
     }
 
 
@@ -965,6 +1159,7 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
         schema=schema,
     )
 
+    counts.groups = len(groups)
     identities = _build_identities(groups, decisions)
     counts.identities = len(identities)
     counts.non_person_mentions = len(_unresolved_mentions(groups, decisions, non_person=True))

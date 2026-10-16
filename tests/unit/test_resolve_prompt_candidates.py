@@ -93,8 +93,8 @@ def _run_prompt(mentions: list[Mention], candidates: list[Candidate]) -> str:
 
 
 def test_a_famous_late_listed_candidate_survives_the_prompt_cap() -> None:
-    # The group's years include a stray modern one, as the real Caesar group
-    # does (1948), so the date gate keeps modern namesakes alive alongside him.
+    # Ten date-confirmed namesakes with lower Q-ids keep the group ambiguous.
+    # (A stray 1948 year used to do this; a lifetime split now removes it.)
     caesar = Candidate(
         qid="Q1048",
         label="Julius Caesar",
@@ -103,10 +103,10 @@ def test_a_famous_late_listed_candidate_survives_the_prompt_cap() -> None:
         occupations=("military leader",),
         sitelinks=250,
     )
-    modern = _namesakes("Julius Caesar", 10, born=1900, died=1990)
+    modern = _namesakes("Julius Caesar", 10, born=-80, died=-20)
     mentions = [
         _mention("Julius Caesar", "Battle of Alesia", -51),
-        _mention("Julius Caesar", "A Modern Battle", 1948),
+        _mention("Julius Caesar", "Battle of Munda", -44),
     ]
 
     prompt = _run_prompt(mentions, [*modern, caesar])
@@ -121,12 +121,11 @@ def test_hannibal_barca_beats_dateless_namesakes_into_the_prompt() -> None:
         qid="Q36456", label="Hannibal", birth_year=-245, death_year=-181, sitelinks=180
     )
     dateless = [Candidate(qid=f"Q{100 + i}", label="Hannibal") for i in range(12)]
-    # The real group carries a stray 2015 access-date year, which keeps a
-    # living namesake date-compatible and the group ambiguous.
-    living = Candidate(qid="Q50", label="Hannibal", birth_year=1960)
+    # A second date-confirmed namesake keeps the group ambiguous.
+    living = Candidate(qid="Q50", label="Hannibal", birth_year=-250, death_year=-190)
     mentions = [
         _mention("Hannibal", "Battle of Ager Falernus", -216),
-        _mention("Hannibal", "A Modern Battle", 2015),
+        _mention("Hannibal", "Battle of Cannae", -215),
     ]
 
     prompt = _run_prompt(mentions, [*dateless, living, barca])

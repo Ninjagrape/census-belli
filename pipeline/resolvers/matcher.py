@@ -36,15 +36,19 @@ from rapidfuzz import fuzz
 
 from pipeline.resolvers.candidates import candidate_keys
 from pipeline.resolvers.names import fold
-from pipeline.resolvers.records import Candidate, Decision, Identity, MentionGroup
+from pipeline.resolvers.records import Candidate, Decision, Identity, Mention, MentionGroup
 
 __all__ = [
     "AMBIGUITY_MARGIN",
     "LIFESPAN_SLACK_YEARS",
     "LLM_FLOOR_BELOW_THRESHOLD",
     "MAX_PLAUSIBLE_AGE_YEARS",
+    "MIN_COMMAND_AGE_YEARS",
     "best_score",
+    "career_clusters",
+    "command_window",
     "lifespan_verdict",
+    "partition_by_lifespan",
     "match_against_identities",
     "match_group",
     "rank_for_prompt",
@@ -64,6 +68,12 @@ LIFESPAN_SLACK_YEARS: Final[int] = 2
 # them eligible for every later battle in history. Generous on purpose: this
 # bounds a lifespan to a century, it does not judge whether an age is likely.
 MAX_PLAUSIBLE_AGE_YEARS: Final[int] = 100
+
+# Nobody commands before this age. The window of a candidate with a known birth
+# opens at birth plus this, so a namesake born ten years before a battle is not
+# credited with it. Low on purpose: boy kings and nominal commanders exist, and
+# this gate separates generations, it does not judge competence.
+MIN_COMMAND_AGE_YEARS: Final[int] = 15
 
 # How far the best candidate must beat the runner-up to be accepted without
 # asking the LLM. Two entities scoring within this of each other are usually
@@ -111,6 +121,42 @@ def best_score(keys: Sequence[str], other_keys: Sequence[str]) -> float:
     return max(float(fuzz.WRatio(key, other)) for key in keys for other in other_keys)
 
 
+def command_window(candidate: Candidate) -> tuple[int, int] | None:
+    """The astronomical years in which a candidate could have commanded.
+
+    Args:
+        candidate: The entity.
+
+    Returns:
+        ``(low, high)`` inclusive, or None when the candidate has no dated
+        life and the window cannot be drawn. A known birth opens the window
+        at birth plus :data:`MIN_COMMAND_AGE_YEARS`. A half-dated life is
+        bounded at the missing end rather than left open. Wikidata carries
+        many ancients with a birth and no death -- often an explicit "no
+        value" snak -- and an unbounded upper end made them immortal:
+        Q1576150, a Carthaginian commander born about 300 BC with no recorded
+        death, was judged alive at the Battle of Lissa in 1811, *positively*,
+        so the exact-match rule preferred it over dateless namesakes and
+        linked it at 0.95 confidence. That is a false merge, the one error
+        nothing downstream can detect. The cap is far beyond any real career,
+        like :data:`_CAREER_SPAN_YEARS`: this gate separates centuries, it
+        does not police age.
+    """
+    birth = candidate.birth_year
+    death = candidate.death_year
+    if birth is None and death is None:
+        return None
+
+    if birth is not None:
+        low = birth + MIN_COMMAND_AGE_YEARS
+        high = death if death is not None else birth + MAX_PLAUSIBLE_AGE_YEARS
+    else:
+        assert death is not None
+        low = death - MAX_PLAUSIBLE_AGE_YEARS
+        high = death
+    return low - LIFESPAN_SLACK_YEARS, high + LIFESPAN_SLACK_YEARS
+
+
 def lifespan_verdict(candidate: Candidate, years: Sequence[int]) -> bool | None:
     """Judge whether a candidate could have commanded in these battles.
 
@@ -119,45 +165,96 @@ def lifespan_verdict(candidate: Candidate, years: Sequence[int]) -> bool | None:
         years: Astronomical years of the group's battles.
 
     Returns:
-        True when at least one battle falls inside the candidate's lifespan,
-        False when every battle falls outside it, and None when the question
-        cannot be asked -- no dated battle, or no dated life. None is not a
-        pass: it means the gate abstains and the name has to carry the match
-        alone.
+        True when at least one battle falls inside the candidate's command
+        window, False when every battle falls outside it, and None when the
+        question cannot be asked -- no dated battle, or no dated life. None is
+        not a pass: it means the gate abstains and the name has to carry the
+        match alone.
     """
     if not years:
         return None
-    if candidate.birth_year is None and candidate.death_year is None:
+    window = command_window(candidate)
+    if window is None:
         return None
+    low, high = window
+    return any(low <= year <= high for year in years)
 
-    # A half-known lifespan is bounded at the missing end rather than left
-    # open. Wikidata carries many ancients with a birth and no death -- often
-    # an explicit "no value" snak -- and an unbounded upper end made them
-    # immortal: Q1576150, a Carthaginian commander born about 300 BC with no
-    # recorded death, was judged alive at the Battle of Lissa in 1811, and
-    # judged *positively*, so the exact-match rule below preferred it over
-    # dateless namesakes and linked it at 0.95 confidence. That is a false
-    # merge, which is the one error nothing downstream can detect.
-    #
-    # The cap is deliberately far beyond any real career, like
-    # _CAREER_SPAN_YEARS: this gate separates centuries, it does not police age.
-    low = candidate.birth_year
-    high = candidate.death_year
-    if low is None and high is not None:
-        low = high - MAX_PLAUSIBLE_AGE_YEARS
-    if high is None and low is not None:
-        high = low + MAX_PLAUSIBLE_AGE_YEARS
 
-    low = None if low is None else low - LIFESPAN_SLACK_YEARS
-    high = None if high is None else high + LIFESPAN_SLACK_YEARS
+def partition_by_lifespan(
+    mentions: Sequence[Mention], candidate: Candidate
+) -> tuple[list[Mention], list[Mention]]:
+    """Separate the mentions a candidate could have commanded from the rest.
 
-    for year in years:
-        if low is not None and year < low:
+    A group is linked as a whole on the strength of one in-lifespan battle
+    (:func:`lifespan_verdict`), which carried every namesake mention with it.
+    This is the per-mention check that follows the link.
+
+    Args:
+        mentions: A linked group's mentions.
+        candidate: The entity it was linked to.
+
+    Returns:
+        ``(kept, detached)``. Undated mentions are kept, because the gate
+        abstains on them; so is everything when the candidate has no dated
+        life.
+    """
+    window = command_window(candidate)
+    if window is None:
+        return list(mentions), []
+    low, high = window
+    kept: list[Mention] = []
+    detached: list[Mention] = []
+    for mention in mentions:
+        year = mention.context.year if mention.context else None
+        outside = year is not None and not low <= year <= high
+        (detached if outside else kept).append(mention)
+    return kept, detached
+
+
+def career_clusters(mentions: Sequence[Mention]) -> list[list[Mention]]:
+    """Split one name's mentions where the dated years leave a lifetime.
+
+    Two battles further apart than :data:`_CAREER_SPAN_YEARS` are not one
+    career (the same test :func:`_careers_overlap` applies between
+    identities), so "Caesar" in 45 BC and in 1948 are two people. Splitting
+    runs before candidate matching, because one in-lifespan battle otherwise
+    keeps a modern namesake viable for the whole group.
+
+    Args:
+        mentions: One group's mentions.
+
+    Returns:
+        Clusters in chronological order, the mentions of each in their
+        original order. Undated mentions join the largest cluster (the
+        earliest on a tie). A single cluster means no split.
+    """
+    dated = sorted({m.context.year for m in mentions if m.context and m.context.year is not None})
+    if len(dated) < 2:
+        return [list(mentions)]
+
+    bounds: list[tuple[int, int]] = []
+    first = previous = dated[0]
+    for year in dated[1:]:
+        if year - previous > _CAREER_SPAN_YEARS:
+            bounds.append((first, previous))
+            first = year
+        previous = year
+    bounds.append((first, previous))
+    if len(bounds) == 1:
+        return [list(mentions)]
+
+    clusters: list[list[Mention]] = [[] for _ in bounds]
+    undated: list[Mention] = []
+    for mention in mentions:
+        when = mention.context.year if mention.context else None
+        if when is None:
+            undated.append(mention)
             continue
-        if high is not None and year > high:
-            continue
-        return True
-    return False
+        index = next(i for i, (low, high) in enumerate(bounds) if low <= when <= high)
+        clusters[index].append(mention)
+    largest = max(range(len(clusters)), key=lambda i: (len(clusters[i]), -i))
+    clusters[largest].extend(undated)
+    return clusters
 
 
 def viable_candidates(
