@@ -69,6 +69,7 @@ from pipeline.resolvers import (
     match_group,
     non_person_reason,
     prompt_parts,
+    rank_for_prompt,
     write_identity,
 )
 from pipeline.resolvers.battles import DEFAULT_NAME_THRESHOLD, DEFAULT_YEAR_SLACK
@@ -297,6 +298,7 @@ def _build_identities(
             identity.method = decision.method
 
         identity.groups.append(group)
+        identity.uncertain_split = identity.uncertain_split or decision.method == "llm_uncertain"
         for alias in group.surface_forms:
             if alias and alias not in identity.aliases:
                 identity.aliases.append(alias)
@@ -412,7 +414,9 @@ def resolve_groups(
         counts.llm_calls += 1
         decisions[group.key] = disambiguate(
             group,
-            candidates_by_group.get(group.key, []),
+            # Date-gated and ranked: the prompt shows only the first few, and
+            # source order cut Caesar and Hannibal from their own prompts.
+            rank_for_prompt(group, candidates_by_group.get(group.key, [])),
             client,
             system=system,
             template=template,

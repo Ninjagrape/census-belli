@@ -33,7 +33,7 @@ from sqlalchemy import text
 
 from pipeline.extractors.records import Provenance, to_schema_command_role
 from pipeline.extractors.store import source_id
-from pipeline.resolvers.records import Identity, Mention, ResolveCounts
+from pipeline.resolvers.records import UNCERTAIN_SPLIT_NOTE, Identity, Mention, ResolveCounts
 
 __all__ = [
     "NON_PERSON_FIELD",
@@ -144,10 +144,11 @@ _UPSERT_COMMANDER = text(
     """
     INSERT INTO battle_commanders (
         battle_id, side_id, general_id, command_role, source_id,
-        extraction_method, confidence, role_evidence, attribution_method
+        extraction_method, confidence, role_evidence, attribution_method, infobox_order
     ) VALUES (
         :battle_id, :side_id, :general_id, CAST(:command_role AS command_role), :source_id,
-        CAST(:extraction_method AS extraction_method), :confidence, :role_evidence, 'equal'
+        CAST(:extraction_method AS extraction_method), :confidence, :role_evidence, 'equal',
+        :infobox_order
     )
     ON CONFLICT (battle_id, side_id, general_id) DO UPDATE SET
         -- classify refines command_role in place, so a resolve re-run only
@@ -161,7 +162,9 @@ _UPSERT_COMMANDER = text(
         confidence        = EXCLUDED.confidence,
         role_evidence     = COALESCE(
             NULLIF(EXCLUDED.role_evidence, ''), battle_commanders.role_evidence
-        )
+        ),
+        -- resolve owns this column outright: a re-run takes what the infobox now says.
+        infobox_order     = EXCLUDED.infobox_order
     """
 )
 
@@ -282,8 +285,24 @@ def _general_params(identity: Identity) -> dict[str, Any]:
         "born": year_to_date_literal(identity.birth_year),
         "died": year_to_date_literal(identity.death_year),
         "era": identity.era,
-        "notes": f"resolved by {identity.method} (confidence {identity.confidence:.2f})",
+        "notes": _identity_notes(identity),
     }
+
+
+def _identity_notes(identity: Identity) -> str:
+    """Describe how an identity was resolved, for ``generals.notes``.
+
+    Args:
+        identity: The resolved person.
+
+    Returns:
+        The method and confidence, plus :data:`UNCERTAIN_SPLIT_NOTE` when an
+        UNCERTAIN LLM answer is why the person has no Wikidata id.
+    """
+    note = f"resolved by {identity.method} (confidence {identity.confidence:.2f})"
+    if identity.uncertain_split and identity.qid is None:
+        note = f"{note}; {UNCERTAIN_SPLIT_NOTE}"
+    return note
 
 
 def _publishable_name(identity: Identity) -> str:
@@ -499,6 +518,16 @@ def write_identity(
         if current is None or len(mention.role_evidence) > len(current[0].role_evidence):
             best[key] = (mention, confidence)
 
+    # The best mention is chosen for its evidence text, which is rarely the
+    # infobox's, so the order is taken from whichever mention carries one.
+    infobox_orders: dict[tuple[int, int], int] = {}
+    for mention, battle_id, side_id, _ in placements:
+        if mention.infobox_order is not None:
+            key = (battle_id, side_id)
+            infobox_orders[key] = min(
+                infobox_orders.get(key, mention.infobox_order), mention.infobox_order
+            )
+
     for (battle_id, side_id), (mention, confidence) in best.items():
         conn.execute(
             _UPSERT_COMMANDER,
@@ -511,6 +540,7 @@ def write_identity(
                 "extraction_method": mention.extraction_method,
                 "confidence": confidence,
                 "role_evidence": mention.role_evidence[:2000],
+                "infobox_order": infobox_orders.get((battle_id, side_id)),
             },
         )
         counts.commanders_written += 1

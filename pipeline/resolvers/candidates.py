@@ -116,13 +116,14 @@ _SPARQL_ESCAPES: Final[tuple[tuple[str, str], ...]] = (
 # from the label alone, which silently discarded every alias-matched entity:
 # Wellington and Nelson both, until 2026-09-19.
 _PERSON_QUERY: Final[str] = """
-SELECT ?name ?person ?personLabel ?personDescription ?birth ?death
+SELECT ?name ?person ?personLabel ?personDescription ?birth ?death ?sitelinks
        (GROUP_CONCAT(DISTINCT ?countryLabel; separator=", ") AS ?countries)
        (GROUP_CONCAT(DISTINCT ?occupationLabel; separator=", ") AS ?occupations)
        (SAMPLE(?articleUrl) AS ?article) WHERE {{
   VALUES ?name {{ {names} }}
   {match}
   ?person wdt:P31 wd:Q5 .
+  OPTIONAL {{ ?person wikibase:sitelinks ?sitelinks . }}
   OPTIONAL {{ ?person wdt:P569 ?birth . }}
   OPTIONAL {{ ?person wdt:P570 ?death . }}
   OPTIONAL {{
@@ -141,7 +142,7 @@ SELECT ?name ?person ?personLabel ?personDescription ?birth ?death
   }}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{languages}" . }}
 }}
-GROUP BY ?name ?person ?personLabel ?personDescription ?birth ?death
+GROUP BY ?name ?person ?personLabel ?personDescription ?birth ?death ?sitelinks
 LIMIT {limit}
 """
 
@@ -471,6 +472,7 @@ def person_candidates(payload: dict[str, Any]) -> list[Candidate]:
                 birth_year=_claim_year(entity, _P_BIRTH),
                 death_year=_claim_year(entity, _P_DEATH),
                 wikipedia_url=wikipedia_url,
+                sitelinks=len(sitelinks) if isinstance(sitelinks, dict) else 0,
             )
         )
 
@@ -678,6 +680,21 @@ def _preferred_name(label: str, names: set[str], qid: str) -> str:
     return qid
 
 
+def _int_or_zero(value: str) -> int:
+    """Read a SPARQL integer binding, treating absence or junk as zero.
+
+    Args:
+        value: The flattened binding text.
+
+    Returns:
+        The integer, or 0.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _merge_rows(
     rows: Iterable[dict[str, str]], *, names_are_aliases: bool = True
 ) -> list[tuple[Candidate, set[str]]]:
@@ -722,11 +739,15 @@ def _merge_rows(
                 "countries": [],
                 "occupations": [],
                 "article": row.get("article", ""),
+                "sitelinks": _int_or_zero(row.get("sitelinks", "")),
                 "names": set(),
             },
         )
         # GROUP_CONCAT already collapsed these, so a row carries the whole
-        # set as one comma-joined string. Several rows per person can still
+        # set as one comma-joined string. Its element order is the endpoint's
+        # and changes between identical queries, so the fold sorts them below:
+        # they are rendered into the LLM prompt, which is hashed for the
+        # llm_calls cache. Several rows per person can still
         # arrive when more than one requested name matched them.
         for field, value in (
             ("countries", row.get("countries", "")),
@@ -762,9 +783,10 @@ def _merge_rows(
                     ),
                     birth_year=entry["birth"],
                     death_year=entry["death"],
-                    country=", ".join(entry["countries"]),
-                    occupations=tuple(entry["occupations"]),
+                    country=", ".join(sorted(entry["countries"])),
+                    occupations=tuple(sorted(entry["occupations"])),
                     wikipedia_url=str(entry["article"]),
+                    sitelinks=int(entry["sitelinks"]),
                 ),
                 names,
             )

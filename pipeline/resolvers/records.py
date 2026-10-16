@@ -20,6 +20,7 @@ from typing import Any, Final, Literal
 
 __all__ = [
     "METHODS",
+    "UNCERTAIN_SPLIT_NOTE",
     "BattleContext",
     "Candidate",
     "Decision",
@@ -37,12 +38,19 @@ METHODS: Final[tuple[str, ...]] = (
     "fuzzy_contextual",  # rapidfuzz above threshold, lifespan-compatible, unambiguous
     "corpus_fuzzy",  # matched an identity already resolved from this corpus
     "llm_disambiguation",  # the deterministic steps left it ambiguous
+    "llm_uncertain",  # the LLM answered UNCERTAIN: kept as a separate corpus-local identity
     "new_entity",  # no viable candidate; a corpus-local identity
     "placeholder",  # the mention names nobody ("Unknown", "various")
     "non_person",  # the mention names an organisation, formation or place, not a person
     "llm_failed",  # the disambiguation call did not return usable data
     "llm_deferred",  # the disambiguation request awaits offline processing
 )
+
+# Written to ``generals.notes`` for a corpus-local person created because the LLM
+# could not tell them from a Wikidata candidate. agents/resolve.yaml matches this
+# text so the no_duplicate_generals gate treats that deliberate split (handover
+# 9.3: prefer a split to a merge) as a warning, not an error.
+UNCERTAIN_SPLIT_NOTE: Final[str] = "kept separate after an uncertain match"
 
 DecisionStatus = Literal["linked", "new", "ambiguous", "unresolved"]
 
@@ -62,6 +70,8 @@ class Candidate:
         country: A country or polity label, used as a tiebreak only.
         occupations: Occupation labels, used to prefer military candidates.
         wikipedia_url: English Wikipedia URL, when the entity has one.
+        sitelinks: Number of Wikimedia sitelinks, a cheap notability signal
+            used to order candidates before the prompt cap. Zero when unknown.
     """
 
     qid: str
@@ -73,6 +83,7 @@ class Candidate:
     country: str = ""
     occupations: tuple[str, ...] = ()
     wikipedia_url: str = ""
+    sitelinks: int = 0
 
     @property
     def is_military(self) -> bool:
@@ -133,6 +144,7 @@ class Mention:
     mentions: int = 1
     polity: str = ""
     context: BattleContext | None = None
+    infobox_order: int | None = None
 
 
 @dataclass
@@ -237,6 +249,9 @@ class Identity:
     birth_year: int | None = None
     death_year: int | None = None
     era: str | None = None
+    # True when any group of this identity was kept apart because the LLM
+    # answered UNCERTAIN, so a Wikidata namesake of it is a known split.
+    uncertain_split: bool = False
 
     @property
     def mentions(self) -> list[Mention]:

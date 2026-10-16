@@ -84,7 +84,6 @@ def sync(test: Callable[..., Coroutine[Any, Any, None]]) -> Callable[..., None]:
     return wrapper
 
 
-
 def _mention(
     name: str,
     *,
@@ -176,9 +175,7 @@ class _StubFetcher:
         self.bodies = list(bodies)
         self.queries: list[str] = []
 
-    async def fetch_raw(
-        self, url: str, *, params: Any = None, headers: Any = None
-    ) -> FetchResult:
+    async def fetch_raw(self, url: str, *, params: Any = None, headers: Any = None) -> FetchResult:
         self.queries.append(str((params or {}).get("query", "")))
         body = self.bodies[min(len(self.queries) - 1, len(self.bodies) - 1)]
         if body is None:
@@ -204,11 +201,7 @@ def _entity(
                 "aliases": {"en": [{"value": a} for a in aliases]},
                 "claims": {
                     "P31": [
-                        {
-                            "mainsnak": {
-                                "datavalue": {"value": {"id": "Q5" if human else "Q178561"}}
-                            }
-                        }
+                        {"mainsnak": {"datavalue": {"value": {"id": "Q5" if human else "Q178561"}}}}
                     ],
                     "P569": [
                         {
@@ -548,12 +541,34 @@ def test_uncertain_splits_rather_than_merges() -> None:
     assert decision.status == "new"
     # A split the ranking can absorb beats a merge that pools two records.
     assert decision.confidence < 0.5
+    # The gate that tells a deliberate split from a duplicate reads this method.
+    assert decision.method == "llm_uncertain"
 
 
 def test_a_qid_that_was_never_offered_is_not_trusted() -> None:
     decision, _ = _disambiguate({"match": "Q999999", "confidence": 1.0})
     assert decision.status == "new"
     assert "not among the candidates" in decision.reasoning
+    assert decision.method == "llm_uncertain"
+
+
+def test_new_entity_from_the_llm_is_not_marked_uncertain() -> None:
+    decision, _ = _disambiguate({"match": "NEW_ENTITY", "confidence": 0.4})
+    assert decision.method == "llm_disambiguation"
+
+
+def test_an_identity_remembers_that_an_uncertain_answer_split_it() -> None:
+    group = _group("Georgy Zakharov")
+    uncertain = Decision(
+        status="new",
+        canonical_name="Georgy Zakharov",
+        method="llm_uncertain",
+        confidence=0.4,
+    )
+    plain = Decision(status="new", canonical_name="Georgy Zakharov", method="new_entity")
+
+    assert _build_identities([group], {group.key: uncertain})[0].uncertain_split
+    assert not _build_identities([group], {group.key: plain})[0].uncertain_split
 
 
 def test_a_failed_call_leaves_the_group_unresolved() -> None:

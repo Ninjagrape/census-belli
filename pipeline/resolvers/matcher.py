@@ -47,6 +47,7 @@ __all__ = [
     "lifespan_verdict",
     "match_against_identities",
     "match_group",
+    "rank_for_prompt",
     "viable_candidates",
 ]
 
@@ -239,6 +240,45 @@ def _ranked(
     return scored
 
 
+def rank_for_prompt(group: MentionGroup, candidates: Sequence[Candidate]) -> list[Candidate]:
+    """Order the date-viable candidates by plausibility, best first.
+
+    The LLM prompt shows only the first few candidates, so the order decides
+    who the model can choose. Source order is the endpoint's, effectively
+    arbitrary, and cut Julius Caesar (11th of 11 for his own name) and
+    Hannibal Barca (15th of 15) from their own prompts.
+
+    Args:
+        group: The mention group.
+        candidates: Everything the candidate source returned.
+
+    Returns:
+        The candidates the date gate keeps, with name-exact before fuzzy,
+        date-confirmed before date-silent, then the matcher's score with its
+        military and polity tiebreaks, then the Wikimedia sitelink count as a
+        notability signal, then Q-id so a re-run orders identically.
+    """
+    years = group.years
+    group_keys = set(group.keys)
+
+    def sort_key(row: tuple[float, float, Candidate]) -> tuple[int, int, float, float, int, str]:
+        raw, ranked, candidate = row
+        exact = bool(group_keys & set(candidate_keys(candidate)))
+        confirmed = lifespan_verdict(candidate, years) is True
+        return (
+            0 if exact else 1,
+            0 if confirmed else 1,
+            -ranked,
+            -raw,
+            -candidate.sitelinks,
+            candidate.qid,
+        )
+
+    return [
+        c for _, _, c in sorted(_ranked(group, viable_candidates(candidates, years)), key=sort_key)
+    ]
+
+
 def _careers_overlap(left: Sequence[int], right: Sequence[int]) -> bool:
     """Whether two sets of battle years could belong to one career.
 
@@ -363,8 +403,7 @@ def match_group(
             runner_up=runner_up,
             candidates_considered=len(viable),
             reasoning=(
-                f"{len(exact)} candidates match the name exactly and the dates "
-                "do not separate them"
+                f"{len(exact)} candidates match the name exactly and the dates do not separate them"
             ),
         )
 

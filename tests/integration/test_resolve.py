@@ -157,7 +157,9 @@ def _seed_battle(conn: Connection, name: str = BATTLE_NAME, date: str = BATTLE_D
     return battle_id
 
 
-def _mention(name: str, *, side: str = SIDE_LABEL, evidence: str = "") -> Mention:
+def _mention(
+    name: str, *, side: str = SIDE_LABEL, evidence: str = "", infobox_order: int | None = None
+) -> Mention:
     """Build a mention of one commander at the fixture battle."""
     return Mention(
         battle_slug="Battle_of_Actium",
@@ -172,6 +174,7 @@ def _mention(name: str, *, side: str = SIDE_LABEL, evidence: str = "") -> Mentio
             year=BATTLE_YEAR,
             date_text=BATTLE_DATE,
         ),
+        infobox_order=infobox_order,
     )
 
 
@@ -305,6 +308,30 @@ def test_a_resolved_commander_reaches_battle_commanders(conn: Connection) -> Non
         _scalar(conn, "SELECT role_evidence FROM battle_commanders LIMIT 1")
         == "Agrippa commanded the fleet"
     )
+
+
+def test_infobox_order_is_written_on_insert_and_replaced_on_update(conn: Connection) -> None:
+    _seed_battle(conn)
+    agrippa = [_mention("Agrippa", infobox_order=1), _mention("Agrippa", infobox_order=0)]
+    _write(conn, _identity("Agrippa", qid="Q48174", mentions=agrippa))
+    _write(conn, _identity("Octavian", qid="Q1405", mentions=[_mention("Octavian")]))
+
+    def orders() -> dict[str, int | None]:
+        rows = conn.execute(
+            text(
+                "SELECT g.canonical_name, bc.infobox_order FROM battle_commanders bc "
+                "JOIN generals g USING (general_id)"
+            )
+        ).fetchall()
+        return {name: order for name, order in rows}
+
+    # The lowest order among a commander's mentions; a body-only mention is NULL.
+    assert orders() == {"Agrippa": 0, "Octavian": None}
+
+    _write(
+        conn, _identity("Agrippa", qid="Q48174", mentions=[_mention("Agrippa", infobox_order=2)])
+    )
+    assert orders()["Agrippa"] == 2
 
 
 def test_years_active_comes_back_as_the_astronomical_year(conn: Connection) -> None:
@@ -623,6 +650,77 @@ def test_the_probable_duplicate_gate_catches_one_man_in_two_spellings(
     _add_local_general(conn, "Karl Philipp von Wrede", 1809, 1816)
     assert _gates(conn)["no_duplicate_generals"].passed
     assert _gates(conn)["probable_duplicate_generals"].actual_value == 1
+
+
+def _add_linked_general(conn: Connection, name: str, qid: str, lo: int, hi: int) -> None:
+    """Insert a general that carries a Wikidata id."""
+    conn.execute(
+        text(
+            "INSERT INTO generals (canonical_name, wikidata_id, years_active) "
+            "VALUES (:n, :q, int4range(:lo, :hi))"
+        ),
+        {"n": name, "q": qid, "lo": lo, "hi": hi},
+    )
+
+
+def _write_uncertain_split(conn: Connection, name: str, *, uncertain: bool) -> None:
+    """Write a corpus-local identity through the stage's writer."""
+    identity = _identity(name, qid=None, mentions=[_mention(name)], confidence=0.4)
+    identity.method = "llm_uncertain" if uncertain else "new_entity"
+    identity.uncertain_split = uncertain
+    _write(conn, identity)
+
+
+def test_an_uncertain_split_beside_a_linked_namesake_is_a_warning_not_an_error(
+    conn: Connection,
+) -> None:
+    # Handover 9.3: UNCERTAIN splits on purpose. Friedrich von Bulow, Georgy
+    # Zakharov, William Holmes and Xanthippus each have a Q-id row and a
+    # corpus-local row from a battle where the LLM could not tell.
+    _seed_battle(conn)
+    _add_linked_general(conn, "Xanthippus", "Q1", -60, 0)
+    _add_linked_general(conn, "Georgy Zakharov", "Q2", -60, 0)
+    _write_uncertain_split(conn, "Xanthippus", uncertain=True)
+    _write_uncertain_split(conn, "Georgy Zakharov", uncertain=True)
+
+    notes = _scalar(conn, "SELECT notes FROM generals WHERE wikidata_id IS NULL LIMIT 1")
+    assert "kept separate after an uncertain match" in notes
+    assert _gates(conn)["no_duplicate_generals"].passed
+    # Both pairs show up in the warning, the one-token name included.
+    assert _gates(conn)["probable_duplicate_generals"].actual_value == 2
+
+
+def test_a_local_row_with_no_uncertain_answer_behind_it_still_fails_the_gate(
+    conn: Connection,
+) -> None:
+    _seed_battle(conn)
+    _add_linked_general(conn, "William Holmes", "Q3", -60, 0)
+    _write_uncertain_split(conn, "William Holmes", uncertain=False)
+
+    result = _gates(conn)["no_duplicate_generals"]
+    assert result.actual_value == 1
+    assert not result.passed
+
+
+def test_two_corpus_local_rows_still_fail_even_if_one_was_an_uncertain_split(
+    conn: Connection,
+) -> None:
+    _seed_battle(conn)
+    _write_uncertain_split(conn, "Friedrich von Bülow", uncertain=True)
+    _add_local_general(conn, "Friedrich von Bulow", -40, -20)
+
+    result = _gates(conn)["no_duplicate_generals"]
+    assert result.actual_value == 1
+    assert not result.passed
+
+
+def test_the_gate_text_matches_the_note_the_writer_emits() -> None:
+    from pipeline.resolvers.records import UNCERTAIN_SPLIT_NOTE
+
+    spec = yaml.safe_load((AGENTS / "resolve.yaml").read_text(encoding="utf-8"))
+    for check in spec["quality_checks"]:
+        if check["name"] in ("no_duplicate_generals", "probable_duplicate_generals"):
+            assert UNCERTAIN_SPLIT_NOTE in check["check"], check["name"]
 
 
 def test_one_identity_that_fails_to_write_does_not_lose_the_others(conn: Connection) -> None:

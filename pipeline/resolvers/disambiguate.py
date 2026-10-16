@@ -271,7 +271,7 @@ def disambiguate(
         return Decision(
             status="new",
             canonical_name=group.display_name,
-            method="llm_disambiguation",
+            method="llm_uncertain",
             confidence=_UNCERTAIN_CONFIDENCE,
             candidates_considered=len(candidates),
             reasoning=f"model uncertain; kept separate rather than merged. {reasoning}".strip(),
@@ -288,7 +288,7 @@ def disambiguate(
     return Decision(
         status="new",
         canonical_name=group.display_name,
-        method="llm_disambiguation",
+        method="llm_uncertain",
         confidence=_UNCERTAIN_CONFIDENCE,
         candidates_considered=len(candidates),
         reasoning=f"model returned {match[:40]!r}, which was not among the candidates offered",

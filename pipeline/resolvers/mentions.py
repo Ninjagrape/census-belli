@@ -208,6 +208,11 @@ def _side_polities(rows: list[dict[str, Any]]) -> dict[tuple[str, str], str]:
     return polities
 
 
+def _optional_int(value: Any) -> int | None:
+    """Read a JSON number as an int, or None when absent or not a whole number."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def load_mentions(commanders_path: Path, battles_path: Path) -> list[Mention]:
     """Read every commander mention, with its battle context attached.
 
@@ -249,6 +254,7 @@ def load_mentions(commanders_path: Path, battles_path: Path) -> list[Mention]:
                 mentions=int(row.get("mentions") or 1),
                 polity=polities.get((slug, side_label), ""),
                 context=contexts.get(slug),
+                infobox_order=_optional_int(row.get("infobox_order")),
             )
         )
 

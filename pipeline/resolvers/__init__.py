@@ -45,6 +45,7 @@ from pipeline.resolvers.matcher import (
     lifespan_verdict,
     match_against_identities,
     match_group,
+    rank_for_prompt,
     viable_candidates,
 )
 from pipeline.resolvers.mentions import (
@@ -121,6 +122,7 @@ __all__ = [
     "log_unresolved",
     "match_against_identities",
     "match_group",
+    "rank_for_prompt",
     "name_keys",
     "non_person_reason",
     "person_candidates",

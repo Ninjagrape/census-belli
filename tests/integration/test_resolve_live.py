@@ -50,8 +50,10 @@ from pipeline.resolvers import (
     fetch_candidates,
     group_mentions,
     match_group,
+    rank_for_prompt,
     viable_candidates,
 )
+from pipeline.resolvers.disambiguate import MAX_CANDIDATES_IN_PROMPT
 
 _ENV_FLAG = "GENERAL_WAR_LIVE_CRAWL"
 
@@ -104,6 +106,9 @@ KNOWN_COMMANDERS: Final[dict[str, str]] = {
 }
 
 _HANNIBAL_NAME: Final[str] = "Hannibal"
+_SMITH_NAME: Final[str] = "Sidney Smith"
+# Looked up live 2026-10-16 (not recalled): Sir William Sidney Smith, RN.
+SIDNEY_SMITH_QID: Final[str] = "Q1389040"
 
 
 def live_params() -> dict[str, Any]:
@@ -159,7 +164,7 @@ def live_candidates() -> dict[str, list[Candidate]]:
     Returns:
         Surface form to candidates, from the live endpoint.
     """
-    names = [*KNOWN_COMMANDERS, _HANNIBAL_NAME]
+    names = [*KNOWN_COMMANDERS, _HANNIBAL_NAME, _SMITH_NAME]
     return asyncio.run(_fetch_all(names))
 
 
@@ -251,7 +256,7 @@ def test_no_candidate_label_is_qid_shaped(live_candidates: dict[str, list[Candid
 
 
 def test_date_gate_separates_centuries(live_candidates: dict[str, list[Candidate]]) -> None:
-    """"Hannibal" in an 1811 battle must not reach Hannibal Barca (247-183 BC).
+    """ "Hannibal" in an 1811 battle must not reach Hannibal Barca (247-183 BC).
 
     This is the assertion behind ``matcher.py``'s whole design: name
     similarity alone cannot tell a Carthaginian general from anyone else
@@ -300,6 +305,54 @@ def test_known_commanders_resolve_deterministically(
         if decision.status != "linked" or decision.qid != expected_qid:
             failures.append((name, decision.status, decision.qid, decision.reasoning))
 
-    assert not failures, (
-        f"expected a deterministic link with no LLM step, got: {failures}"
+    assert not failures, f"expected a deterministic link with no LLM step, got: {failures}"
+
+
+def _group_for_years(name: str, battles: Sequence[tuple[str, int]]) -> MentionGroup:
+    """Build one group spanning several dated battles."""
+    mentions = [
+        Mention(
+            battle_slug=b.lower().replace(" ", "-"),
+            battle_name=b,
+            side_label="side",
+            name=name,
+            context=BattleContext(slug=b.lower().replace(" ", "-"), name=b, year=y),
+        )
+        for b, y in battles
+    ]
+    return group_mentions(mentions)[0]
+
+
+def test_famous_commanders_survive_the_prompt_cap(
+    live_candidates: dict[str, list[Candidate]],
+) -> None:
+    """Caesar, Hannibal and Sidney Smith are among the candidates the prompt shows.
+
+    The 2026-10-15 corpus run cut each from its own LLM prompt: the stage
+    handed the prompt the endpoint's order and the prompt kept the first eight.
+    The groups carry a stray modern year (1948, 2015) as the real ones do,
+    which is what keeps modern namesakes date-compatible and the group
+    ambiguous, so the ranking has to do the work.
+    """
+    cases = (
+        ("Julius Caesar", CAESAR_QID, [("Alesia", -51), ("Pharsalus", -47), ("Odd", 1948)]),
+        (_HANNIBAL_NAME, HANNIBAL_BARCA_QID, [("Cannae", -215), ("Zama", -201), ("Odd", 2015)]),
+        (_SMITH_NAME, SIDNEY_SMITH_QID, [("Acre", 1799), ("Odd", 2015)]),
     )
+    missing: list[tuple[str, str, list[str]]] = []
+
+    for name, expected_qid, battles in cases:
+        group = _group_for_years(name, battles)
+        shown = rank_for_prompt(group, live_candidates.get(name, []))[:MAX_CANDIDATES_IN_PROMPT]
+        if expected_qid not in {c.qid for c in shown}:
+            missing.append((name, expected_qid, [c.qid for c in shown]))
+
+    assert not missing, f"expected commander cut from the prompt: {missing}"
+
+
+def test_live_candidates_carry_sitelink_counts(
+    live_candidates: dict[str, list[Candidate]],
+) -> None:
+    """The query returns ``wikibase:sitelinks``, the ranking's notability signal."""
+    caesar = next(c for c in live_candidates["Julius Caesar"] if c.qid == CAESAR_QID)
+    assert caesar.sitelinks > 50, f"Caesar's sitelink count read as {caesar.sitelinks}"

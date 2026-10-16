@@ -112,6 +112,8 @@ prompt:
     the best canonical name. If the match is uncertain, respond with
     "UNCERTAIN" and your best guess with a confidence score.
 
+  # Rendered by render_template (regex on {word}), not str.format, so literal
+  # braces are written as single braces. Doubling them leaks into the prompt.
   user_template: |
     Commander mention: "{name}"
     Battle: {battle_name} ({date}, {war})
@@ -123,7 +125,7 @@ prompt:
     {candidates_formatted}
 
     Which candidate matches this commander? Respond with JSON:
-    {{"match": "<wikidata_id or NEW_ENTITY or UNCERTAIN>", "confidence": 0.0-1.0, "reasoning": "..."}}
+    {"match": "<wikidata_id or NEW_ENTITY or UNCERTAIN>", "confidence": 0.0-1.0, "reasoning": "..."}
 
   # The stage loads this at run time and hands it to the LLM layer, which
   # validates every response against it. A Q-id cannot be constrained to the
@@ -177,6 +179,13 @@ quality_checks:
     # with battle years that overlap (or no years to compare), where at least
     # one of the pair has no Wikidata id. A pair where both carry different
     # Q-ids is two people Wikidata already told apart.
+    #
+    # One deliberate split is excluded: a corpus-local row whose notes carry
+    # "kept separate after an uncertain match" (records.UNCERTAIN_SPLIT_NOTE) is
+    # a person the LLM answered UNCERTAIN about, set apart from a Wikidata
+    # namesake on purpose (handover 9.3, prefer a split to a merge). Such a pair
+    # is counted by probable_duplicate_generals instead. Two corpus-local rows,
+    # or a corpus-local row with no such note, still fail here.
     check: >
       SELECT COUNT(*) FROM generals a
       JOIN generals b ON a.general_id < b.general_id
@@ -189,6 +198,10 @@ quality_checks:
       WHERE (a.wikidata_id IS NULL OR b.wikidata_id IS NULL)
         AND (a.years_active IS NULL OR b.years_active IS NULL
              OR a.years_active && b.years_active)
+        AND NOT (a.wikidata_id IS NULL AND b.wikidata_id IS NOT NULL
+                 AND COALESCE(a.notes, '') LIKE '%kept separate after an uncertain match%')
+        AND NOT (b.wikidata_id IS NULL AND a.wikidata_id IS NOT NULL
+                 AND COALESCE(b.notes, '') LIKE '%kept separate after an uncertain match%')
     threshold: "= 0"
     severity: error
     description: "No two generals with the same name, overlapping years and a missing Wikidata id"
@@ -199,6 +212,10 @@ quality_checks:
     # catches one man split across spellings ("Karl von Wrede" and "Karl Philipp
     # von Wrede", "Gebhard von Blucher" and "Gebhard Leberecht von Blucher").
     # A warning, because two Romans can share both ends of a three-part name.
+    # It also counts the deliberate UNCERTAIN splits that no_duplicate_generals
+    # excludes (a corpus-local row noted "kept separate after an uncertain
+    # match" beside a Wikidata row of the same folded name), including
+    # one-token names like Xanthippus that the first/last-token rule skips.
     # On the 2026-10 pilot it found five real splits and one non-person pair.
     check: >
       WITH n AS (
@@ -207,7 +224,8 @@ quality_checks:
                  regexp_replace(translate(lower(canonical_name),
                    'àáâãäåçèéêëìíîïñòóôõöùúûüýÿšžłø', 'aaaaaaceeeeiiiinooooouuuuyyszlo'),
                    '[^a-z0-9 ]+', '', 'g'),
-                 ' +', ' ', 'g') AS nm
+                 ' +', ' ', 'g') AS nm,
+               COALESCE(notes, '') LIKE '%kept separate after an uncertain match%' AS uncertain_split
         FROM generals
       ), k AS (
         SELECT *, split_part(nm, ' ', 1) AS first_tok,
@@ -217,8 +235,11 @@ quality_checks:
       )
       SELECT COUNT(*) FROM k a
       JOIN k b ON a.general_id < b.general_id
-       AND a.first_tok = b.first_tok AND a.last_tok = b.last_tok
-       AND a.first_tok <> a.last_tok
+       AND ((a.first_tok = b.first_tok AND a.last_tok = b.last_tok
+             AND a.first_tok <> a.last_tok)
+            OR (replace(a.nm, ' ', '') = replace(b.nm, ' ', '')
+                AND ((a.wikidata_id IS NULL AND a.uncertain_split AND b.wikidata_id IS NOT NULL)
+                  OR (b.wikidata_id IS NULL AND b.uncertain_split AND a.wikidata_id IS NOT NULL))))
       WHERE (a.wikidata_id IS NULL OR b.wikidata_id IS NULL)
         AND (a.years_active IS NULL OR b.years_active IS NULL
              OR a.years_active && b.years_active)
