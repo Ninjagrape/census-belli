@@ -28,10 +28,14 @@ import numpy as np
 from scipy.linalg import cho_solve, solve_triangular
 
 from pipeline.imputers.design import ImputeDesign, RandomBlock
+from pipeline.imputers.likelihood import SharedError
 from pipeline.imputers.model import is_random_active
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     import arviz as az
+
+# Third seed component of the reconcile-draw stream, kept apart from the main one.
+_THETA_STREAM = 1
 
 __all__ = [
     "PosteriorSamples",
@@ -39,8 +43,10 @@ __all__ = [
     "apply_mnar_delta",
     "conditional_draw",
     "draw_rounds",
+    "era_loading_table",
     "extract_posterior",
     "select_draw_indices",
+    "select_theta_indices",
     "side_means",
 ]
 
@@ -74,11 +80,14 @@ class RoundSet:
         values: ``(n_rounds, n_sides)`` log troop counts, MNAR delta applied.
         is_imputed: Per side, True when it had no likelihood.
         draw_index: The pooled posterior-draw index each round used.
+        theta_index: The reconcile draw each round took its shared parameters
+            from, or None when the shared error is not propagated.
     """
 
     values: np.ndarray
     is_imputed: np.ndarray
     draw_index: tuple[int, ...]
+    theta_index: tuple[int, ...] | None = None
 
 
 def _pooled(idata: az.InferenceData, name: str) -> np.ndarray:
@@ -145,6 +154,82 @@ def select_draw_indices(n_chains: int, n_draws: int, n_rounds: int) -> list[int]
         draw = min(n_draws - 1, int((slot + 0.5) * n_draws / per_chain))
         indices.append(chain * n_draws + draw)
     return indices
+
+
+def select_theta_indices(theta_centered: np.ndarray, n_rounds: int, seed: int) -> list[int]:
+    """Latin hypercube choice of one reconcile draw per round.
+
+    Independent uniform picks leave the round-to-round spread of theta noisy at
+    the 20 or so rounds Rubin pooling uses, which is spread the pooled variance
+    inherits. Sorting by the leading component and taking one draw from each of
+    ``n_rounds`` equal-probability strata covers it without gaps. The position
+    inside a stratum is uniform, not the stratum midpoint: midpoints understate
+    theta's between-round variance by 6 to 12%, which Rubin's between-imputation
+    term then inherits. A permutation seeded by ``seed`` decides which round
+    gets which stratum, so rounds are not ordered by theta.
+
+    Args:
+        theta_centered: ``(n_draws, p)`` centred shared parameters.
+        n_rounds: Rounds wanted.
+        seed: Base seed; the permutation and the within-stratum jitter use
+            ``default_rng([seed, 1])``.
+
+    Returns:
+        ``n_rounds`` row indices into ``theta_centered``, round ``j`` using the
+        ``j``-th. Deterministic per seed.
+    """
+    n_draws = len(theta_centered)
+    order = np.argsort(theta_centered[:, 0], kind="stable")
+    rng = np.random.default_rng([seed, _THETA_STREAM])
+    permutation = rng.permutation(n_rounds)
+    jitter = rng.uniform(size=n_rounds)
+    positions = np.minimum(
+        ((np.arange(n_rounds) + jitter) * n_draws / n_rounds).astype(int), n_draws - 1
+    )
+    strata = order[positions]
+    return [int(i) for i in strata[permutation]]
+
+
+def era_loading_table(design: ImputeDesign) -> np.ndarray | None:
+    """Precision-weighted mean likelihood loading of the observed sides, per era.
+
+    An imputed side, or a side too weak to carry a likelihood, has no data to
+    shift with theta, but its prior mean is the era level, which was learned
+    from observed sides whose estimates do shift. This table is how much, per
+    era, those observed sides move per unit of centred theta.
+
+    Two approximations, both deliberate. Weighting by each side's precision
+    over-weights precise sides relative to the impute model's own era-level
+    weighting, which is a different average of the same sides. An era with no
+    observed side gets a zero shift, so its imputed sides do not move with
+    theta even though their true level plausibly would.
+
+    Args:
+        design: The design, with each battle's likelihood and its loading.
+
+    Returns:
+        ``(n_eras, p)``, zero for an era with no observed side; None when no
+        battle carries a loading (the shared error is not propagated).
+    """
+    n_eras = len(design.eras)
+    total: np.ndarray | None = None
+    weight = np.zeros(n_eras)
+    for battle in design.battles:
+        if battle.shift_loading is None or not len(battle.obs_local):
+            continue
+        if total is None:
+            total = np.zeros((n_eras, battle.shift_loading.shape[1]))
+        eras = design.era_index[battle.rows[battle.obs_local]]
+        for j, era in enumerate(eras):
+            w = float(battle.precision[j, j])
+            total[era] += w * battle.shift_loading[j]
+            weight[era] += w
+    if total is None:
+        return None
+    table: np.ndarray = np.divide(
+        total, weight[:, None], out=np.zeros_like(total), where=weight[:, None] > 0
+    )
+    return table
 
 
 def _random_effect(
@@ -215,6 +300,7 @@ def conditional_draw(
     tau_b: float,
     sigma: float,
     rng: np.random.Generator,
+    theta_shift: np.ndarray | None = None,
 ) -> np.ndarray:
     """Draw every side's latent log troops given the likelihood, per battle.
 
@@ -224,6 +310,9 @@ def conditional_draw(
         tau_b: Between-battle sd in this draw.
         sigma: Within-battle sd in this draw.
         rng: Random generator.
+        theta_shift: This round's centred shared reconcile parameters, ``(p,)``.
+            Every battle's likelihood mean moves by its loading times this, so
+            battles in one round share the same reconcile error.
 
     Returns:
         ``(n_sides,)`` latent log troop counts.
@@ -244,7 +333,10 @@ def conditional_draw(
             precision = prior_precision.copy()
             precision[np.ix_(ix, ix)] += battle.precision
             rhs = rhs.copy()
-            rhs[ix] += battle.precision @ battle.m_lik
+            m_lik = battle.m_lik
+            if theta_shift is not None and battle.shift_loading is not None:
+                m_lik = m_lik + battle.shift_loading @ theta_shift
+            rhs[ix] += battle.precision @ m_lik
         chol = np.linalg.cholesky(precision)
         mean = cho_solve((chol, True), rhs)
         noise = solve_triangular(chol.T, rng.standard_normal(n), lower=False)
@@ -282,6 +374,7 @@ def draw_rounds(
     n_rounds: int,
     seed: int,
     mnar_delta: float,
+    shared: SharedError | None = None,
 ) -> RoundSet:
     """Produce every imputation round from the posterior.
 
@@ -291,18 +384,43 @@ def draw_rounds(
         n_rounds: Number of rounds.
         seed: Base seed; round ``j`` uses ``default_rng([seed, j])``.
         mnar_delta: See :func:`apply_mnar_delta`.
+        shared: Reconcile's shared parameter draws. When given, round ``j``
+            picks one reconcile draw from its own stream
+            a stratified choice (:func:`select_theta_indices`; its
+            permutation is separate from the stream the conditional draws use,
+            so switching this on does not change them). Every battle's
+            likelihood mean is shifted for it, and so is every side's prior
+            mean by its era's mean loading (:func:`era_loading_table`), so an
+            imputed side co-moves with the observed sides it is imputed from.
 
     Returns:
         The rounds.
     """
     indices = select_draw_indices(post.n_chains, post.n_draws, n_rounds)
     values = np.empty((n_rounds, design.n_sides))
+    theta_index = (
+        [] if shared is None else select_theta_indices(shared.theta_centered, n_rounds, seed)
+    )
+    era_table = era_loading_table(design) if shared is not None else None
     for j, flat in enumerate(indices):
         rng = np.random.default_rng([seed, j])
+        theta_shift = None
+        if shared is not None:
+            theta_shift = shared.theta_centered[theta_index[j]]
         means = side_means(post, flat, design, rng)
+        if theta_shift is not None and era_table is not None:
+            # Every side, not only the unobserved: an observed side's likelihood
+            # shifts by its own loading, and shifting its prior mean as well keeps
+            # the prior-coupled difference to an imputed neighbour from moving.
+            means = means + era_table[design.era_index] @ theta_shift
         values[j] = conditional_draw(
-            design, means, float(post.tau_b[flat]), float(post.sigma[flat]), rng
+            design, means, float(post.tau_b[flat]), float(post.sigma[flat]), rng, theta_shift
         )
     is_imputed = ~design.is_observed
     values = apply_mnar_delta(values, is_imputed, design.mnar, mnar_delta)
-    return RoundSet(values=values, is_imputed=is_imputed, draw_index=tuple(indices))
+    return RoundSet(
+        values=values,
+        is_imputed=is_imputed,
+        draw_index=tuple(indices),
+        theta_index=tuple(theta_index) if shared is not None else None,
+    )

@@ -113,6 +113,8 @@ def write_rounds(
             "config_hash": config_digest,
             "n_sides": design.n_sides,
             "n_imputed": int(rounds.is_imputed.sum()),
+            "shared_error_propagated": rounds.theta_index is not None,
+            "theta_draw_index": None if rounds.theta_index is None else rounds.theta_index[n],
         }
         (directory / "manifest.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
@@ -128,6 +130,7 @@ def write_gate_report(
     run_id: int,
     written: bool,
     gates: Sequence[GateResult],
+    shared_error: dict[str, object] | None = None,
 ) -> Path:
     """Write the gate report under the scale directory.
 
@@ -138,6 +141,8 @@ def write_gate_report(
         written: Whether the rounds were written (False when the fit did not
             converge, in which case the gates describe nothing on disk).
         gates: The dataset-level gate results.
+        shared_error: From ``shared_error_summary``: whether the shared
+            reconcile error was propagated, with the diagnostics.
 
     Returns:
         The scale-level report path.
@@ -148,6 +153,8 @@ def write_gate_report(
         "rounds_written": written,
         "gates": [g.as_dict() for g in gates],
     }
+    if shared_error is not None:
+        report["shared_error"] = shared_error
     text = json.dumps(report, indent=2, sort_keys=True, default=_json_default)
     scale_dir = root / scale
     scale_dir.mkdir(parents=True, exist_ok=True)

@@ -33,14 +33,44 @@ description: >
   pooled level absorbs that shift rather than treating the side as a random
   draw from the named polities.
 
-  Known limitation (shared reconcile error is not propagated). Reconcile's
-  neutral fit has measurement error shared across battles, g_unlabelled (the
-  unlabelled-regime offset) and a_era. Impute keeps only each battle's
-  within-battle covariance and draws battles independently in every round, so
-  that cross-battle correlation is dropped and the uncertainty in beta_force
-  is understated for battles in the mixed regime. Evaluate must run a +/-1 sd
-  g_unlabelled sensitivity to bound it; the proper fix is to export the regime
-  draws in the npz and carry them through the rounds (TODO.md, Stage 6).
+  Shared reconcile error is propagated, approximately. Reconcile's neutral fit
+  has measurement error shared across battles, g_unlabelled (the
+  unlabelled-regime offset) and a_era, and its npz carries those draws aligned
+  with the side draws. Impute regresses every side's draws on theta = (g_unlabelled,
+  a_era) by least squares (a constant or absent component is dropped), builds
+  each battle's likelihood from the residuals through the prior division, and
+  in each round picks one reconcile draw (seeded per round, from a stream
+  separate from the conditional draws) and shifts every battle's likelihood
+  mean by its loading times that draw's centred theta. All battles in a round
+  share the draw, which restores the cross-battle correlation and the
+  uncertainty in beta_force that independent per-battle Gaussians dropped. The
+  shift is carried back through the prior division. The posterior mean moves
+  less than the data estimate by the side prior's pull, but that prior's mean
+  m0 = corpus_level - offset_bar co-moves with g (about -w_u per unit g), so the
+  likelihood loading is B + P^-1 (B - 1 c') / s0^2 with c = d m0 / d theta,
+  regressed from the exported m0 draws; with m0 held fixed, an all-unlabelled
+  side's data loading of -1 would come out overstated by 1 / (P s0^2). A draws
+  file without m0 falls back to fixed m0 and logs impute_m0_draws_absent. The
+  gate report records the mean gap between the recovered loadings and the
+  design's (-unlabelled share on g, -share * era on a_era). Imputed sides
+  co-move too: each round adds, to the mean of every side, the precision-weighted
+  mean likelihood loading of the observed sides in its era times centred theta,
+  so an imputed side shifts with the observed sides its era level is learned
+  from. Weak sides are classified on the raw covariance, so propagation does not
+  change which sides are missing. The reconcile draw per round is stratified on
+  the leading theta component (permuted by the round seed), not independent.
+  Remaining approximation: the dependence on theta is linear-Gaussian and conditioned
+  on two shared parameters only; any other shared structure (for example the
+  b_type and lineage effects) stays in the within-battle residual covariance
+  or is dropped, and the imputation model itself is fit on the residual
+  likelihood. Old draws files without the shared arrays, or a theta with no
+  variance, fall back to independent battles and log
+  impute_shared_error_not_propagated; params.propagate_shared_error: false
+  forces that. gate_report.json and each round manifest record whether it was
+  on, the reconcile draw per round, the mean absolute loading and the share of
+  side variance theta explains. Evaluate's +/-1 sd g_unlabelled variant tests
+  misspecification of g's posterior mean (the rounds already carry theta), not
+  what the approximation misses.
 
   Runs once per scale. neutral (primary) reads reconcile's regime-neutral
   draws (data/processed/reconcile/neutral_draws_run{run_id}.npz) and divides
@@ -83,6 +113,7 @@ params:
   # as missing.
   min_lik_precision: 0.5
   published_default_sd: 1.0           # log sd when a published estimate has no interval
+  propagate_shared_error: true        # neutral scale: carry reconcile's g_unlabelled/a_era error across battles
 
   imputation_priors: config/imputation_priors.yaml
   reconcile_root: data/processed/reconcile

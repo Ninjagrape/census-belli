@@ -85,6 +85,7 @@ class ImputeParams:
     priors_path: str = str(DEFAULT_PRIORS_PATH)
     reconcile_root: str = "data/processed/reconcile"
     draws_path: str | None = None
+    propagate_shared_error: bool = True
 
     @classmethod
     def from_params(cls, params: dict[str, Any]) -> ImputeParams:
@@ -131,6 +132,9 @@ class ImputeParams:
             priors_path=str(params.get("imputation_priors", d.priors_path)),
             reconcile_root=str(params.get("reconcile_root", d.reconcile_root)),
             draws_path=None if draws_path is None else str(draws_path),
+            propagate_shared_error=bool(
+                params.get("propagate_shared_error", d.propagate_shared_error)
+            ),
         )
 
 

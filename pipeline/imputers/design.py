@@ -85,6 +85,8 @@ class BattleBlock:
         obs_local: Positions within ``rows`` of the sides with a likelihood.
         m_lik: Likelihood mean for those sides.
         precision: Likelihood precision for those sides.
+        shift_loading: ``(k, p)`` loading of ``m_lik`` on the shared reconcile
+            parameters, or None.
     """
 
     battle_id: int
@@ -92,6 +94,7 @@ class BattleBlock:
     obs_local: np.ndarray
     m_lik: np.ndarray
     precision: np.ndarray
+    shift_loading: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -269,7 +272,9 @@ def build_design(
         for j in obs_local:
             flat_pos[int(rows[j])] = len(flat_rows)
             flat_rows.append(int(rows[j]))
-        battles.append(BattleBlock(battle_id, rows, obs_local, lik.m_lik, lik.precision))
+        battles.append(
+            BattleBlock(battle_id, rows, obs_local, lik.m_lik, lik.precision, lik.shift_loading)
+        )
 
     grouped: dict[int, list[BattleBlock]] = defaultdict(list)
     for block in battles:

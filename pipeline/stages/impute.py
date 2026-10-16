@@ -44,10 +44,12 @@ from pipeline.imputers.conditional import RoundSet, draw_rounds, extract_posteri
 from pipeline.imputers.design import ImputeDesign, build_design
 from pipeline.imputers.gates import GateResult, run_gates
 from pipeline.imputers.likelihood import (
+    LikelihoodStats,
     NeutralDraws,
     likelihoods_from_draws,
     likelihoods_from_published,
     load_neutral_draws,
+    shared_error_summary,
 )
 from pipeline.imputers.load import (
     latest_written_neutral_run_id,
@@ -82,7 +84,7 @@ OWNS_DB_CONNECTION = True
 
 def _build_likelihoods(
     conn: Any, ip: ImputeParams, sides: list[SideRow], counts: ImputeCounts
-) -> tuple[list[BattleLikelihood], int | None]:
+) -> tuple[list[BattleLikelihood], int | None, LikelihoodStats]:
     """Build the per-battle likelihoods for the configured scale.
 
     Args:
@@ -92,7 +94,8 @@ def _build_likelihoods(
         counts: Counters to update.
 
     Returns:
-        The likelihoods and the reconcile run id they came from.
+        The likelihoods, the reconcile run id they came from, and the build
+        statistics (which carry the shared-error fit, if any).
 
     Raises:
         FileNotFoundError: On the neutral scale, if reconcile has written no
@@ -106,6 +109,7 @@ def _build_likelihoods(
         return (
             likelihoods_from_published(sides, default_sd=ip.published_default_sd),
             published_run_id(conn),
+            LikelihoodStats(shared_reason="published_scale"),
         )
 
     expected = latest_written_neutral_run_id(conn)
@@ -137,12 +141,15 @@ def _build_likelihoods(
     _check_fingerprint(conn, neutral, path)
     logger.info("impute_neutral_draws_loaded", path=str(path), run_id=neutral.run_id)
     liks, stats = likelihoods_from_draws(
-        neutral, {s.side_id for s in sides}, min_precision=ip.min_lik_precision
+        neutral,
+        {s.side_id for s in sides},
+        min_precision=ip.min_lik_precision,
+        propagate_shared=ip.propagate_shared_error,
     )
     counts.sides_stale_in_draws = stats.stale_sides
     counts.sides_weak_as_missing = stats.weak_sides
     counts.battles_diagonal_fallback = stats.diagonal_battles
-    return liks, neutral.run_id
+    return liks, neutral.run_id, stats
 
 
 def _check_fingerprint(conn: Any, neutral: NeutralDraws, path: Path) -> None:
@@ -175,6 +182,7 @@ def _fit_and_write(
     reconcile_run_id: int | None,
     config_digest: str,
     counts: ImputeCounts,
+    likelihood_stats: LikelihoodStats,
 ) -> dict[str, Any]:
     """Sample the model, then write the rounds if the fit converged.
 
@@ -186,6 +194,7 @@ def _fit_and_write(
         reconcile_run_id: The reconcile run behind the likelihood.
         config_digest: Hash of the run configuration, for the manifests.
         counts: Counters to update.
+        likelihood_stats: From the likelihood build; supplies the shared-error fit.
 
     Returns:
         The ``model_runs.diagnostics`` payload.
@@ -227,6 +236,8 @@ def _fit_and_write(
         reconcile_run_id=reconcile_run_id,
         written=converged,
     )
+    shared = likelihood_stats.shared
+    reason = likelihood_stats.shared_reason
     if not converged:
         logger.error(
             "impute_fit_not_written",
@@ -234,7 +245,14 @@ def _fit_and_write(
             worst=worst,
             hint="no rounds or log rows written; see model_convergence",
         )
-        write_gate_report(root, scale=ip.scale, run_id=run_id, written=False, gates=[])
+        write_gate_report(
+            root,
+            scale=ip.scale,
+            run_id=run_id,
+            written=False,
+            gates=[],
+            shared_error=shared_error_summary(shared, reason),
+        )
         return diagnostics
 
     rounds = draw_rounds(
@@ -243,6 +261,7 @@ def _fit_and_write(
         n_rounds=ip.n_imputations,
         seed=ip.random_seed,
         mnar_delta=ip.mnar_delta,
+        shared=shared,
     )
     gates = _gates(ip, design, rounds)
     write_rounds(
@@ -263,7 +282,14 @@ def _fit_and_write(
             n_rounds=ip.n_imputations,
             counts=counts,
         )
-    write_gate_report(root, scale=ip.scale, run_id=run_id, written=True, gates=gates)
+    write_gate_report(
+        root,
+        scale=ip.scale,
+        run_id=run_id,
+        written=True,
+        gates=gates,
+        shared_error=shared_error_summary(shared, reason, rounds.theta_index),
+    )
     counts.sides_imputed = int(rounds.is_imputed.sum())
     return diagnostics
 
@@ -310,7 +336,7 @@ def _run_body(
         logger.warning("impute_no_sides", hint="no battle_sides rows; writing nothing")
         return
 
-    likelihoods, reconcile_run_id = _build_likelihoods(conn, ip, sides, counts)
+    likelihoods, reconcile_run_id, likelihood_stats = _build_likelihoods(conn, ip, sides, counts)
     design = build_design(sides, likelihoods, priors)
     counts.sides_observed = design.n_observed
     if design.n_observed == 0:
@@ -350,6 +376,7 @@ def _run_body(
         reconcile_run_id=reconcile_run_id,
         config_digest=config_hash(config_payload),
         counts=counts,
+        likelihood_stats=likelihood_stats,
     )
     run_store.complete_model_run(conn, run_id, diagnostics)
     if owns_connection:

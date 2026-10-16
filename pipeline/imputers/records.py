@@ -76,6 +76,10 @@ class BattleLikelihood:
         precision: Likelihood precision, shape ``(k, k)``, positive definite.
         method: ``'joint'`` (full matrix), ``'diagonal'`` (fallback) or
             ``'published'``.
+        shift_loading: ``(k, p)`` response of ``m_lik`` to the ``p`` shared
+            reconcile parameters, or None when the shared error is not
+            propagated. A round that draws theta shifts ``m_lik`` by this
+            times the centred theta.
     """
 
     battle_id: int
@@ -83,6 +87,7 @@ class BattleLikelihood:
     m_lik: np.ndarray
     precision: np.ndarray
     method: str
+    shift_loading: np.ndarray | None = None
 
 
 @dataclass

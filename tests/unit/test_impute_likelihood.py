@@ -147,6 +147,58 @@ def test_load_reads_the_fingerprint_and_tolerates_its_absence(tmp_path: Path) ->
     assert load_neutral_draws(old).database is None
 
 
+def test_load_leaves_the_shared_regime_fields_none_on_an_old_file(tmp_path: Path) -> None:
+    old = tmp_path / "neutral_draws_run2.npz"
+    _write_draws(old, 2, np.zeros((5, 2)), [1, 2])
+
+    loaded = load_neutral_draws(old)
+
+    assert loaded.g_unlabelled is None
+    assert loaded.a_era is None
+    assert loaded.offset_bar is None
+    assert loaded.side_era is None
+    assert loaded.side_unlabelled_share is None
+
+
+def test_load_reads_the_shared_regime_fields_and_checks_their_shapes(tmp_path: Path) -> None:
+    path = tmp_path / "neutral_draws_run3.npz"
+    shared = {
+        "g_unlabelled": np.arange(5.0),
+        "a_era": np.arange(5.0),
+        "offset_bar": np.arange(5.0),
+        "side_era": np.array([0.1, 0.2]),
+        "side_unlabelled_share": np.array([0.0, 1.0]),
+    }
+    np.savez(
+        path,
+        run_id=3,
+        side_id=np.array([1, 2], dtype=np.int64),
+        battle_id=np.array([1, 1], dtype=np.int64),
+        draws=np.zeros((5, 2)),
+        m0_mean=M0,
+        s0_mean=S0,
+        **shared,
+    )
+
+    loaded = load_neutral_draws(path)
+    np.testing.assert_array_equal(loaded.g_unlabelled, shared["g_unlabelled"])
+    np.testing.assert_array_equal(loaded.side_unlabelled_share, shared["side_unlabelled_share"])
+
+    bad = tmp_path / "neutral_draws_run4.npz"
+    np.savez(
+        bad,
+        run_id=4,
+        side_id=np.array([1, 2], dtype=np.int64),
+        battle_id=np.array([1, 1], dtype=np.int64),
+        draws=np.zeros((5, 2)),
+        m0_mean=M0,
+        s0_mean=S0,
+        side_era=np.zeros(3),
+    )
+    with pytest.raises(ValueError, match="side_era"):
+        load_neutral_draws(bad)
+
+
 def test_likelihoods_from_draws_recover_a_known_likelihood(tmp_path: Path) -> None:
     rng = np.random.default_rng(0)
     precision = np.array([[2.0, 0.0], [0.0, 3.0]])
