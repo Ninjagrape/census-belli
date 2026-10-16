@@ -9,6 +9,7 @@ import math
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from pipeline.reconcilers.design import build_design
 from pipeline.reconcilers.neutral import (
@@ -20,7 +21,9 @@ from pipeline.reconcilers.neutral import (
 from pipeline.reconcilers.records import Report, SourceKey
 
 
-def _report(report_id: int, side_id: int, battle_id: int) -> Report:
+def _report(
+    report_id: int, side_id: int, battle_id: int, regime: str = "modern_scholarly"
+) -> Report:
     return Report(
         report_id=report_id,
         side_id=side_id,
@@ -31,7 +34,7 @@ def _report(report_id: int, side_id: int, battle_id: int) -> Report:
         quantity="troops",
         reported_value=10_000.0 * report_id,
         scope="engaged",
-        claim_regime="modern_scholarly",
+        claim_regime=regime,
         year_astronomical=1800,
     )
 
@@ -124,6 +127,8 @@ def test_the_npz_has_the_documented_arrays_and_dtypes(tmp_path: Path) -> None:
             "draws",
             "m0_mean",
             "s0_mean",
+            "side_era",
+            "side_unlabelled_share",
         }
         assert int(data["run_id"]) == 7
         assert str(data["database"]) == "db_a"
@@ -175,3 +180,96 @@ def test_neutral_estimates_are_stamped_with_their_own_run_id() -> None:
     other = _Conn()
     write_side_estimates(other, [published])
     assert "neutral" not in other.calls[0][0]
+
+
+def _shared_summary(n_draws: int = 4000):  # type: ignore[no-untyped-def]
+    """A neutral summary whose shared-parameter draws are exact multiples of a row index.
+
+    Side 20 carries one unlabelled and one modern report, side 30 only an
+    unlabelled one dated 1800, side 10 only a modern one.
+    """
+    import arviz as az
+
+    reports = [
+        _report(1, 30, 3, "unlabelled"),
+        _report(2, 10, 1),
+        _report(3, 20, 1, "unlabelled"),
+        _report(4, 20, 1),
+    ]
+    design = build_design(reports, quantity="troops", ancient_cutoff_year=500)
+    chains, per_chain = 2, n_draws // 2
+    index = (np.arange(n_draws, dtype=np.float64) / 1000.0).reshape(chains, per_chain)
+    regimes = design.coords()["regime"]
+    g_regime = np.zeros((chains, per_chain, len(regimes)))
+    g_regime[:, :, regimes.index("unlabelled")] = 2.0 * index
+    posterior = {
+        "mu_side": np.repeat(index[:, :, None], design.n_sides, axis=2),
+        # m0 = corpus_level - offset_bar, so it falls as offset_bar rises.
+        "m0": 9.0 - 4.0 * index,
+        "s0": np.full((chains, per_chain), 1.0),
+        "g_regime": g_regime,
+        "a_era": 3.0 * index,
+        "offset_bar": 4.0 * index,
+    }
+    idata = az.from_dict(
+        posterior=posterior,
+        coords={"side": [str(s) for s in design.side_ids], "regime": regimes},
+        dims={"mu_side": ["side"], "g_regime": ["regime"]},
+    )
+    battles = {30: 3, 10: 1, 20: 1}
+    return design, summarise_neutral(idata, design, battles, run_id=9, ci_mass=0.95)
+
+
+def test_shared_regime_draws_are_row_aligned_with_the_mu_draws() -> None:
+    _, summary = _shared_summary()
+
+    assert summary.g_unlabelled is not None
+    assert summary.a_era is not None
+    assert summary.offset_bar is not None
+    assert summary.m0_draws is not None
+    assert summary.draws.shape[0] == MAX_NEUTRAL_DRAWS
+    for shared, factor in (
+        (summary.g_unlabelled, 2.0),
+        (summary.a_era, 3.0),
+        (summary.offset_bar, 4.0),
+    ):
+        assert shared.shape == (MAX_NEUTRAL_DRAWS,)
+        np.testing.assert_allclose(shared, factor * summary.draws[:, 0])
+    assert summary.m0_draws.shape == (MAX_NEUTRAL_DRAWS,)
+    np.testing.assert_allclose(summary.m0_draws, 9.0 - 4.0 * summary.draws[:, 0])
+
+
+def test_per_side_era_and_unlabelled_share_follow_the_design_rows() -> None:
+    design, summary = _shared_summary()
+
+    assert summary.side_era is not None
+    assert summary.side_unlabelled_share is not None
+    share = dict(zip(summary.side_ids, summary.side_unlabelled_share, strict=True))
+    era = dict(zip(summary.side_ids, summary.side_era, strict=True))
+    assert share == {10: 0.0, 20: 0.5, 30: 1.0}
+    assert era[10] == 0.0
+    unlabelled_rows = design.regime_index == design.regimes.index("unlabelled")
+    side_30 = design.side_index == design.side_ids.index(30)
+    assert era[30] == pytest.approx(float(design.era[unlabelled_rows & side_30][0]))
+
+
+def test_the_shared_arrays_round_trip_through_the_file(tmp_path: Path) -> None:
+    from pipeline.imputers.likelihood import load_neutral_draws
+
+    _, summary = _shared_summary()
+    path = write_neutral_draws(
+        summary, processed_root=tmp_path, run_id=9, database="db_a", started_at="t0"
+    )
+
+    with np.load(path) as data:
+        assert data["g_unlabelled"].shape == (MAX_NEUTRAL_DRAWS,)
+        assert data["a_era"].shape == (MAX_NEUTRAL_DRAWS,)
+        assert data["offset_bar"].shape == (MAX_NEUTRAL_DRAWS,)
+        assert data["m0_draws"].shape == (MAX_NEUTRAL_DRAWS,)
+        assert data["side_era"].shape == (3,)
+        assert data["side_unlabelled_share"].shape == (3,)
+    loaded = load_neutral_draws(path)
+    assert loaded.database == "db_a"
+    names = ("g_unlabelled", "a_era", "offset_bar", "m0_draws", "side_era", "side_unlabelled_share")
+    for name in names:
+        np.testing.assert_array_equal(getattr(loaded, name), getattr(summary, name))

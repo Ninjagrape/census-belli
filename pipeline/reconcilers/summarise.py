@@ -68,6 +68,8 @@ from pipeline.reconcilers.model import (
     _UNLABELLED_WEIGHT,
     InflationPrior,
     ModelPriors,
+    _ratio_level_mask,
+    _ratio_pairs,
     _unknown_level_mask,
     _unlabelled_mask,
 )
@@ -234,8 +236,10 @@ def summarise_fit(
         "m0": _scalar_stats(idata, "m0"),
         "corpus_level": _scalar_stats(idata, "corpus_level"),
         "identified_level": _identified_level_stats(idata),
-        "n_identifying_sides": _n_identifying_sides(rows, design.regimes),
+        "n_identifying_sides": n_identifying_sides(design, inflation.anchor_regime),
+        "identified_width": identified_width_stats(idata, design, side_estimates, ci_mass),
         "contraction": _contraction(idata, design, priors, inflation),
+        "bound_excess": _bound_excess_stats(idata, priors),
     }
     diagnostics.update(_contamination_diagnostics(idata, design, priors.contamination_sd))
 
@@ -454,6 +458,11 @@ def _row_eta_and_var(
         + draw("delta_level")[:, design.level_index[rows]]
         + draw("a_era")[:, None] * (design.era * _unlabelled_mask(design))[rows]
     )
+    ratio = _ratio_level_mask(design)
+    if ratio.any():
+        pair_of_row, _ = _ratio_pairs(design)
+        offsets = draw("sigma_ratio")[:, None] * draw("z_ratio")[:, pair_of_row[rows]]
+        eta = eta + offsets * ratio[rows]
     var = (
         draw("sigma_source")[:, design.source_index[rows]] ** 2
         + draw("sigma_estimate")[:, None] ** 2 * design.is_estimate.astype(float)[rows]
@@ -922,7 +931,7 @@ def _convergence(
         if values.size == 0:
             continue
         candidate = float(values.min())
-        if "side" in data_array.dims:
+        if "side" in data_array.dims or "ratio_pair" in data_array.dims:
             min_ess_side = min(min_ess_side, candidate)
         elif candidate < min_ess:
             min_ess = candidate
@@ -1058,33 +1067,245 @@ def _identified_level_stats(idata: az.InferenceData) -> dict[str, float | None]:
     return {"mean": _finite(float(np.mean(combined))), "sd": _finite(float(np.std(combined)))}
 
 
-def _n_identifying_sides(rows: list[Report], regimes: tuple[str, ...]) -> dict[str, int]:
-    """Count, per regime, how many sides have at least two reports carrying it.
+def n_identifying_sides(design: Design, anchor_regime: str) -> dict[str, int]:
+    """Count, per non-anchor regime, the sides that tie it to the anchor's component.
 
-    A regime fitted from a single report per side everywhere is not actually
-    contrasted against anything within a side; this is the count that says
-    whether ``g_regime`` for a given regime is backed by real within-side
-    disagreement or is only ever seen once per side.
+    ``g_regime`` is identified relative to the anchor only through a chain of
+    sides that carry reports in more than one regime. Two reports in a single
+    regime identify the observation scale, not the regime's bias. So take the
+    bipartite graph of regimes and sides (a side is linked to every regime it
+    has a fitted report in) and, for each non-anchor regime ``r``, count the
+    sides that have a report in ``r`` **and** a report in some other regime
+    inside the anchor's connected component. A regime in a component without
+    the anchor gets 0 whatever its report count, and so does every regime when
+    nothing reports in the anchor (an all-unlabelled corpus), which is the
+    honest answer: there is then no contrast at all.
 
     Args:
-        rows: This quantity's reports.
-        regimes: The full regime vocabulary from the design, so every regime
-            gets an entry even at zero.
+        design: The design; rows reporting exactly zero are not evidence and
+            are skipped.
+        anchor_regime: The regime pinned to zero bias.
 
     Returns:
-        A mapping from regime name to the number of qualifying sides.
+        A mapping from each non-anchor regime in ``design.regimes`` to its count.
     """
-    counts_by_side_regime: dict[tuple[int, str], int] = defaultdict(int)
-    for report in rows:
-        counts_by_side_regime[(report.side_id, report.claim_regime)] += 1
+    zero = set(design.zero_rows.tolist())
+    regimes_of_side: dict[int, set[int]] = defaultdict(set)
+    for row, (side, regime) in enumerate(zip(design.side_index, design.regime_index, strict=True)):
+        if row not in zero:
+            regimes_of_side[int(side)].add(int(regime))
 
-    result = {regime: 0 for regime in regimes}
-    for (_side_id, regime), n in counts_by_side_regime.items():
-        # A regime can be absent from the design's vocabulary when every one of
-        # its rows was merged away as a duplicate of a labelled row.
-        if n >= 2 and regime in result:
-            result[regime] += 1
+    # Regimes joined through a shared side form one component.
+    parent = list(range(len(design.regimes)))
+
+    def find(node: int) -> int:
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    for regimes in regimes_of_side.values():
+        first, *rest = sorted(regimes)
+        for other in rest:
+            parent[find(other)] = find(first)
+
+    anchor = design.regimes.index(anchor_regime)
+    in_anchor_component = {r for r in range(len(design.regimes)) if find(r) == find(anchor)}
+
+    result: dict[str, int] = {}
+    for r, name in enumerate(design.regimes):
+        if r == anchor:
+            continue
+        result[name] = sum(
+            1
+            for regimes in regimes_of_side.values()
+            if r in regimes and (regimes - {r}) & in_anchor_component
+        )
     return result
+
+
+def _width_summary(widths: list[float]) -> dict[str, float | int | None]:
+    """Summarise a group of interval widths.
+
+    Args:
+        widths: Log-scale widths, ``LN(hi / lo)``.
+
+    Returns:
+        ``n`` and the ``min``, ``median`` and ``max`` (None when the group is
+        empty).
+    """
+    if not widths:
+        return {"n": 0, "min": None, "median": None, "max": None}
+    return {
+        "n": len(widths),
+        "min": _finite(min(widths)),
+        "median": _finite(float(np.median(widths))),
+        "max": _finite(max(widths)),
+    }
+
+
+def _row_precision(idata: az.InferenceData, design: Design, *, max_draws: int = 500) -> np.ndarray:
+    """Posterior-mean precision, ``E[1 / variance]``, of each row's noise.
+
+    The variance is the model's own (:func:`_row_eta_and_var`) without the
+    casualty ratio terms, which now sit in the location. Uses whichever of the
+    noise pieces the posterior holds.
+
+    Args:
+        idata: The fit's posterior.
+        design: The design.
+        max_draws: Draws used, thinned evenly.
+
+    Returns:
+        ``(n_obs,)`` weights; all ones when the posterior has no source scale.
+    """
+    if "sigma_source" not in idata.posterior.data_vars:
+        return np.ones(design.n_obs)
+    sigma = _pooled(idata, "sigma_source")
+    keep = np.unique(np.linspace(0, sigma.shape[0] - 1, min(max_draws, sigma.shape[0])).astype(int))
+    var = sigma[keep][:, design.source_index] ** 2 + design.range_var[None, :]
+    columns = {
+        "sigma_estimate": design.is_estimate.astype(float),
+        "sigma_round": design.roundness,
+        "sigma_unknown": _unknown_level_mask(design),
+    }
+    for name, column in columns.items():
+        if name in idata.posterior.data_vars:
+            var = var + _pooled(idata, name)[keep][:, None] ** 2 * column[None, :]
+    weight: np.ndarray = (1.0 / np.maximum(var, 1e-12)).mean(axis=0)
+    return weight
+
+
+def _side_offsets(idata: az.InferenceData, design: Design) -> np.ndarray:
+    """Per-side precision-weighted mean of the row offsets added to ``mu_side``, draw by draw.
+
+    The row offset is ``g_regime[r] + delta_level[k] + a_era * era * unlabelled``
+    (``model.py``'s docstring), so a side's reports sit at ``mu_side`` plus the
+    precision-weighted mean of that over its own rows. Falls back to the corpus ``offset_bar`` for
+    every side when the posterior lacks the pieces.
+
+    Args:
+        idata: The fit's posterior.
+        design: The design, for the row arrays and vocabularies.
+
+    Returns:
+        ``(n_pooled, n_sides)``, columns in ``design.side_ids`` order.
+    """
+    names = set(idata.posterior.data_vars)
+    if not {"g_regime", "delta_level", "a_era"} <= names:
+        return _pooled(idata, "offset_bar")[:, None]
+    g_labels = _coord_labels(idata, "regime")
+    g_regime = _pooled(idata, "g_regime")[:, [g_labels.index(str(r)) for r in design.regimes]]
+    l_labels = _coord_labels(idata, "level")
+    delta = _pooled(idata, "delta_level")[:, [l_labels.index(str(k)) for k in design.levels]]
+    unlabelled = (
+        design.regime_index == design.regimes.index("unlabelled")
+        if "unlabelled" in design.regimes
+        else np.zeros(design.n_obs, dtype=bool)
+    )
+    era_row = design.era * unlabelled
+    regime_weight = np.zeros((design.n_sides, len(design.regimes)))
+    level_weight = np.zeros((design.n_sides, len(design.levels)))
+    era_weight = np.zeros(design.n_sides)
+    # A precise row says more about where the side sits than a vague one, so
+    # the side's offset is the precision-weighted mean of its rows' offsets,
+    # the same weighting the likelihood gives them.
+    row_weight = _row_precision(idata, design)
+    totals = np.bincount(design.side_index, weights=row_weight, minlength=design.n_sides)
+    totals[totals == 0] = 1.0
+    np.add.at(regime_weight, (design.side_index, design.regime_index), row_weight)
+    np.add.at(level_weight, (design.side_index, design.level_index), row_weight)
+    np.add.at(era_weight, design.side_index, row_weight * era_row)
+    regime_weight /= totals[:, None]
+    level_weight /= totals[:, None]
+    era_weight /= totals
+    offsets: np.ndarray = (
+        g_regime @ regime_weight.T
+        + delta @ level_weight.T
+        + _pooled(idata, "a_era")[:, None] * era_weight[None, :]
+    )
+    return offsets
+
+
+def identified_width_stats(
+    idata: az.InferenceData,
+    design: Design,
+    side_estimates: list[SideEstimate],
+    ci_mass: float,
+) -> dict[str, dict[str, float | int | None]]:
+    """Interval widths on the identified scale, split singleton against multi-claim.
+
+    The published interval carries the shared prior offset (``offset_bar``),
+    which floors its width near 3.7 on a mostly-unlabelled corpus and so can
+    never fail the narrow-singleton gate. ``mu_side`` plus the side's own
+    row-weighted offset (:func:`_side_offsets`) is the quantity the data
+    identify, and its width reflects the evidence alone. The corpus
+    ``offset_bar`` would be wrong for a side whose rows are mostly labelled: it
+    would add the unlabelled shift the side never carried. Widths are
+    ``LN(hi / lo)`` of that sum, drawn jointly so the correlation between
+    ``mu_side`` and the offset is kept.
+
+    Args:
+        idata: The fit's posterior.
+        design: The design, for the side order.
+        side_estimates: One per design side, in ``design.side_ids`` order; their
+            ``method`` decides the group (``source_disagreement`` is
+            multi-claim, everything else is singleton).
+        ci_mass: The credible interval's total mass.
+
+    Returns:
+        ``{"singleton": ..., "multi_claim": ...}``, each the output of
+        :func:`_width_summary`.
+    """
+    mu = _pooled(idata, "mu_side")
+    labels = _coord_labels(idata, "side")
+    mu = mu[:, [labels.index(str(side_id)) for side_id in design.side_ids]]
+    identified = mu + _side_offsets(idata, design)
+    lower_q = (1.0 - ci_mass) / 2.0
+    quantiles = np.quantile(identified, [lower_q, 1.0 - lower_q], axis=0)
+    widths = quantiles[1] - quantiles[0]
+
+    singleton: list[float] = []
+    multi_claim: list[float] = []
+    for width, estimate in zip(widths, side_estimates, strict=True):
+        group = multi_claim if estimate.method == "source_disagreement" else singleton
+        group.append(float(width))
+    return {"singleton": _width_summary(singleton), "multi_claim": _width_summary(multi_claim)}
+
+
+def _bound_excess_stats(
+    idata: az.InferenceData, priors: ModelPriors
+) -> dict[str, dict[str, float | None]]:
+    """Posterior of the ExGaussian bound excess rates, per direction.
+
+    Each rate is shared by every side and source, so it is a hyperparameter
+    that a reviewer should see move (or not) from its prior: on a corpus with
+    few bounds the contraction is near zero and the excess is the prior.
+
+    Args:
+        idata: The fit's posterior.
+        priors: Supplies ``bound_excess_prior_sd``.
+
+    Returns:
+        ``{"upper": ..., "lower": ...}`` for the rates the model built, each
+        with posterior ``mean``, ``sd`` and ``contraction``. Empty under
+        censored bounds.
+    """
+    # sd of HalfNormal(sigma) is sigma * sqrt(1 - 2 / pi).
+    prior_sd = priors.bound_excess_prior_sd * math.sqrt(1.0 - 2.0 / math.pi)
+    stats: dict[str, dict[str, float | None]] = {}
+    for direction in ("upper", "lower"):
+        name = f"lambda_{direction}"
+        if name not in idata.posterior.data_vars:
+            continue
+        samples = _pooled(idata, name)
+        posterior_sd = float(np.std(samples))
+        stats[direction] = {
+            "mean": _finite(float(np.mean(samples))),
+            "sd": _finite(posterior_sd),
+            "contraction": _contraction_value(posterior_sd, prior_sd),
+        }
+    return stats
 
 
 def _contraction_value(posterior_sd: float, prior_sd: float) -> float | None:

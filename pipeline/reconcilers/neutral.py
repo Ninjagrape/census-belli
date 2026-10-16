@@ -9,7 +9,11 @@ turns its posterior into the three things the rest of the pipeline reads:
 * ``neutral_draws_run{run_id}.npz``, the joint posterior draws of ``mu_side``
   that the impute stage conditions on. Draws rather than marginal summaries,
   because two sides of one battle are correlated through the shared
-  hyperparameters and a ratio needs that covariance.
+  hyperparameters and a ratio needs that covariance. The file also carries,
+  row-aligned with those draws, the shared regime parameters the sides load on
+  (``g_unlabelled``, ``a_era``, ``offset_bar``, ``m0_draws``) and, per side, the era value and
+  unlabelled-row share the design applied, so a reader can tell which sides
+  depend on them.
 
 Nothing here samples. Convergence thresholds are applied by the stage, as for
 the published fit.
@@ -69,6 +73,20 @@ class NeutralSummary:
         draws: Thinned pooled draws of ``mu_side``, shape ``(n_draws, n_sides)``.
         m0_mean: Posterior mean of ``m0``.
         s0_mean: Posterior mean of ``s0``.
+        g_unlabelled: The unlabelled regime's ``g_regime`` draws, shape
+            ``(n_draws,)``, row-aligned with ``draws``; zeros when the design
+            has no unlabelled regime. None if the posterior lacks ``g_regime``.
+        a_era: ``a_era`` draws, shape ``(n_draws,)``, row-aligned.
+        offset_bar: ``offset_bar`` draws, shape ``(n_draws,)``, row-aligned.
+        side_era: Per side, the mean era covariate over its unlabelled rows (the
+            value ``a_era`` multiplies); 0 for a side with none. Shape
+            ``(n_sides,)``, in ``side_ids`` order.
+        side_unlabelled_share: Per side, the share of its design rows whose
+            regime is unlabelled. Shape ``(n_sides,)``.
+        m0_draws: ``m0`` draws, shape ``(n_draws,)``, row-aligned. ``m0`` is
+            ``corpus_level - offset_bar``, so it falls with ``g_unlabelled``;
+            impute needs that to carry a theta shift back through the side
+            prior division.
     """
 
     estimates: list[NeutralSideEstimate]
@@ -78,6 +96,12 @@ class NeutralSummary:
     draws: np.ndarray
     m0_mean: float
     s0_mean: float
+    g_unlabelled: np.ndarray | None = None
+    a_era: np.ndarray | None = None
+    offset_bar: np.ndarray | None = None
+    side_era: np.ndarray | None = None
+    side_unlabelled_share: np.ndarray | None = None
+    m0_draws: np.ndarray | None = None
 
 
 def _thin(draws: np.ndarray, limit: int) -> np.ndarray:
@@ -97,6 +121,67 @@ def _thin(draws: np.ndarray, limit: int) -> np.ndarray:
         return np.array(draws, dtype=np.float64)
     keep = np.linspace(0, n - 1, limit).round().astype(int)
     return np.array(draws[keep], dtype=np.float64)
+
+
+def _side_regime_loading(design: Design) -> tuple[np.ndarray, np.ndarray]:
+    """Per side, the era value and unlabelled-row share the design applied.
+
+    The model adds ``a_era * era`` on unlabelled rows only and ``g_unlabelled``
+    on the same rows, so these two numbers say how strongly a side's reports
+    load on the shared regime parameters.
+
+    Args:
+        design: The design the neutral fit was built from.
+
+    Returns:
+        ``(side_era, side_unlabelled_share)``, each of shape ``(n_sides,)``, in
+        ``design.side_ids`` order.
+    """
+    era = np.zeros(design.n_sides, dtype=np.float64)
+    share = np.zeros(design.n_sides, dtype=np.float64)
+    if "unlabelled" not in design.regimes:
+        return era, share
+    unlabelled = design.regime_index == design.regimes.index("unlabelled")
+    for position in range(design.n_sides):
+        on_side = design.side_index == position
+        n_rows = int(on_side.sum())
+        rows = on_side & unlabelled
+        n_unlabelled = int(rows.sum())
+        if n_rows:
+            share[position] = n_unlabelled / n_rows
+        if n_unlabelled:
+            era[position] = float(np.mean(design.era[rows]))
+    return era, share
+
+
+def _shared_draws(
+    idata: az.InferenceData, design: Design
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+    """Pooled draws of the shared regime parameters, or None if absent.
+
+    Args:
+        idata: Posterior from the neutral fit.
+        design: The design, for the regime vocabulary.
+
+    Returns:
+        ``(g_unlabelled, a_era, offset_bar, m0)``, each shape ``(n_pooled,)``, in
+        the same pooled order as ``mu_side``.
+    """
+    names = set(idata.posterior.data_vars)
+    if not {"g_regime", "a_era", "offset_bar", "m0"} <= names:
+        return None
+    g_regime = _pooled(idata, "g_regime")
+    if "unlabelled" in design.regimes:
+        labels = _coord_labels(idata, "regime")
+        g_unlabelled = g_regime[:, labels.index("unlabelled")]
+    else:
+        g_unlabelled = np.zeros(g_regime.shape[0])
+    return (
+        g_unlabelled,
+        _pooled(idata, "a_era"),
+        _pooled(idata, "offset_bar"),
+        _pooled(idata, "m0"),
+    )
 
 
 def summarise_neutral(
@@ -175,6 +260,8 @@ def summarise_neutral(
         "m0": m0,
         "s0": s0,
     }
+    shared = _shared_draws(idata, design)
+    side_era, side_share = _side_regime_loading(design)
     return NeutralSummary(
         estimates=estimates,
         diagnostics=diagnostics,
@@ -183,6 +270,12 @@ def summarise_neutral(
         draws=_thin(mu, MAX_NEUTRAL_DRAWS),
         m0_mean=_finite(float(np.mean(_pooled(idata, "m0")))) or 0.0,
         s0_mean=_finite(float(np.mean(_pooled(idata, "s0")))) or 0.0,
+        g_unlabelled=None if shared is None else _thin(shared[0], MAX_NEUTRAL_DRAWS),
+        a_era=None if shared is None else _thin(shared[1], MAX_NEUTRAL_DRAWS),
+        offset_bar=None if shared is None else _thin(shared[2], MAX_NEUTRAL_DRAWS),
+        m0_draws=None if shared is None else _thin(shared[3], MAX_NEUTRAL_DRAWS),
+        side_era=side_era,
+        side_unlabelled_share=side_share,
     )
 
 
@@ -227,17 +320,26 @@ def write_neutral_draws(
     path = neutral_draws_path(processed_root, run_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.stem + ".tmp.npz")
-    np.savez(
-        tmp,
-        run_id=np.int64(run_id),
-        database=np.str_(database),
-        started_at=np.str_(started_at),
-        side_id=np.asarray(summary.side_ids, dtype=np.int64),
-        battle_id=np.asarray(summary.battle_ids, dtype=np.int64),
-        draws=summary.draws,
-        m0_mean=np.float64(summary.m0_mean),
-        s0_mean=np.float64(summary.s0_mean),
-    )
+    arrays: dict[str, Any] = {
+        "run_id": np.int64(run_id),
+        "database": np.str_(database),
+        "started_at": np.str_(started_at),
+        "side_id": np.asarray(summary.side_ids, dtype=np.int64),
+        "battle_id": np.asarray(summary.battle_ids, dtype=np.int64),
+        "draws": summary.draws,
+        "m0_mean": np.float64(summary.m0_mean),
+        "s0_mean": np.float64(summary.s0_mean),
+    }
+    shared = {
+        "g_unlabelled": summary.g_unlabelled,
+        "a_era": summary.a_era,
+        "offset_bar": summary.offset_bar,
+        "m0_draws": summary.m0_draws,
+        "side_era": summary.side_era,
+        "side_unlabelled_share": summary.side_unlabelled_share,
+    }
+    arrays.update({k: np.asarray(v, dtype=np.float64) for k, v in shared.items() if v is not None})
+    np.savez(tmp, **arrays)
     tmp.replace(path)
     logger.info(
         "reconcile_neutral_draws_written",

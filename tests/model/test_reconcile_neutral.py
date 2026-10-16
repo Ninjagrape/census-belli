@@ -224,7 +224,13 @@ def test_neutral_fit_matches_the_relabelled_published_fit_plus_faithful_mu(
     # prior puts the unlabelled offset at faithful_mu rather than at zero, so
     # the Macedonian side sits that much lower and the ratio that much higher.
     expected = gaugamela_relabelled.published + FAITHFUL_MU
-    # Measured: neutral 0.843 against 0.737 + 0.128 = 0.865, a gap of 0.022.
+    # Measured: neutral 0.838 against 0.865, a gap of 0.027. With the noise prior
+    # at InverseGamma(3, 2) the gap was 0.060: that prior's strength, not the
+    # S3/S4/N1 changes (this fixture's 4 keys are each in their own type, so
+    # none of those touch it), drove the shrinkage of two-report sides and so
+    # the difference between the two fits. Mode-preserving IG(3, 4/3) restores
+    # it. The fits are separate 16-side samples, so the tolerance carries that
+    # spread.
     assert abs(gaugamela.neutral - expected) < 0.06, (gaugamela.neutral, expected)
 
 

@@ -85,12 +85,15 @@ _TROOPS: Final[str] = "troops"
 _UNLABELLED: Final[str] = "unlabelled"
 
 # A source key earns its own bias (u_source) and noise scale (sigma_source) only
-# when it reports on at least this many distinct battles. A key confined to one
-# battle is confounded with that battle's level: the real corpus has 148 keys,
-# every one a single battle's infobox, and a free per-key bias absorbed the
-# whole between-side spread (tau_u 0.87, s0 collapsing to 0.10), flattening
-# every estimate to the same ~35k. Two battles is no better, since the effect
-# then trades off against only two side levels.
+# when it co-reports, in at least this many battles: another source key reports
+# the same side and quantity there. A key alone on its sides is confounded with
+# those sides' levels, so its bias is the side level under another name. The
+# real corpus has 148 keys, every one a single battle's infobox, and a free
+# per-key bias absorbed the whole between-side spread (tau_u 0.87, s0
+# collapsing to 0.10), flattening every estimate to the same ~35k. Spanning
+# many battles is not enough on its own: a key that is alone on every one of
+# them is still the side levels under another name, so the count is of battles
+# where something else reports the same side and can tell the two apart.
 DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT: Final[int] = 3
 
 
@@ -106,8 +109,9 @@ class Design:
         log_y: Natural log of each reported value.
         side_index: Row's side, as an index into ``side_ids``.
         source_index: Row's source *key*, as an index into ``source_keys``.
-        source_has_own_effect: Per source key, whether it reports on enough
-            distinct battles to carry its own bias and noise terms. See
+        source_has_own_effect: Per source key, whether it co-reports (another
+            key reports the same side) in enough distinct battles to carry its
+            own bias and noise terms. See
             :data:`DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT`.
         source_type_index: Row's source type, into ``source_types``.
         regime_index: Row's claim regime, into ``regimes``.
@@ -256,8 +260,8 @@ def build_design(
         ancient_cutoff_year: Astronomical year below which a battle counts as
             ancient, for the era fallback.
         counts: Optional counters to accumulate censoring tallies into.
-        min_battles_per_source_effect: A source key reporting on fewer distinct
-            battles than this is pooled; see
+        min_battles_per_source_effect: A source key co-reporting in fewer
+            distinct battles than this is pooled; see
             :data:`DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT`.
         merge_ranges: Whether a lower-bound and an upper-bound row of one stated
             range become one point row; see
@@ -304,14 +308,17 @@ def build_design(
     level_ix = _index_map([level_of(r) for r in rows], order=level_order)
     lineage_ix = _index_map([r.lineage_id for r in rows])
 
-    battles_of_key: dict[str, set[int]] = {}
-    for r in rows:
-        battles_of_key.setdefault(f"{r.source_key.source_type}|{r.source_key.url}", set()).add(
-            r.battle_id
-        )
+    label_of_row = [f"{r.source_key.source_type}|{r.source_key.url}" for r in rows]
+    keys_on_side: dict[int, set[str]] = {}
+    for r, label in zip(rows, label_of_row, strict=True):
+        keys_on_side.setdefault(r.side_id, set()).add(label)
+    co_reported_battles: dict[str, set[int]] = {}
+    for r, label in zip(rows, label_of_row, strict=True):
+        if len(keys_on_side[r.side_id]) >= 2:
+            co_reported_battles.setdefault(label, set()).add(r.battle_id)
     source_has_own_effect = np.array(
         [
-            len(battles_of_key[label]) >= min_battles_per_source_effect
+            len(co_reported_battles.get(label, ())) >= min_battles_per_source_effect
             for label in sorted(key_ix, key=lambda k: key_ix[k])
         ],
         dtype=bool,

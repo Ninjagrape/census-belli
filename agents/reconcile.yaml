@@ -34,8 +34,13 @@ tools:
 params:
   # ── source-bias model priors ──────────────────────────────────────────────
   bias_prior_sd: 1.0                  # weakly informative
-  precision_prior_alpha: 2.0          # inverse-gamma shape
-  precision_prior_beta: 1.0
+  # Inverse-gamma on each source type's noise variance. The original IG(2, 1)
+  # has infinite variance on a parameter that sets every interval width, so
+  # alpha is 3. Beta 4/3 preserves the original mode, beta / (alpha + 1) = 1/3,
+  # rather than the mean: IG(3, 2) kept the mean at 1 but is a far stronger
+  # prior (mode 0.5, thin tail) and shrank two-report sides.
+  precision_prior_alpha: 3.0          # inverse-gamma shape
+  precision_prior_beta: 1.3333333333333333
 
   # The ancient-inflation prior is no longer a single mu/sd pair. A normal
   # centred on 0.3 means 1.35x inflation and cannot reach 6x even at three
@@ -108,6 +113,18 @@ params:
   min_estimate_coverage: 0.99         # estimates_populated
   max_median_ci_log_width: 4.5        # ci_width_reasonable, LN(hi/lo) on multi-claim sides
   min_singleton_ci_log_width: 0.8     # singleton_estimates_are_honestly_uncertain
+  # Widths of mu_side + each side's own row offset, the scale the data identify (diagnostics
+  # identified_width). The published-interval gates above carry the shared prior
+  # offset and cannot see a fit that dropped its source uncertainty.
+  min_singleton_identified_width: 0.8   # singleton_identified_width_is_honest, narrowest singleton
+  max_multi_claim_identified_width: 2.2 # multi_claim_identified_width_is_tight, median
+  # Prior predictive check on the built model (diagnostics prior_predictive).
+  # Draws 0 skips it. The seed is the check's own and leaves the fit's untouched.
+  prior_predictive_draws: 500
+  prior_predictive_seed: 20261014
+  prior_predictive_min_troops: 50
+  prior_predictive_max_troops: 5000000
+  max_prior_predictive_outside_frac: 0.05   # prior_predictive_is_plausible
   min_calibration_sides: 20           # calibration_set_is_not_empty
   max_low_precision_frac: 0.05        # sides_low_precision
 
@@ -127,6 +144,10 @@ params:
   min_battles_per_source_effect: 3
   source_deviation_prior_sd: 0.5      # tau_u, per-source deviation from its type
   sigma_deviation_prior_sd: 0.3       # tau_sigma
+  # tau_u and tau_sigma are learned (HalfNormal) only when at least this many
+  # keys carry a deviation; below it they are fixed at the two scales above,
+  # since a scale learned from a handful of deviations is the prior again.
+  min_keys_for_hierarchical_deviation: 5
   # lineage_prior_sd removed 2026-10-02: copies of one claim are collapsed to
   # one row in build_design, so the model has no lineage term (handover-log 20.10).
   scope_offset_prior_sd: 0.4
@@ -134,6 +155,21 @@ params:
   estimate_dispersion_sd: 0.3
   roundness_dispersion_sd: 0.3        # conventional figures are coarsened, not noisy
   casualty_type_offset_prior_sd: 0.7
+  # Extra sd (HalfNormal scale) on a casualty component report's log value,
+  # because the component-to-total ratio is one corpus constant per component
+  # and varies between battles. Troops are unaffected.
+  casualty_ratio_dispersion_sd: 0.5
+
+  # How a lone bound ("up to X", "at least X") enters the likelihood. The default
+  # 'exgaussian' adds a one-sided exponential excess of mean lambda (HalfNormal,
+  # scale below), one lambda per direction shared across sides, so the truth
+  # sits a typical distance from the stated figure; it beat 'censored' on both
+  # upper and lower bounds in the recovery tests. Its noise is Gaussian, so a
+  # mis-extracted bound is absorbed less robustly than a point row (whose noise
+  # is Student-t); its scale is matched to the point rows' variance. 'censored'
+  # says only that the truth lies on one side and lets the level drift.
+  bound_likelihood: exgaussian        # 'censored' or 'exgaussian'
+  bound_excess_prior_sd: 0.5
 
   # ── latent side-strength prior ────────────────────────────────────────────
   # Deliberately not era-structured: era and polity priors belong to the
@@ -409,6 +445,101 @@ quality_checks:
       0.85. A narrow interval here means the fit dropped either the source
       bias uncertainty or the observation noise, which is the failure that
       makes a wrong ranking look precise.
+
+  - name: singleton_identified_width_is_honest
+    check: >
+      SELECT COALESCE(
+        (latest.diagnostics -> 'troops' -> 'identified_width' -> 'singleton' ->> 'min')::float,
+        CASE WHEN (latest.diagnostics -> 'troops' -> 'identified_width' -> 'singleton' ->> 'n')::int = 0
+             THEN 1000::float END)
+      FROM (
+        SELECT diagnostics
+        FROM model_runs
+        WHERE model_type = 'source_disagreement'
+          AND completed_at IS NOT NULL
+        ORDER BY run_id DESC
+        LIMIT 1
+      ) latest
+    threshold: ">= {params.min_singleton_identified_width}"
+    severity: error
+    description: >
+      The narrowest 95% interval, LN(hi/lo), of mu_side plus the side's own row-weighted offset among sides
+      fitted from a single claim (est_troops_method single_report_debiased or
+      bound_only), read from the newest run's diagnostics. This is the identified
+      scale: the published interval adds the shared prior offset, which floors its
+      width near 3.7 and hides a fit that dropped the source uncertainty. A NULL
+      (no identified_width block) fails; a run with no singletons passes.
+
+  - name: multi_claim_identified_width_is_tight
+    check: >
+      SELECT (latest.diagnostics -> 'troops' -> 'identified_width' -> 'multi_claim' ->> 'median')::float
+      FROM (
+        SELECT diagnostics
+        FROM model_runs
+        WHERE model_type = 'source_disagreement'
+          AND completed_at IS NOT NULL
+        ORDER BY run_id DESC
+        LIMIT 1
+      ) latest
+    threshold: "<= {params.max_multi_claim_identified_width}"
+    severity: warning
+    description: >
+      Median LN(hi/lo) of mu_side plus the side's own row-weighted offset over multi-claim sides
+      (est_troops_method source_disagreement). Two or more independent claims
+      should pin a side tighter than one. A NULL (no multi-claim side, or no
+      identified_width block) fails, as ci_width_reasonable does.
+
+  - name: prior_predictive_is_plausible
+    check: >
+      SELECT CASE
+        WHEN (latest.diagnostics -> 'troops' -> 'prior_predictive') ->> 'status' = 'failed' THEN 1::float
+        ELSE COALESCE(
+          ((latest.diagnostics -> 'troops' -> 'prior_predictive') ->> 'share_outside')::float,
+          CASE WHEN (latest.diagnostics -> 'troops' -> 'prior_predictive') ->> 'skipped' IS NOT NULL THEN 0::float END)
+      END
+      FROM (
+        SELECT diagnostics
+        FROM model_runs
+        WHERE model_type = 'source_disagreement'
+          AND completed_at IS NOT NULL
+        ORDER BY run_id DESC
+        LIMIT 1
+      ) latest
+    threshold: "<= {params.max_prior_predictive_outside_frac}"
+    severity: warning
+    description: >
+      Share of prior-predictive troop observations (point rows, 500 draws of the
+      built model's own prior) outside [prior_predictive_min_troops,
+      prior_predictive_max_troops]. A prior that routinely implies armies of ten
+      men or fifty million is doing damage wherever the data are thin. A run that
+      disabled the check (prior_predictive_draws 0) passes, with the reason in
+      diagnostics.troops.prior_predictive.skipped. A check whose sampler raised
+      is recorded as status "failed" with the error and fails this gate, since it
+      is not evidence the prior is sensible.
+
+  - name: prior_predictive_neutral_is_plausible
+    check: >
+      SELECT CASE
+        WHEN (latest.diagnostics -> 'troops_neutral' -> 'prior_predictive_neutral') ->> 'status' = 'failed' THEN 1::float
+        ELSE COALESCE(
+          ((latest.diagnostics -> 'troops_neutral' -> 'prior_predictive_neutral') ->> 'share_outside')::float,
+          CASE WHEN (latest.diagnostics -> 'troops_neutral' -> 'prior_predictive_neutral') ->> 'skipped' IS NOT NULL THEN 0::float END)
+      END
+      FROM (
+        SELECT diagnostics
+        FROM model_runs
+        WHERE model_type = 'source_disagreement'
+          AND completed_at IS NOT NULL
+        ORDER BY run_id DESC
+        LIMIT 1
+      ) latest
+    threshold: "<= {params.max_prior_predictive_outside_frac}"
+    severity: warning
+    description: >
+      The same check on the regime-neutral fit, which has its own era prior and no
+      regime offsets (diagnostics.troops_neutral.prior_predictive_neutral). Disabled
+      passes; a sampler failure (status "failed") fails. A run with no neutral block
+      has no value and fails, as neutral_fit_converged does.
 
   - name: calibration_set_is_not_empty
     check: >

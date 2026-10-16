@@ -119,6 +119,12 @@ from pipeline.reconcilers.model import (
     sample,
 )
 from pipeline.reconcilers.neutral import summarise_neutral, write_neutral_draws
+from pipeline.reconcilers.prior_check import (
+    DEFAULT_DRAWS,
+    DEFAULT_SEED,
+    DEFAULT_TROOP_BOUNDS,
+    prior_predictive_check,
+)
 from pipeline.reconcilers.records import Quantity, ReconcileCounts, Report
 from pipeline.reconcilers.report import build_report, write_report
 from pipeline.reconcilers.summarise import (
@@ -329,6 +335,29 @@ def _warn_low_precision(quantity: str, worst: dict[str, Any], run_id: int) -> No
     )
 
 
+def _prior_check(model: Any, design: Design, params: dict[str, Any]) -> dict[str, Any]:
+    """Run the prior predictive check with the spec's parameters.
+
+    Args:
+        model: The built, unsampled model.
+        design: The design it was built from.
+        params: The spec's ``params`` mapping.
+
+    Returns:
+        The block from :func:`~pipeline.reconcilers.prior_check.prior_predictive_check`.
+    """
+    return prior_predictive_check(
+        model,
+        design,
+        draws=int(params.get("prior_predictive_draws", DEFAULT_DRAWS)),
+        seed=int(params.get("prior_predictive_seed", DEFAULT_SEED)),
+        troop_bounds=(
+            float(params.get("prior_predictive_min_troops", DEFAULT_TROOP_BOUNDS[0])),
+            float(params.get("prior_predictive_max_troops", DEFAULT_TROOP_BOUNDS[1])),
+        ),
+    )
+
+
 def _fit_neutral_troops(
     conn: Any,
     *,
@@ -362,6 +391,9 @@ def _fit_neutral_troops(
         Exception: Whatever sampling raises, re-raised after logging.
     """
     model = build_model(design, priors=priors, inflation=inflation, neutral=True)
+    # The neutral fit has its own, tighter era prior and no regime offsets, so the
+    # published fit's prior check says nothing about it.
+    prior_predictive = _prior_check(model, design, params)
     try:
         idata = sample(model, SamplerSettings.from_params(params))
     except Exception:
@@ -378,6 +410,7 @@ def _fit_neutral_troops(
         max_quantile_mcse_frac=_max_quantile_mcse_frac(params),
         max_median_mcse_log=_max_median_mcse_log(params),
     )
+    summary.diagnostics["prior_predictive_neutral"] = prior_predictive
     worst = summary.diagnostics["worst"]
     written = _passes_global_thresholds(worst, params)
     summary.diagnostics["written"] = written
@@ -464,6 +497,9 @@ def _fit_quantity(
         merge_ranges=bool(params.get("merge_ranges", True)),
     )
     model = build_model(design, priors=priors, inflation=inflation)
+    # Before the fit, with its own seed: the prior sampler does not touch the
+    # posterior's seed stream.
+    prior_predictive = _prior_check(model, design, params)
 
     try:
         idata = sample(model, SamplerSettings.from_params(params))
@@ -488,6 +524,8 @@ def _fit_quantity(
         max_quantile_mcse_frac=_max_quantile_mcse_frac(params),
         max_median_mcse_log=_max_median_mcse_log(params),
     )
+
+    summary.diagnostics["prior_predictive"] = prior_predictive
 
     # Write only a converged fit. The model_convergence gate runs after the
     # stage, so writing first let an unconverged run overwrite the last good

@@ -114,9 +114,13 @@ def _fit(
     corpus: Corpus, inflation: object, *, merge_ranges: bool, seed: int = SEED
 ) -> tuple[Fit, float]:
     started = time.perf_counter()
+    # The unmerged control is the censored-pair pathology, so it must run with
+    # censored bounds: the ExGaussian default reads each bound as a noisy report
+    # and largely defuses it (sigma 0.259 measured, below the 0.8 control floor).
+    bound = "exgaussian" if merge_ranges else "censored"
     fit = run_fit(
         corpus.reports,
-        priors=ModelPriors.from_params({}, quantity="troops"),
+        priors=replace(ModelPriors.from_params({}, quantity="troops"), bound_likelihood=bound),
         inflation=inflation,  # type: ignore[arg-type]
         sampler=replace(SAMPLER, random_seed=seed),
         ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,

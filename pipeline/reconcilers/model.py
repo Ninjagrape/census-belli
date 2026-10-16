@@ -45,6 +45,19 @@ Four devices, each doing a different job:
    that mean is the same parameter as ``b_type``: with one key in a type the
    two are exactly confounded. A type holding a single key therefore gets no
    free deviation at all, which is the correct answer and says so.
+
+   The exception (pilot review S4) is a type holding **both** own-effect and
+   pooled keys (a "mixed" type). There the own-effect keys' deviations
+   (``u_source`` and ``z_sigma`` alike) are plain ``Normal(0, 1)`` draws scaled
+   by their tau, so
+   ``b_type`` against the own keys' mean deviation is settled by the deviation
+   prior (partial pooling), not by the pooled keys: after S3 the pooled keys
+   are those that rarely co-report, so they pin ``b_type`` only weakly. The sum
+   of the effective type biases is then not exactly zero in a mixed type, and
+   the absolute level depends softly on ``tau_u``'s prior. Exposure on the
+   current corpus is zero (no type has own-effect keys at all). A type whose
+   keys all have their own effect keeps the ``ZeroSumNormal``; it is the only
+   thing identifying ``b_type`` there.
 3. **The rotation.** The observation-weighted mean of the reference-coded
    blocks is what the data identify, so it is what gets sampled: ``corpus_level``
    rather than ``m0``, with ``m0`` derived. The ridge then lies along a
@@ -73,12 +86,72 @@ battle level under another name. It absorbed the between-side spread (tau_u 0.87
 ``s0`` collapsing to 0.10) and, because the published estimate leaves the source
 term out, every side came back at about 35,000 on a clean convergence. A key
 therefore carries its own ``u_source`` and its own noise deviation only if
-``Design.source_has_own_effect`` says it spans enough battles
-(``min_battles_per_source_effect``). Every other key is pooled: its bias is its
+``Design.source_has_own_effect`` says it **co-reports**: another source key
+reports the same side in at least ``min_battles_per_source_effect`` battles
+(pilot review S3). Spanning that many battles is not enough, because a key
+alone on its sides has its bias as the side level under another name however
+many battles it covers. Every other key is pooled: its bias is its
 source type's ``b_type`` and its noise is its type's ``sqrt(sigma_sq_type)``.
-When no source type has two such keys there is no ``u_source``, ``tau_u``,
-``z_sigma`` or ``tau_sigma`` at all. The recovery tests that pass with cross-
-classified sources therefore keep passing, and the nested case has its own.
+When no source type has a key that can carry a deviation there is no
+``u_source``, ``tau_u``, ``z_sigma`` or ``tau_sigma`` at all. The recovery tests
+that pass with cross-classified sources therefore keep passing, and the nested
+case has its own.
+
+**tau_u and tau_sigma need data to be hyperparameters** (pilot review N1). A
+scale learned from two or three deviations is the prior in a different guise,
+and it samples as a funnel. They are ``HalfNormal`` only when at least
+``min_keys_for_hierarchical_deviation`` (spec param, default 5) keys carry a
+deviation; below that they are constants at ``source_deviation_prior_sd`` and
+``sigma_deviation_prior_sd``, so the deviations are plain draws from a fixed
+prior. The count is of the keys that actually get a deviation, which excludes
+the lone key of a type that has no pooled keys, since that key is ``b_type``.
+
+## Observation scale, casualty ratios and one-sided bounds
+
+``sigma_sq_type`` is ``InverseGamma(3, 4/3)``. The first version was IG(2, 1),
+whose infinite variance sits on a parameter that sets every interval width.
+Alpha 3 fixes that, but IG(3, 2) keeping the *mean* at 1 was a much stronger
+prior than that suggests (mode 0.5, a thin right tail) and visibly shrank
+two-report sides. IG(3, 4/3) instead keeps the old *mode*
+(``beta / (alpha + 1) = 1/3``), so the bulk of the prior is where it was, and
+has finite variance.
+
+``delta_level`` for casualties is a corpus constant, so a killed report implies
+the same killed-to-total ratio at Cannae as at the Somme. Each (side, non-total
+level) pair that occurs therefore gets a non-centred offset
+``r = sigma_ratio * z_ratio`` with ``z_ratio ~ N(0, 1)`` and
+``sigma_ratio ~ HalfNormal(casualty_ratio_dispersion_sd)``, default 0.5, added to
+``eta``. It moves the component's level for that side, which a per-row variance
+(the first version) could only blur. A side with a single component report has
+that offset confounded with its own noise; the prior is what keeps it honest.
+Troops are unchanged.
+
+``bound_likelihood`` chooses how a lone bound is modelled. ``exgaussian`` (the
+default) reads a bound as a noisy report plus a one-sided excess: "up to X" is
+``log y ~ ExGaussian(eta, sd, nu)`` and "at least X" is
+``-log y ~ ExGaussian(-eta, sd, nu)``, with ``nu`` the mean excess in log units and
+``HalfNormal(bound_excess_prior_sd)``, one per direction and shared across sides
+and sources (``lambda_upper`` and ``lambda_lower`` in the trace; their
+posterior and contraction are in the run diagnostics). Its noise is Gaussian,
+not Student-t, so a mis-extracted bound is absorbed less robustly than a
+mis-extracted point; its ``sd`` is scaled to the point rows' variance so a bound
+is not treated as a more precise report than a point from the same source.
+``censored`` treats "up to X" as ``latent <= X`` through ``pm.Censored``, which
+says nothing about how far below X the truth lies and, on a bound-heavy corpus,
+lets the level drift (the recovery ablation measures it). Ranges are merged
+points before this point and are unaffected, and exactly-zero casualty rows
+stay censored in both settings.
+
+## What a period mean would not separate (N3)
+
+``mu_side`` and ``a_era`` are not separately identified on unlabelled rows: a
+period mean on the side level and the era slope move the same rows, because
+``era_side`` equals ``era_row`` there (a side's rows share its battle's date).
+Nothing in the likelihood tells "armies of this period were smaller" from "this
+period's unmarked figures are deflated". What separates them is ``a_era``'s
+fitted prior (``inflation.era_mu`` and ``era_sd``). Adding a period mean on
+``mu_side`` would hand that job to a prior that was never fitted for it, so
+none is added.
 
 ## The inflation prior
 
@@ -120,7 +193,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 import numpy as np
 import structlog
@@ -247,8 +320,12 @@ class ModelPriors:
     scope_unknown_dispersion_sd: float = 0.4
     estimate_dispersion_sd: float = 0.3
     roundness_dispersion_sd: float = 0.3
-    precision_prior_alpha: float = 2.0
-    precision_prior_beta: float = 1.0
+    precision_prior_alpha: float = 3.0
+    precision_prior_beta: float = 4.0 / 3.0
+    min_keys_for_hierarchical_deviation: int = 5
+    casualty_ratio_dispersion_sd: float = 0.5
+    bound_likelihood: str = "exgaussian"
+    bound_excess_prior_sd: float = 0.5
     likelihood_family: str = "student_t"
     contamination_pi_alpha: float = 1.0
     contamination_pi_beta: float = 9.0
@@ -282,8 +359,14 @@ class ModelPriors:
             scope_unknown_dispersion_sd=float(params.get("scope_unknown_dispersion_sd", 0.4)),
             estimate_dispersion_sd=float(params.get("estimate_dispersion_sd", 0.3)),
             roundness_dispersion_sd=float(params.get("roundness_dispersion_sd", 0.3)),
-            precision_prior_alpha=float(params.get("precision_prior_alpha", 2.0)),
-            precision_prior_beta=float(params.get("precision_prior_beta", 1.0)),
+            precision_prior_alpha=float(params.get("precision_prior_alpha", 3.0)),
+            precision_prior_beta=float(params.get("precision_prior_beta", 4.0 / 3.0)),
+            min_keys_for_hierarchical_deviation=int(
+                params.get("min_keys_for_hierarchical_deviation", 5)
+            ),
+            casualty_ratio_dispersion_sd=float(params.get("casualty_ratio_dispersion_sd", 0.5)),
+            bound_likelihood=str(params.get("bound_likelihood", "exgaussian")),
+            bound_excess_prior_sd=float(params.get("bound_excess_prior_sd", 0.5)),
             likelihood_family=str(params.get("likelihood_family", "student_t")),
             contamination_pi_alpha=float(params.get("contamination_pi_alpha", 1.0)),
             contamination_pi_beta=float(params.get("contamination_pi_beta", 9.0)),
@@ -423,6 +506,8 @@ def build_model(
     coords = design.coords()
     free_regimes = [r for r in design.regimes if r != inflation.anchor_regime]
     coords["regime_free"] = free_regimes
+    if _ratio_level_mask(design).any():
+        coords["ratio_pair"] = _ratio_pairs(design)[1]
     source_type_of_key = _source_type_of_key(design)
 
     # The observation-weighted share of each reference-coded level. These are
@@ -466,8 +551,16 @@ def build_model(
         b_type = pm.ZeroSumNormal("b_type", sigma=priors.bias_prior_sd, dims="source_type")
         beta = b_type[source_type_of_key]
         deviation_groups = _deviation_groups(design, source_type_of_key)
+        n_deviating_keys = sum(group.keys.size for group in deviation_groups)
+        # Below the floor the scale would be learned from a handful of
+        # deviations and is the prior under another name; fix it instead.
+        hierarchical_deviation = n_deviating_keys >= priors.min_keys_for_hierarchical_deviation
         if deviation_groups:
-            tau_u = pm.HalfNormal("tau_u", sigma=priors.source_deviation_prior_sd)
+            tau_u: Any = (
+                pm.HalfNormal("tau_u", sigma=priors.source_deviation_prior_sd)
+                if hierarchical_deviation
+                else priors.source_deviation_prior_sd
+            )
             z_source = _within_type_deviations(pm, pt, design, deviation_groups)
             u_source = pm.Deterministic("u_source", tau_u * z_source, dims="source_key")
             beta = beta + u_source
@@ -498,11 +591,16 @@ def build_model(
         )
         sigma_type_scale = pm.math.sqrt(sigma_sq_type[source_type_of_key])
         if deviation_groups:
-            tau_sigma = pm.HalfNormal("tau_sigma", sigma=priors.sigma_deviation_prior_sd)
-            # Zero-sum within type, for the same reason as u_source: a free mean
-            # of z_sigma within a type is the same parameter as that type's
-            # sigma_sq_type. Measured on the recovery corpus as tau_sigma at
-            # ess 201 and rhat 1.02, the last thing failing the convergence gate.
+            tau_sigma: Any = (
+                pm.HalfNormal("tau_sigma", sigma=priors.sigma_deviation_prior_sd)
+                if hierarchical_deviation
+                else priors.sigma_deviation_prior_sd
+            )
+            # Zero-sum within a type of own-effect keys only, for the same reason
+            # as u_source: a free mean of z_sigma within such a type is the same
+            # parameter as that type's sigma_sq_type. Measured on the recovery
+            # corpus as tau_sigma at ess 201 and rhat 1.02, the last thing
+            # failing the convergence gate.
             z_sigma = pm.Deterministic(
                 "z_sigma",
                 _within_type_deviations(pm, pt, design, deviation_groups, prefix="z_sigma"),
@@ -530,6 +628,19 @@ def build_model(
             + delta_level[_data(pm, "data_level_index", design.level_index)]
             + a_era * era_column
         )
+        ratio_mask = _ratio_level_mask(design)
+        if ratio_mask.any():
+            # delta_level is one corpus-wide constant per component, so the
+            # killed-to-total ratio would be identical at Cannae and the Somme.
+            # Each (side, non-total level) pair that occurs gets its own
+            # offset r ~ N(0, sigma_ratio), non-centred, so the ratio varies
+            # by battle and moves a level instead of only widening an interval.
+            pair_of_row, _ = _ratio_pairs(design)
+            sigma_ratio = pm.HalfNormal("sigma_ratio", sigma=priors.casualty_ratio_dispersion_sd)
+            z_ratio = pm.Normal("z_ratio", 0.0, 1.0, dims="ratio_pair")
+            eta = eta + (sigma_ratio * z_ratio)[_data(pm, "data_ratio_pair", pair_of_row)] * _data(
+                pm, "data_ratio_mask", ratio_mask
+            )
 
         # Monotone, interpretable inflation of the observation scale. These
         # terms stand for extra dispersion from a latent mixture: an unreadable
@@ -566,6 +677,8 @@ def build_model(
         n_source_keys_own_effect=design.n_source_keys_own_effect,
         n_source_keys_pooled=design.n_source_keys_pooled,
         likelihood=priors.likelihood_family,
+        bound_likelihood=priors.bound_likelihood,
+        hierarchical_deviation=hierarchical_deviation,
         anchor_regime=inflation.anchor_regime,
         free_regimes=free_regimes,
         era_mu=inflation.era_mu,
@@ -602,29 +715,53 @@ def _source_type_of_key(design: Design) -> np.ndarray:
     return np.array([lookup[key.source_type] for key in design.source_keys], dtype=int)
 
 
-def _deviation_groups(
-    design: Design, source_type_of_key: np.ndarray
-) -> list[tuple[str, np.ndarray]]:
+class DeviationGroup(NamedTuple):
+    """One source type's keys that carry a within-type deviation.
+
+    Attributes:
+        type_name: The source type.
+        keys: Indices of the type's own-effect keys.
+        zero_sum: Whether their deviations are constrained to sum to zero. Only
+            when the type has no pooled key: a pooled key identifies ``b_type``,
+            and a zero-sum on the others would pin it to their mean.
+    """
+
+    type_name: str
+    keys: np.ndarray
+    zero_sum: bool
+
+
+def _deviation_groups(design: Design, source_type_of_key: np.ndarray) -> list[DeviationGroup]:
     """The source-type groups that can carry a within-type deviation.
 
-    A group is the keys of one source type that have their own effect, and it
-    needs two of them: one key's deviation is its type's mean, which ``b_type``
-    already carries.
+    A type whose keys all have their own effect needs two of them, with a
+    zero-sum: one key's deviation is its type's mean, which ``b_type`` already
+    carries. A type that also holds pooled keys needs only one, with no
+    zero-sum. There ``b_type`` against the own keys' mean deviation is settled
+    by the deviation prior (partial pooling), not by the pooled keys, which
+    after S3 rarely co-report and so pin it only weakly; the type biases then
+    no longer sum exactly to zero and the absolute level depends softly on
+    ``tau_u``'s prior. Exposure on the current corpus is zero.
 
     Args:
         design: The design, whose ``source_has_own_effect`` selects the keys.
         source_type_of_key: Each key's source-type index.
 
     Returns:
-        ``(type name, key indices)`` for each type with at least two own-effect
-        keys. Empty when no type has, in which case the model builds no
-        deviation terms at all.
+        One :class:`DeviationGroup` per qualifying type. Empty when none
+        qualifies, in which case the model builds no deviation terms at all.
     """
-    groups: list[tuple[str, np.ndarray]] = []
+    groups: list[DeviationGroup] = []
     for type_index, type_name in enumerate(design.source_types):
-        keys = np.flatnonzero((source_type_of_key == type_index) & design.source_has_own_effect)
-        if keys.size >= 2:
-            groups.append((type_name, keys))
+        in_type = source_type_of_key == type_index
+        own = np.flatnonzero(in_type & design.source_has_own_effect)
+        if own.size == 0:
+            continue
+        has_pooled = bool((in_type & ~design.source_has_own_effect).any())
+        if has_pooled:
+            groups.append(DeviationGroup(type_name, own, zero_sum=False))
+        elif own.size >= 2:
+            groups.append(DeviationGroup(type_name, own, zero_sum=True))
     return groups
 
 
@@ -632,37 +769,42 @@ def _within_type_deviations(
     pm_module: Any,
     pt_module: Any,
     design: Design,
-    groups: list[tuple[str, np.ndarray]],
+    groups: list[DeviationGroup],
     *,
     prefix: str = "z_source",
 ) -> Any:
-    """Per-source deviations, constrained to sum to zero within each type.
+    """Per-source deviations, zero-sum within a type only where that is safe.
 
     Zero-sum across all keys leaves the type-level mean of the deviations free,
     and that mean is the same parameter as ``b_type``. With a single key in a
     type the two are exactly confounded; with several the ridge is softer but
-    still costs most of the effective sample size on ``tau_u``. A type holding
-    one key therefore gets no free deviation, which is correct: ``b_type``
-    carries it entirely.
+    still costs most of the effective sample size on ``tau_u``. A type whose
+    keys all carry a deviation is therefore zero-sum within the type, and one
+    holding a single such key gets none. In a type that also holds pooled keys
+    those identify ``b_type``, so the deviations are plain standard normals
+    there; see device 2 in the module docstring.
 
     Args:
         pm_module: The imported pymc module.
         pt_module: The imported pytensor.tensor module.
         design: The design.
         groups: From :func:`_deviation_groups`.
-        prefix: Name stem for the per-type ZeroSumNormal variables, so the
-            bias deviations and the noise-scale deviations stay distinct.
+        prefix: Name stem for the per-type variables, so the bias deviations and
+            the noise-scale deviations stay distinct.
 
     Returns:
         A pytensor vector over the ``source_key`` dimension, exactly zero for
         every key outside ``groups``.
     """
     z = pt_module.zeros(len(design.source_keys))
-    for type_name, keys in groups:
-        z = pt_module.set_subtensor(
-            z[keys],
-            pm_module.ZeroSumNormal(f"{prefix}_{type_name}", sigma=1.0, shape=keys.size),
+    for group in groups:
+        name = f"{prefix}_{group.type_name}"
+        draw = (
+            pm_module.ZeroSumNormal(name, sigma=1.0, shape=group.keys.size)
+            if group.zero_sum
+            else pm_module.Normal(name, mu=0.0, sigma=1.0, shape=group.keys.size)
         )
+        z = pt_module.set_subtensor(z[group.keys], draw)
     return z
 
 
@@ -767,6 +909,47 @@ def _unknown_level_mask(design: Design) -> np.ndarray:
     return mask
 
 
+def _ratio_level_mask(design: Design) -> np.ndarray:
+    """Flag the casualty rows whose type is a component rather than the total.
+
+    Args:
+        design: The design.
+
+    Returns:
+        A float array, 1.0 where a casualty row's level is not the reference
+        (``total``) level; all zeros for troops.
+    """
+    if design.quantity == _TROOPS:
+        return np.zeros(design.n_obs, dtype=float)
+    mask: np.ndarray = (design.level_index != 0).astype(float)
+    return mask
+
+
+def _ratio_pairs(design: Design) -> tuple[np.ndarray, list[str]]:
+    """The (side, component level) pairs that carry a casualty ratio offset.
+
+    Args:
+        design: The design.
+
+    Returns:
+        ``(pair_of_row, labels)``: for each row the index of its pair (0 for a
+        row that is not a ratio row, which the ratio mask zeroes out), and the
+        ``"{side_id}:{level}"`` label of each pair. Only pairs that occur get
+        an offset, so a side with no component-level report carries none.
+    """
+    mask = _ratio_level_mask(design) > 0
+    pair_of_row = np.zeros(design.n_obs, dtype=int)
+    index: dict[tuple[int, int], int] = {}
+    labels: list[str] = []
+    for row in np.flatnonzero(mask):
+        key = (int(design.side_index[row]), int(design.level_index[row]))
+        if key not in index:
+            index[key] = len(labels)
+            labels.append(f"{design.side_ids[key[0]]}:{design.levels[key[1]]}")
+        pair_of_row[row] = index[key]
+    return pair_of_row, labels
+
+
 def _unlabelled_mask(design: Design) -> np.ndarray:
     """Flag the rows whose claim regime could not be read.
 
@@ -811,18 +994,25 @@ def _attach_likelihood(
             (a two-component Normal mixture on point rows, so a scope or
             extraction error goes to a wide component instead of inflating
             sigma), ``"student_t"`` or ``"normal"``. Censored and bound rows are
-            Normal in the contaminated family.
+            Normal in the contaminated family. ``bound_likelihood`` is
+            ``"censored"`` or ``"exgaussian"``; the latter replaces the two
+            ``pm.Censored`` terms with a one-sided excess, Gaussian whatever the
+            family.
 
     Raises:
-        ValueError: If the family is not recognised.
+        ValueError: If the family or the bound likelihood is not recognised.
     """
     family = priors.likelihood_family
     if family not in ("contaminated", "student_t", "normal"):
         raise ValueError(
             f"Unknown likelihood_family {family!r}; expected contaminated, student_t or normal"
         )
+    if priors.bound_likelihood not in ("censored", "exgaussian"):
+        raise ValueError(
+            f"Unknown bound_likelihood {priors.bound_likelihood!r}; expected censored or exgaussian"
+        )
 
-    nu = None
+    nu: Any = None
     if family == "student_t":
         # Concentrated on small values on purpose. PyMC's Gamma takes a rate,
         # so Gamma(2, 0.1) would have mean 20, where StudentT is visually
@@ -841,12 +1031,17 @@ def _attach_likelihood(
         # The row partitions are per-observation arrays too; see build_model.
         return pm_module.Data(f"data_rows_{name}", rows)
 
+    pi: Any = None
+    if family == "contaminated" and (
+        design.point_rows.size or priors.bound_likelihood == "exgaussian"
+    ):
+        pi = pm_module.Beta(
+            "pi_contam", alpha=priors.contamination_pi_alpha, beta=priors.contamination_pi_beta
+        )
+
     if design.point_rows.size:
         rows = rows_data("point", design.point_rows)
         if family == "contaminated":
-            pi = pm_module.Beta(
-                "pi_contam", alpha=priors.contamination_pi_alpha, beta=priors.contamination_pi_beta
-            )
             wide_sd = pt_module.sqrt(sd[rows] ** 2 + priors.contamination_sd**2)
             pm_module.Mixture(
                 "obs_point",
@@ -864,25 +1059,39 @@ def _attach_likelihood(
                 "obs_point", nu=nu, mu=eta[rows], sigma=sd[rows], observed=log_y[rows]
             )
 
-    if design.censor_lower_at.size:
-        rows = rows_data("censor_lower", design.censor_lower_at)
-        pm_module.Censored(
-            "obs_censor_lower",
-            dist(rows),
-            lower=log_y[rows],
-            upper=np.inf,
-            observed=log_y[rows],
-        )
+    if priors.bound_likelihood == "exgaussian":
+        # Point rows get heavy tails (student_t) or a wide component
+        # (contaminated); the ExGaussian's noise is Gaussian. Match the
+        # variance so a bound row is not given a tighter noise scale than a
+        # point row from the same source. The tails still differ (see
+        # _attach_exgaussian_bounds).
+        if family == "student_t":
+            bound_sd = sd * pt_module.sqrt(nu / (nu - 2.0))
+        elif family == "contaminated":
+            bound_sd = pt_module.sqrt(sd**2 + pi * priors.contamination_sd**2)
+        else:
+            bound_sd = sd
+        _attach_exgaussian_bounds(pm_module, design, eta, bound_sd, log_y, priors, rows_data)
+    else:
+        if design.censor_lower_at.size:
+            rows = rows_data("censor_lower", design.censor_lower_at)
+            pm_module.Censored(
+                "obs_censor_lower",
+                dist(rows),
+                lower=log_y[rows],
+                upper=np.inf,
+                observed=log_y[rows],
+            )
 
-    if design.censor_upper_at.size:
-        rows = rows_data("censor_upper", design.censor_upper_at)
-        pm_module.Censored(
-            "obs_censor_upper",
-            dist(rows),
-            lower=-np.inf,
-            upper=log_y[rows],
-            observed=log_y[rows],
-        )
+        if design.censor_upper_at.size:
+            rows = rows_data("censor_upper", design.censor_upper_at)
+            pm_module.Censored(
+                "obs_censor_upper",
+                dist(rows),
+                lower=-np.inf,
+                upper=log_y[rows],
+                observed=log_y[rows],
+            )
 
     if design.zero_rows.size:
         # "One casualty or fewer". Kept rather than dropped, because zero
@@ -895,6 +1104,67 @@ def _attach_likelihood(
             lower=log_y[rows],
             upper=np.inf,
             observed=log_y[rows],
+        )
+
+
+def _attach_exgaussian_bounds(
+    pm_module: Any,
+    design: Design,
+    eta: Any,
+    sd: Any,
+    log_y: Any,
+    priors: ModelPriors,
+    rows_data: Any,
+) -> None:
+    """Model a lone bound as a noisy report plus a one-sided excess.
+
+    Pure censoring says the truth lies on one side of the figure and nothing
+    about how far, so with many bound reports it lets the latent level drift
+    away from them. Here "up to X" is ``log y = eta + noise + excess`` and "at
+    least X" is ``log y = eta - excess + noise`` with ``excess`` exponential, which
+    puts the truth a typical distance from the stated figure. The second case is
+    fitted as ``-log y ~ ExGaussian(-eta, sd, nu)``.
+
+    Two limits worth knowing. The ExGaussian's noise has Gaussian tails, not the
+    Student-t tails of point rows, so a mis-extracted bound (a figure that is
+    not a bound at all) is less robustly absorbed than a mis-extracted point;
+    the caller inflates ``sd`` to the point rows' variance so the scale at
+    least matches. And there is one excess rate per direction, shared by every
+    side and source: "up to X" is assumed to overshoot by the same typical
+    amount in a Roman and a modern report.
+
+    Args:
+        pm_module: The imported pymc module.
+        design: The design; ``censor_lower_at`` holds the "up to X" rows and
+            ``censor_upper_at`` the "at least X" rows (see the module
+            docstring of :mod:`pipeline.reconcilers.design`).
+        eta: The linear predictor.
+        sd: The per-observation scale, already matched to the point rows'
+            noise variance.
+        log_y: The observed log values, as model data.
+        priors: Supplies ``bound_excess_prior_sd``.
+        rows_data: Registers a row partition as model data.
+    """
+    if design.censor_lower_at.size:
+        rows = rows_data("censor_lower", design.censor_lower_at)
+        lambda_upper = pm_module.HalfNormal("lambda_upper", sigma=priors.bound_excess_prior_sd)
+        pm_module.ExGaussian(
+            "obs_bound_upper",
+            mu=eta[rows],
+            sigma=sd[rows],
+            nu=lambda_upper,
+            observed=log_y[rows],
+        )
+
+    if design.censor_upper_at.size:
+        rows = rows_data("censor_upper", design.censor_upper_at)
+        lambda_lower = pm_module.HalfNormal("lambda_lower", sigma=priors.bound_excess_prior_sd)
+        pm_module.ExGaussian(
+            "obs_bound_lower",
+            mu=-eta[rows],
+            sigma=sd[rows],
+            nu=lambda_lower,
+            observed=-log_y[rows],
         )
 
 

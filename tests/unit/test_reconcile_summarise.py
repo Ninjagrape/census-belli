@@ -9,6 +9,7 @@ in ``summarise.py``, not whether PyMC converges. Nothing here carries the
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 from datetime import UTC, date, datetime
@@ -21,7 +22,7 @@ from pipeline.quality import _roll_up_metrics
 from pipeline.reconcilers.design import Design, build_design
 from pipeline.reconcilers.model import _LEVEL_PRIOR_SD, InflationPrior, ModelPriors
 from pipeline.reconcilers.records import ReconcileCounts, Report, SourceKey
-from pipeline.reconcilers.summarise import summarise_fit
+from pipeline.reconcilers.summarise import n_identifying_sides, summarise_fit
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -176,7 +177,7 @@ def _build_idata(
 # ─── Point estimate ─────────────────────────────────────────────────────────────
 
 
-def test_the_point_estimate_is_the_exponentiated_posterior_median_not_the_mean_of_the_exponential() -> None:  # noqa: E501
+def test_the_point_estimate_is_the_exponentiated_posterior_median_not_the_mean_of_exp() -> None:
     reports = [_report(1, side_id=1)]
     design = _design(reports)
     inflation = InflationPrior()
@@ -349,7 +350,7 @@ def test_identified_level_is_the_mean_of_m0_plus_offset_bar() -> None:
 # ─── Method assignment ──────────────────────────────────────────────────────────
 
 
-def test_a_singleton_side_gets_single_report_debiased_and_a_multi_lineage_side_gets_source_disagreement() -> None:  # noqa: E501
+def test_a_singleton_side_is_single_report_debiased_and_a_multi_lineage_side_disagreement() -> None:
     reports = [
         _report(1, side_id=1, lineage_id=1),  # side 1: one lineage
         _report(2, side_id=2, lineage_id=2, url="https://example/b"),
@@ -435,34 +436,132 @@ def test_zero_valued_rows_count_neither_towards_the_method_nor_the_lineage_count
 # ─── n_identifying_sides ─────────────────────────────────────────────────────────
 
 
-def test_n_identifying_sides_counts_sides_with_at_least_two_reports_of_a_regime() -> None:
+def _regimes_design(spec: dict[int, list[str]]) -> Design:
+    """A design whose side ``s`` has one report in each regime listed for it."""
+    reports = []
+    next_id = 1
+    for side_id, regimes in spec.items():
+        for regime in regimes:
+            reports.append(
+                _report(
+                    next_id,
+                    side_id=side_id,
+                    regime=regime,
+                    url=f"https://example/{next_id}",
+                    value=10_000.0 + 1_000.0 * next_id,
+                )
+            )
+            next_id += 1
+    return _design(reports)
+
+
+def test_n_identifying_sides_counts_sides_bridging_a_regime_to_the_anchor_component() -> None:
+    # anchor <- side 1 -> chronicle; chronicle <- side 2 -> unlabelled, so
+    # unlabelled is in the anchor's component through chronicle.
+    design = _regimes_design(
+        {
+            1: ["modern_scholarly", "chronicle"],
+            2: ["chronicle", "unlabelled"],
+            3: ["chronicle"],  # one regime only: bridges nothing
+            4: ["unlabelled"],
+        }
+    )
+
+    result = n_identifying_sides(design, "modern_scholarly")
+
+    assert "modern_scholarly" not in result
+    assert result["chronicle"] == 2  # sides 1 and 2
+    assert result["unlabelled"] == 1  # side 2
+
+
+def test_two_reports_in_one_regime_do_not_identify_it() -> None:
+    design = _regimes_design({1: ["modern_scholarly"], 2: ["unlabelled", "unlabelled"]})
+
+    assert n_identifying_sides(design, "modern_scholarly")["unlabelled"] == 0
+
+
+def test_a_regime_outside_the_anchor_component_gets_zero() -> None:
+    # chronicle and unlabelled are linked to each other by side 2 but to the
+    # anchor by nobody.
+    design = _regimes_design({1: ["modern_scholarly"], 2: ["chronicle", "unlabelled"]})
+
+    result = n_identifying_sides(design, "modern_scholarly")
+
+    assert result["chronicle"] == 0
+    assert result["unlabelled"] == 0
+
+
+def test_summarise_fit_reports_n_identifying_sides_per_non_anchor_regime() -> None:
     reports = [
-        # side 1: two chronicle reports -> identifies chronicle
-        _report(1, side_id=1, regime="chronicle", url="https://example/a", lineage_id=1),
-        _report(2, side_id=1, regime="chronicle", url="https://example/b", lineage_id=2),
-        # side 2: one chronicle report only -> does not identify it
-        _report(3, side_id=2, regime="chronicle", url="https://example/c", lineage_id=3),
-        # side 2: two unlabelled reports -> identifies unlabelled
-        _report(
-            4,
-            side_id=2,
-            regime="unlabelled",
-            url="https://example/d",
-            lineage_id=4,
-            value=20_000.0,
-        ),
-        _report(
-            5,
-            side_id=2,
-            regime="unlabelled",
-            url="https://example/e",
-            lineage_id=5,
-            value=30_000.0,
-        ),
+        _report(1, side_id=1, regime="modern_scholarly"),
+        _report(2, side_id=1, regime="unlabelled", value=20_000.0),
+        _report(3, side_id=2, regime="unlabelled", value=30_000.0),
     ]
     design = _design(reports)
     inflation = InflationPrior()
-    idata = _build_idata(design, inflation, seed=10)
+
+    result = summarise_fit(
+        _build_idata(design, inflation, seed=10),
+        design,
+        reports,
+        run_id=1,
+        ci_mass=0.95,
+        inflation=inflation,
+        priors=ModelPriors(),
+        computed_at=_COMPUTED_AT,
+    )
+
+    assert result.diagnostics["n_identifying_sides"]["unlabelled"] == 1
+
+
+# ─── Identified-scale widths ─────────────────────────────────────────────────────
+
+
+def _offset_posterior(
+    design: Design, shared: np.ndarray, *, labelled: str | None = None
+) -> dict[str, tuple[list[str], np.ndarray]]:
+    """Posterior pieces whose row offset is ``-shared`` on unlabelled rows only.
+
+    ``labelled`` names a regime that carries ``+shared`` instead, so a side with
+    rows in both groups has an offset that differs from the corpus mean.
+    """
+    n_chains, n_draws = shared.shape
+    g = np.zeros((n_chains, n_draws, len(design.regimes)))
+    g[:, :, design.regimes.index("unlabelled")] = -shared
+    if labelled is not None:
+        g[:, :, design.regimes.index(labelled)] = shared
+    return {
+        "g_regime": (["regime"], g),
+        "delta_level": (["level"], np.zeros((n_chains, n_draws, len(design.levels)))),
+        "a_era": ([], np.zeros((n_chains, n_draws))),
+        # Deliberately not the side-weighted mean: the corpus value must be unused.
+        "offset_bar": ([], np.full((n_chains, n_draws), 5.0)),
+    }
+
+
+def test_identified_widths_use_mu_plus_offset_and_split_by_method() -> None:
+    reports = [
+        _report(1, side_id=1),  # singleton
+        _report(2, side_id=2, url="https://example/b"),
+        _report(3, side_id=2, url="https://example/c", value=12_000.0),  # multi-claim
+    ]
+    design = _design(reports)
+    inflation = InflationPrior()
+    n_chains, n_draws = 2, 2000
+    rng = np.random.default_rng(3)
+    # offset_bar anti-correlated with side 1's mu, so a width computed on mu
+    # alone differs from one on the sum.
+    shared = rng.normal(0.0, 1.0, size=(n_chains, n_draws))
+    mu_two = 9.0 + 0.1 * rng.normal(size=shared.shape)
+    per_side_mu = {1: (9.0 + shared).ravel(), 2: mu_two.ravel()}
+    idata = _build_idata(
+        design,
+        inflation,
+        n_chains=n_chains,
+        n_draws=n_draws,
+        per_side_mu=per_side_mu,
+        extra_posterior=_offset_posterior(design, shared),
+    )
 
     result = summarise_fit(
         idata,
@@ -475,12 +574,135 @@ def test_n_identifying_sides_counts_sides_with_at_least_two_reports_of_a_regime(
         computed_at=_COMPUTED_AT,
     )
 
-    n_identifying = result.diagnostics["n_identifying_sides"]
-    assert n_identifying["chronicle"] == 1
-    assert n_identifying["unlabelled"] == 1
+    widths = result.diagnostics["identified_width"]
+    assert widths["singleton"]["n"] == 1
+    assert widths["multi_claim"]["n"] == 1
+    # mu_side + the side's own offset cancels the shared component on side 1.
+    assert widths["singleton"]["median"] == pytest.approx(0.0, abs=1e-9)
+    lo, hi = np.quantile(mu_two - shared, [0.025, 0.975])
+    assert widths["multi_claim"]["median"] == pytest.approx(hi - lo)
+    json.dumps(result.diagnostics)
+
+
+def test_identified_width_uses_each_sides_own_row_weighted_offset() -> None:
+    # Side 1 has one unlabelled and one labelled row, so its mean offset is
+    # (-shared + shared) / 2 = 0 and mu keeps its full spread; side 2 is all
+    # unlabelled and cancels. A corpus-wide offset would treat them alike.
+    reports = [
+        _report(1, side_id=1, regime="unlabelled"),
+        _report(2, side_id=1, regime="staff_return", url="https://example/b", value=12_000.0),
+        _report(3, side_id=2, regime="unlabelled", url="https://example/c"),
+    ]
+    design = _design(reports)
+    inflation = InflationPrior()
+    n_chains, n_draws = 2, 2000
+    rng = np.random.default_rng(4)
+    shared = rng.normal(0.0, 1.0, size=(n_chains, n_draws))
+    idata = _build_idata(
+        design,
+        inflation,
+        n_chains=n_chains,
+        n_draws=n_draws,
+        per_side_mu={1: (9.0 + shared).ravel(), 2: (9.0 + shared).ravel()},
+        extra_posterior=_offset_posterior(design, shared, labelled="staff_return"),
+    )
+
+    result = summarise_fit(
+        idata,
+        design,
+        reports,
+        run_id=1,
+        ci_mass=0.95,
+        inflation=inflation,
+        priors=ModelPriors(),
+        computed_at=_COMPUTED_AT,
+    )
+
+    assert "staff_return" in design.regimes
+    widths = result.diagnostics["identified_width"]
+    lo, hi = np.quantile(shared, [0.025, 0.975])
+    # Side 1 is multi-claim (two rows from distinct sources) with the full spread;
+    # side 2 is a singleton whose spread cancels.
+    assert widths["singleton"]["median"] == pytest.approx(0.0, abs=1e-9)
+    assert widths["multi_claim"]["median"] == pytest.approx(hi - lo, rel=0.02)
+
+
+def test_a_sides_offset_weights_its_rows_by_their_precision() -> None:
+    # Same setup as the unweighted case, but side 1's labelled row is a very
+    # vague range. The unweighted mean would cancel the shared offset to zero;
+    # weighting leaves almost all of the unlabelled row's -shared in, so the
+    # identified level mu + offset is nearly constant.
+    reports = [
+        _report(1, side_id=1, regime="unlabelled"),
+        _report(2, side_id=1, regime="staff_return", url="https://example/b", value=12_000.0),
+    ]
+    design = _design(reports)
+    vague = np.where(design.regime_index == design.regimes.index("staff_return"), 99.0, 0.0)
+    design = dataclasses.replace(design, range_var=vague)
+    inflation = InflationPrior()
+    n_chains, n_draws = 2, 2000
+    shared = np.random.default_rng(4).normal(0.0, 1.0, size=(n_chains, n_draws))
+    idata = _build_idata(
+        design,
+        inflation,
+        n_chains=n_chains,
+        n_draws=n_draws,
+        per_side_mu={1: (9.0 + shared).ravel()},
+        extra_posterior=_offset_posterior(design, shared, labelled="staff_return"),
+    )
+
+    result = summarise_fit(
+        idata,
+        design,
+        reports,
+        run_id=1,
+        ci_mass=0.95,
+        inflation=inflation,
+        priors=ModelPriors(),
+        computed_at=_COMPUTED_AT,
+    )
+
+    lo, hi = np.quantile(shared, [0.025, 0.975])
+    width = result.diagnostics["identified_width"]["multi_claim"]["median"]
+    assert width < 0.1 * (hi - lo)
 
 
 # ─── Contraction ─────────────────────────────────────────────────────────────────
+
+
+def test_bound_excess_rates_are_written_to_the_diagnostics_with_their_contraction() -> None:
+    reports = [_report(1, side_id=1)]
+    design = _design(reports)
+    inflation = InflationPrior()
+    priors = ModelPriors(bound_excess_prior_sd=0.5)
+    n_chains, n_draws = 2, 3000
+    rng = np.random.default_rng(8)
+    upper = np.abs(rng.normal(0.0, 0.5, size=(n_chains, n_draws)))  # the prior itself
+    lower = np.abs(rng.normal(0.4, 0.05, size=(n_chains, n_draws)))  # pinned down
+    idata = _build_idata(
+        design,
+        inflation,
+        n_chains=n_chains,
+        n_draws=n_draws,
+        extra_posterior={"lambda_upper": ([], upper), "lambda_lower": ([], lower)},
+    )
+
+    result = summarise_fit(
+        idata,
+        design,
+        reports,
+        run_id=1,
+        ci_mass=0.95,
+        inflation=inflation,
+        priors=priors,
+        computed_at=_COMPUTED_AT,
+    )
+
+    excess = result.diagnostics["bound_excess"]
+    assert excess["upper"]["contraction"] == pytest.approx(0.0, abs=0.05)
+    assert excess["lower"]["contraction"] > 0.8
+    assert excess["lower"]["mean"] == pytest.approx(0.4, abs=0.02)
+    json.dumps(result.diagnostics)
 
 
 def test_contraction_is_near_zero_when_the_posterior_matches_the_prior() -> None:

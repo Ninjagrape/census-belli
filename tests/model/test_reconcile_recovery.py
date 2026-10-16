@@ -372,6 +372,31 @@ def test_five_sources_repeating_one_claim_do_not_narrow_the_interval_like_five_i
 # ─── Ablation 1: treating a stated bound as a point value ───────────────────
 
 
+CENSORING_SAMPLER = SamplerSettings(
+    draws=500, tune=500, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+)
+
+
+def _censoring_corpus(*, lower: bool = False) -> object:
+    """The bound-heavy corpus both censoring ablations fit (60 sides x 2 reports).
+
+    Args:
+        lower: Make the 80% bound reports "at least X" rather than "up to X".
+    """
+    rng = np.random.default_rng(SEED + (2 if lower else 1))
+    return simulate_corpus(
+        rng,
+        side_groups=[(60, 2)],
+        m0=TRUE_M0,
+        s0=TRUE_S0,
+        regime_weights=MAIN_REGIME_WEIGHTS,
+        scope_weights=MAIN_SCOPE_WEIGHTS,
+        ancient_fraction=0.6,
+        censor_upper_prob=0.0 if lower else 0.80,
+        censor_lower_prob=0.80 if lower else 0.0,
+    )
+
+
 @pytest.fixture(scope="module")
 def censoring_ablation() -> tuple[Fit, Fit, np.ndarray]:
     """Fit the same censored corpus correctly, and again with bounds cleared.
@@ -381,25 +406,12 @@ def censoring_ablation() -> tuple[Fit, Fit, np.ndarray]:
     ratio comparison between two fits of the same data rather than a
     from-scratch recovery check.
     """
-    rng = np.random.default_rng(SEED + 1)
-    corpus = simulate_corpus(
-        rng,
-        side_groups=[(60, 2)],
-        m0=TRUE_M0,
-        s0=TRUE_S0,
-        regime_weights=MAIN_REGIME_WEIGHTS,
-        scope_weights=MAIN_SCOPE_WEIGHTS,
-        ancient_fraction=0.6,
-        censor_upper_prob=0.80,
-        censor_lower_prob=0.0,
-    )
-    priors = ModelPriors.from_params({}, quantity="troops")
+    corpus = _censoring_corpus()
+    priors = replace(ModelPriors.from_params({}, quantity="troops"), bound_likelihood="censored")
     from pipeline.reconcilers.model import load_inflation_prior
 
     inflation = load_inflation_prior()
-    sampler = SamplerSettings(
-        draws=500, tune=500, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
-    )
+    sampler = CENSORING_SAMPLER
 
     correct_fit = run_fit(
         corpus.reports,
@@ -442,6 +454,101 @@ def test_treating_a_stated_bound_as_a_point_value_degrades_the_recovered_scale(
     rmse_naive = float(np.sqrt(np.mean(log_errors(naive_fit.summary, true_log) ** 2)))
 
     assert rmse_naive >= 1.4 * rmse_correct, (rmse_naive, rmse_correct)
+
+
+@pytest.fixture(scope="module")
+def exgaussian_bounds_fit() -> Fit:
+    """The same bound-heavy corpus fitted with ``bound_likelihood: exgaussian``."""
+    from pipeline.reconcilers.model import load_inflation_prior
+
+    corpus = _censoring_corpus()
+    priors = replace(ModelPriors.from_params({}, quantity="troops"), bound_likelihood="exgaussian")
+    return run_fit(
+        corpus.reports,  # type: ignore[attr-defined]
+        priors=priors,
+        inflation=load_inflation_prior(),
+        sampler=CENSORING_SAMPLER,
+        ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
+    )
+
+
+def test_an_exgaussian_bound_likelihood_recovers_what_pure_censoring_loses(
+    censoring_ablation: tuple[Fit, Fit, np.ndarray],
+    exgaussian_bounds_fit: Fit,
+) -> None:
+    """The ExGaussian bound beats pure censoring and is no worse than ignoring bounds.
+
+    This is not the 1.4x claim of the xfail above. On this corpus a bound's
+    excess is a half-normal with sd 0.3, so treating bounds as points costs
+    little, and the ExGaussian fit is about level with it rather than clearly
+    ahead. What it fixes is the censored fit's drift, which is the open design
+    question in docs/handover-log.md 20.4.
+    """
+    censored_fit, naive_fit, true_values = censoring_ablation
+    ids = sorted({e.side_id for e in exgaussian_bounds_fit.summary.side_estimates})
+    true_log = {sid: v for sid, v in zip(ids, true_values, strict=True)}
+
+    def rmse(fit: Fit) -> float:
+        return float(np.sqrt(np.mean(log_errors(fit.summary, true_log) ** 2)))
+
+    rmse_exgaussian, rmse_censored, rmse_naive = (
+        rmse(exgaussian_bounds_fit),
+        rmse(censored_fit),
+        rmse(naive_fit),
+    )
+    print(
+        f"RMSE exgaussian {rmse_exgaussian:.3f}, censored {rmse_censored:.3f}, "
+        f"bounds-as-points {rmse_naive:.3f}"
+    )
+
+    assert rmse_censored >= 2.0 * rmse_exgaussian, (rmse_censored, rmse_exgaussian)
+    assert rmse_exgaussian <= 1.25 * rmse_naive, (rmse_exgaussian, rmse_naive)
+
+
+@pytest.fixture(scope="module")
+def lower_bound_ablation() -> tuple[Fit, Fit, np.ndarray]:
+    """The mirror corpus, 80% "at least X" bounds, fitted censored and ExGaussian.
+
+    The first ablation has upper bounds only, which would not catch a sign
+    error in the lower-bound branch of the ExGaussian (it is fitted as
+    ``-log y ~ ExGaussian(-eta, ...)``).
+    """
+    from pipeline.reconcilers.model import load_inflation_prior
+
+    corpus = _censoring_corpus(lower=True)
+    base = ModelPriors.from_params({}, quantity="troops")
+    inflation = load_inflation_prior()
+    fits = [
+        run_fit(
+            corpus.reports,  # type: ignore[attr-defined]
+            priors=replace(base, bound_likelihood=kind),
+            inflation=inflation,
+            sampler=CENSORING_SAMPLER,
+            ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
+        )
+        for kind in ("exgaussian", "censored")
+    ]
+    true_log = np.array([corpus.true_log_side[sid] for sid in sorted(corpus.true_log_side)])  # type: ignore[attr-defined]
+    return fits[0], fits[1], true_log
+
+
+def test_an_exgaussian_lower_bound_likelihood_also_beats_pure_censoring(
+    lower_bound_ablation: tuple[Fit, Fit, np.ndarray],
+) -> None:
+    exgaussian_fit, censored_fit, true_values = lower_bound_ablation
+    ids = sorted({e.side_id for e in exgaussian_fit.summary.side_estimates})
+    true_log = {sid: v for sid, v in zip(ids, true_values, strict=True)}
+
+    def rmse(fit: Fit) -> float:
+        return float(np.sqrt(np.mean(log_errors(fit.summary, true_log) ** 2)))
+
+    rmse_exgaussian, rmse_censored = rmse(exgaussian_fit), rmse(censored_fit)
+    print(f"lower bounds: RMSE exgaussian {rmse_exgaussian:.3f}, censored {rmse_censored:.3f}")
+    excess = exgaussian_fit.summary.diagnostics["bound_excess"]
+    print(f"lower bounds: bound_excess {excess}")
+
+    # Measured: 0.304 against 2.143.
+    assert rmse_censored >= 2.0 * rmse_exgaussian, (rmse_censored, rmse_exgaussian)
 
 
 # ─── Ablation 2: an all-unlabelled corpus ───────────────────────────────────
