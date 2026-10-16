@@ -61,6 +61,7 @@ __all__ = [
     "parse_article_infobox",
     "parse_infobox",
     "parse_infobox_html",
+    "parse_result",
 ]
 
 logger = structlog.get_logger()
@@ -177,8 +178,11 @@ _COMMANDER_FIELDS: Final[tuple[str, ...]] = ("commander", "commanders", "leader"
 # combatant1a / commander2b group sub-allies under a numbered side.
 _SIDE_SUFFIX_RE: Final = re.compile(r"^(?P<stem>[a-z_ ]+?)(?P<index>[1-9])(?P<sub>[a-z])?$")
 
+_QUALIFIER_WORDS: Final = "decisive|pyrrhic|marginal|tactical|strategic|minor|major|narrow"
+_QUALIFIER_RE: Final = re.compile(rf"\b(?:{_QUALIFIER_WORDS})\b", re.IGNORECASE)
+# The victor span may hold qualifiers on either side of the victor's name
+# ("Roman pyrrhic victory", "Strategic Soviet victory"); they are split out after.
 _RESULT_RE: Final = re.compile(
-    r"(?P<qualifier>decisive|pyrrhic|marginal|tactical|strategic|minor|major|narrow)?\s*"
     r"(?P<who>[A-Za-zÀ-ɏ'’\- ]{2,60}?)\s+victory",
     re.IGNORECASE,
 )
@@ -318,24 +322,33 @@ def _parse_result(result_text: str) -> tuple[str | None, str | None]:
 
     result_text = _RESULT_DEBRIS_RE.sub("", result_text)
     match = _RESULT_RE.search(result_text)
-    if match is None:
+    span = re.sub(r"\s+", " ", match.group("who")).strip(" -–—") if match else ""
+    qualifiers = [q.lower() for q in _QUALIFIER_RE.findall(span)]
+    who = re.sub(r"\s+", " ", _QUALIFIER_RE.sub(" ", span)).strip(" -–—")
+
+    if not who:
+        # "Decisive victory for Octavian": the qualifier filled the span and
+        # the victor follows the word "victory".
         victory_for = _VICTORY_FOR_RE.search(result_text)
         if victory_for is None:
-            return None, None
+            return (None, None) if match is None else (None, _level(qualifiers))
         who = re.sub(r"\s+", " ", victory_for.group("who")).strip(" -–—")
-        return (who or None), "victory"
+        if match is None:
+            return (who or None), "victory"
 
-    qualifier = (match.group("qualifier") or "").lower()
-    who = re.sub(r"\s+", " ", match.group("who")).strip(" -–—")
+    return (who or None), _level(qualifiers)
 
-    if qualifier == "decisive":
-        level = "decisive_victory"
-    elif qualifier == "pyrrhic":
-        level = "pyrrhic_victory"
-    else:
-        level = "victory"
 
-    return (who or None), level
+def _level(qualifiers: list[str]) -> str:
+    """Map victory qualifiers to an outcome level; decisive and pyrrhic win out."""
+    if "decisive" in qualifiers:
+        return "decisive_victory"
+    if "pyrrhic" in qualifiers:
+        return "pyrrhic_victory"
+    return "victory"
+
+
+parse_result = _parse_result
 
 
 def _commander_mentions(
@@ -711,6 +724,7 @@ def _build_extraction(
             label=label,
             aliases=labels[1:],
             polity=label if labels else None,
+            belligerents=len(labels),
         )
         for _, value in commanders.get(index, []):
             side.commanders.extend(

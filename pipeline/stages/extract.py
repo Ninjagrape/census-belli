@@ -62,6 +62,14 @@ from pipeline.extractors import (
     write_battle_isolated,
 )
 from pipeline.extractors.article import DEFAULT_MAX_PASSAGE_CHARS
+from pipeline.extractors.outcome import (
+    OUTCOME_LEAD_MAX_CHARS,
+    OUTCOME_STAGE,
+    OutcomePass,
+    lead_excerpt,
+    needs_outcome_request,
+    resolve_outcome,
+)
 from pipeline.extractors.store import reserve_battle_id
 from pipeline.llm import LLMService
 from pipeline.stages.base import StageContext, StageOutcome
@@ -517,6 +525,7 @@ def extract_battle(
     schema: dict[str, Any],
     max_passage_chars: int = DEFAULT_MAX_PASSAGE_CHARS,
     battle_id: int | None = None,
+    outcome_pass: OutcomePass | None = None,
 ) -> BattleExtraction:
     """Extract and merge every source for one battle.
 
@@ -529,6 +538,8 @@ def extract_battle(
         schema: ``prompt.output_schema`` from the spec.
         max_passage_chars: Chunk size for long articles.
         battle_id: Database id to record on the LLM requests, when known.
+        outcome_pass: The targeted outcome request, or None to leave a battle
+            the deterministic merge could not decide without an outcome.
 
     Returns:
         The merged record, carrying any extraction failures so that the
@@ -601,7 +612,36 @@ def extract_battle(
     sources.extend(llm_result.extractions)
     failures.extend(llm_result.failures)
 
-    return merge_battle(battle.slug, sources, failures=failures, fallback_name=battle.name)
+    merged = merge_battle(battle.slug, sources, failures=failures, fallback_name=battle.name)
+
+    if outcome_pass is not None and needs_outcome_request(merged):
+        status = resolve_outcome(
+            merged,
+            outcome_pass,
+            lead=_article_lead(battle, outcome_pass.max_lead_chars),
+            battle_id=battle_id,
+        )
+        logger.debug("outcome_request_resolved", slug=battle.slug, status=status)
+
+    return merged
+
+
+def _article_lead(battle: RawBattle, max_chars: int) -> str:
+    """Read the opening of a battle's article for the outcome prompt.
+
+    Args:
+        battle: The battle's raw files.
+        max_chars: Cap on the excerpt.
+
+    Returns:
+        The excerpt, or an empty string when there is no readable article.
+    """
+    if battle.article_path is None:
+        return ""
+    raw = _read_text(battle.article_path)
+    if not raw:
+        return ""
+    return lead_excerpt(raw, is_html=battle.article_is_html, max_chars=max_chars)
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -655,6 +695,7 @@ def _write_outputs(
                 "failures": [to_jsonable(f) for f in battle.failures],
                 "notes": battle.notes,
                 "n_sources": battle.n_sources,
+                "outcome_method": battle.outcome_method or None,
                 "needs_review": battle.needs_review,
                 "review_notes": battle.review_notes,
             }
@@ -699,6 +740,55 @@ def _build_service(spec: dict[str, Any], context: StageContext) -> LLMService | 
         logger.info("extract_dry_run_skipping_llm_pass")
         return None
     return LLMService.from_spec(spec, db_conn=context.db_conn)
+
+
+def _build_outcome_pass(spec: dict[str, Any], context: StageContext) -> OutcomePass | None:
+    """Construct the outcome request pass, unless the spec or run switches it off.
+
+    Args:
+        spec: The loaded agent spec.
+        context: The stage context.
+
+    Returns:
+        The pass, or None for a dry run or a spec naming no
+        ``outcome_llm_model`` or ``outcome_prompt``.
+
+    Raises:
+        ValueError: If the spec enables the pass but its prompt is incomplete.
+    """
+    params = spec.get("params") or {}
+    prompt = spec.get("outcome_prompt") or {}
+    model = params.get("outcome_llm_model")
+    if context.dry_run or not model or not prompt:
+        return None
+
+    system = prompt.get("system")
+    template = prompt.get("user_template")
+    schema = prompt.get("output_schema")
+    if not system or not template or not isinstance(schema, dict):
+        raise ValueError(
+            "agents/extract.yaml outcome_prompt must define system, user_template and "
+            "output_schema when params.outcome_llm_model is set."
+        )
+
+    # A separate stage name sends this service's uncached requests to their own
+    # batch file; the model is the outcome model, not the passage one.
+    outcome_spec = {
+        **spec,
+        "stage": OUTCOME_STAGE,
+        "params": {
+            **params,
+            "llm_model": model,
+            "llm_max_tokens": params.get("outcome_llm_max_tokens", 1024),
+        },
+    }
+    return OutcomePass(
+        service=LLMService.from_spec(outcome_spec, db_conn=context.db_conn),
+        system=str(system),
+        template=str(template),
+        schema=schema,
+        max_lead_chars=int(params.get("outcome_lead_max_chars", OUTCOME_LEAD_MAX_CHARS)),
+    )
 
 
 def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutcome | None:
@@ -751,8 +841,13 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
         return None
 
     service = _build_service(spec, ctx)
+    outcome_pass = _build_outcome_pass(spec, ctx)
     merged: list[BattleExtraction] = []
-    reserve_ids = service is not None and ctx.db_conn is not None and not ctx.dry_run
+    reserve_ids = (
+        (service is not None or outcome_pass is not None)
+        and ctx.db_conn is not None
+        and not ctx.dry_run
+    )
 
     for batch_number, batch in enumerate(iter_batches(discovered, batch_size), start=1):
         logger.info(
@@ -775,6 +870,7 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
                         schema=schema,
                         max_passage_chars=max_passage_chars,
                         battle_id=battle_id,
+                        outcome_pass=outcome_pass,
                     )
                 )
             except Exception as exc:
@@ -801,11 +897,21 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
         logger.info("extract_database_write_skipped", dry_run=ctx.dry_run)
 
     outcome: StageOutcome | None = None
+    deferred = 0
+    batch_file = None
     if service is not None:
         batch_file = service.flush_pending()
         service.log_summary()
-        if service.usage.deferred:
-            outcome = StageOutcome(deferred_requests=service.usage.deferred, batch_file=batch_file)
+        deferred += service.usage.deferred
+    if outcome_pass is not None:
+        outcome_file = outcome_pass.service.flush_pending()
+        outcome_pass.service.log_summary()
+        deferred += outcome_pass.service.usage.deferred
+        # The outcome file is the one worth answering on its own, so it is the
+        # file the orchestrator names; the passage file stays on disk.
+        batch_file = outcome_file or batch_file
+    if deferred:
+        outcome = StageOutcome(deferred_requests=deferred, batch_file=batch_file)
 
     flagged = [b for b in merged if b.needs_review]
     logger.info(

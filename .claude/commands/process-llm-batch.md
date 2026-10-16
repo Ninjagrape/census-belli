@@ -16,7 +16,7 @@ You are the coordinator. You do not answer requests yourself: that would spend t
 
    It prints the chunk directory (`data/llm_requests/chunks/<stem>/`), each chunk's `agent_model`, and the request count. If nothing is left to answer, go to step 4.
 
-2. **Dispatch** one `llm-batch-worker` per chunk, `run_in_background: true`, at most N at a time. Set `model` from the chunk's `agent_model` (`haiku` for extract and resolve, `sonnet` for classify). Brief each worker with only:
+2. **Dispatch** one `llm-batch-worker` per chunk, `run_in_background: true`, at most N at a time. Set `model` from the chunk's `agent_model` (`haiku` for extract passages and resolve, `sonnet` for classify and for `extract_outcome_<timestamp>.jsonl`, the small file of who-won requests extract writes beside its passage file). Brief each worker with only:
 
    > Chunk: `data/llm_requests/chunks/<stem>/chunk_NNN.json`
    > Write responses to: `data/llm_responses/<stem>/chunk_NNN.jsonl`

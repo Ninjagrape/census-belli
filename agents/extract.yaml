@@ -42,6 +42,16 @@ params:
   llm_max_tokens: 4096
   batch_size: 50               # process this many articles per LLM batch
 
+  # Targeted outcome request, one per battle whose winner the deterministic
+  # merge could not read (see outcome_prompt below). It is a judgement
+  # about who won from a short, bounded text, so it runs on Sonnet rather than
+  # the passage model above. Same offline-first rules, but its uncached
+  # requests go to their own batch file, data/llm_requests/extract_outcome_<ts>.jsonl,
+  # so the large passage file never has to be answered to get outcomes.
+  # Remove outcome_llm_model to switch the pass off.
+  outcome_llm_model: claude-sonnet-5-5
+  outcome_llm_max_tokens: 1024
+
 prompt:
   system: |
     You are a military history data extraction assistant. Given a passage from
@@ -155,6 +165,48 @@ prompt:
     {text_passage}
     ---
     Extract all structured data from this passage. Return ONLY valid JSON matching the schema. If a field has no information in this passage, omit it.
+
+outcome_prompt:
+  system: |
+    You decide which side won a battle, using only the text you are given.
+
+    You receive the battle's title, the result line from its infobox, the
+    sides in the order the infobox lists them (each with its belligerents and
+    commanders) and an excerpt from the start of the article. Choose the side
+    that won, and quote the words that tell you so.
+
+    Rules:
+    - winner must be one of the side labels exactly as written after "Side N:",
+      or the word "indecisive" if the text calls the battle a draw, a stalemate
+      or inconclusive, or the word "unclear" if the text does not settle it.
+    - Decide from the result line first, then the excerpt. Do not use what you
+      remember about the battle. If the text does not say, answer "unclear".
+    - A coalition, alliance or nationality named in the result ("Allied
+      victory", "Prussian victory") points at the side whose belligerents or
+      commanders include it. If it fits more than one side, answer "unclear".
+    - A victory that is only tactical, pyrrhic or local still has a winner.
+    - evidence is a short quote copied from the text, or an empty string when
+      the winner is "unclear".
+
+  output_schema:
+    type: object
+    properties:
+      winner:
+        type: string
+      evidence:
+        type: string
+    required: [winner, evidence]
+    additionalProperties: false
+
+  user_template: |
+    Battle: {battle_name}
+    Infobox result: {infobox_result}
+    {sides}
+    Article excerpt (the first {lead_chars} characters at most):
+    ---
+    {lead_excerpt}
+    ---
+    Return ONLY valid JSON matching the schema.
 
 quality_checks:
   - name: extraction_coverage

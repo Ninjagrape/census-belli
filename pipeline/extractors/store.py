@@ -146,7 +146,13 @@ _INSERT_SIDE = text(
     "VALUES (:battle_id, :side_label, :polity, CAST(:outcome AS outcome_level)) "
     "RETURNING side_id"
 )
+# Extract owns outcome, so a run that finds none must clear an earlier value.
 _UPDATE_SIDE = text(
+    "UPDATE battle_sides SET polity = COALESCE(:polity, polity), "
+    "outcome = CAST(:outcome AS outcome_level) WHERE side_id = :side_id"
+)
+# A battle reached by a second record in the same run keeps what the first set.
+_UPDATE_SIDE_KEEP_OUTCOME = text(
     "UPDATE battle_sides SET polity = COALESCE(:polity, polity), "
     "outcome = COALESCE(CAST(:outcome AS outcome_level), outcome) WHERE side_id = :side_id"
 )
@@ -462,13 +468,17 @@ def reserve_battle_id(conn: Any, slug: str, name: str) -> int | None:
         return None
 
 
-def _upsert_side(conn: Any, battle_id: int, side: SideExtraction) -> int:
+def _upsert_side(
+    conn: Any, battle_id: int, side: SideExtraction, *, keep_outcome: bool = False
+) -> int:
     """Insert or update one ``battle_sides`` row.
 
     Args:
         conn: An open database connection.
         battle_id: The battle this side belongs to.
         side: The merged side.
+        keep_outcome: Keep a stored outcome when this side has none. Set when
+            another record already wrote the battle this run.
 
     Returns:
         The side id.
@@ -488,7 +498,8 @@ def _upsert_side(conn: Any, battle_id: int, side: SideExtraction) -> int:
         return int(row[0])
 
     side_id = int(existing[0])
-    conn.execute(_UPDATE_SIDE, {**params, "side_id": side_id})
+    update = _UPDATE_SIDE_KEEP_OUTCOME if keep_outcome else _UPDATE_SIDE
+    conn.execute(update, {**params, "side_id": side_id})
     return side_id
 
 
@@ -604,8 +615,9 @@ def write_battle(
     tally.battles += 1
 
     side_ids: dict[str, int] = {}
+    written_before = battle_id in tally.written_battle_ids
     for side in battle.sides:
-        side_id = _upsert_side(conn, battle_id, side)
+        side_id = _upsert_side(conn, battle_id, side, keep_outcome=written_before)
         side_ids[side.label] = side_id
         tally.sides += 1
 

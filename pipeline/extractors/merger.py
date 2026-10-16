@@ -27,6 +27,7 @@ from typing import Any, Final
 import structlog
 
 from pipeline.extractors.dates import astronomical_year, title_year_span, year_precision_literal
+from pipeline.extractors.infobox import parse_result
 from pipeline.extractors.records import (
     BattleExtraction,
     BattleFacts,
@@ -43,6 +44,7 @@ from pipeline.extractors.textnorm import normalise_label
 
 __all__ = [
     "SOURCE_PRIORITY",
+    "apply_winner",
     "merge_battle",
     "missing_fields",
 ]
@@ -268,6 +270,56 @@ def _apply_title_year(facts: BattleFacts, disagreements: list[Disagreement], tit
     facts.date_circa = None
 
 
+_GLUED_VICTORY_RE: Final = re.compile(r"(?<=[a-z])(?=victor(?:y|ies))")
+
+
+def _dbpedia_victor(raw: str | None) -> str | None:
+    """Read DBpedia's raw ``result`` literal the way the infobox parser reads one.
+
+    DBpedia flattens the rendered infobox, so a link boundary glues words
+    together ("Unionvictory") and the literal can carry a whole sentence or an
+    unrendered cross-reference. Passing it through the infobox's own result
+    parser gives a victor label that is comparable with an infobox victor, and
+    drops the literals that name nobody.
+
+    Args:
+        raw: DBpedia's result literal, or None.
+
+    Returns:
+        The victor label, or None when the literal does not name one.
+    """
+    if not raw:
+        return None
+    victor, _level = parse_result(_GLUED_VICTORY_RE.sub(" ", raw))
+    return victor
+
+
+def _order_victors(
+    offered: list[tuple[str, Any]], level_source: str | None
+) -> list[tuple[str, Any]]:
+    """Rank the victors different sources offered.
+
+    The victor is read against the outcome level, so the source that supplied
+    the level goes first when it also named a victor. DBpedia goes last: its
+    literal is unrendered text that only resembles a parsed infobox result, so
+    it fills a gap and never overrides a source that parsed both fields.
+
+    Args:
+        offered: (source type, victor) pairs in priority order.
+        level_source: The source type the outcome level came from, if any.
+
+    Returns:
+        The same pairs, reordered.
+    """
+
+    def rank(item: tuple[str, Any]) -> int:
+        if item[0] == level_source:
+            return 0
+        return 2 if item[0] == "dbpedia" else 1
+
+    return sorted(offered, key=rank)
+
+
 def _merge_scalars(
     sources: Sequence[SourceExtraction],
     title: str = "",
@@ -287,15 +339,20 @@ def _merge_scalars(
     ordered = sorted(sources, key=lambda s: _priority(s.provenance.source_type), reverse=True)
     bad_dates = _conflicting_dbpedia_date(sources, title)
 
+    level_source = next((s.provenance.source_type for s in ordered if s.facts.outcome_level), None)
     for field_name in _SCALAR_FIELDS:
         offered: list[tuple[str, Any]] = []
         for source in ordered:
             if source is bad_dates and field_name in _DATE_FIELDS:
                 continue
             value = getattr(source.facts, field_name)
+            if field_name == "victor" and source.provenance.source_type == "dbpedia":
+                value = _dbpedia_victor(value)
             if value is not None and value != "":
                 offered.append((source.provenance.source_type, value))
 
+        if field_name == "victor":
+            offered = _order_victors(offered, level_source)
         if not offered:
             continue
 
@@ -473,8 +530,10 @@ def _merge_sides(sources: Sequence[SourceExtraction]) -> list[SideExtraction]:
                     aliases=list(side.aliases),
                     polity=side.polity,
                     outcome=side.outcome,
+                    belligerents=side.belligerents,
                 )
             target = merged[key]
+            target.belligerents = max(target.belligerents, side.belligerents)
             if side.label != target.label and side.label not in target.aliases:
                 target.aliases.append(side.label)
             for alias in side.aliases:
@@ -515,6 +574,8 @@ _DEMONYM_PHRASES: Final[dict[str, tuple[str, ...]]] = {
     "allied": ("allies",),
     "muslim": ("caliphate", "muslim"),
     "senatorial": ("senate",),
+    "korean": ("joseon", "korea"),
+    "axis": ("nazi germany", "germany", "kingdom of italy", "italy", "empire of japan"),
 }
 
 # What a demonym adds to a polity stem: Carthag(e) + inian, Macedon(ia) + ian.
@@ -573,6 +634,8 @@ _VICTOR_NOISE: Final[frozenset[str]] = frozenset(
         "see",
     }
 )
+# "Octavian's victory": the possessive would otherwise survive as a stray "s".
+_POSSESSIVE_RE: Final = re.compile(r"['’]s\b")
 _COMPOUND_VICTOR_RE: Final = re.compile(r"\s*(?:-|\band\b|&|/)\s*", re.IGNORECASE)
 _MIN_COMMANDER_TOKEN: Final = 4
 
@@ -584,7 +647,8 @@ def _stem_related(a: str, b: str) -> bool:
     prefix of the longer one, with a known demonym ending left over. That
     pairs Carthage and Carthaginian, Austria and Austrian, Germany and
     German, but not Austria and Australia, which share five letters and
-    nothing else.
+    nothing else. A combining form ("Prusso", "Austro", "Franco") is the same
+    stem plus an ``o``, so it is tried with the ``o`` removed.
 
     Args:
         a: A normalised token.
@@ -594,10 +658,29 @@ def _stem_related(a: str, b: str) -> bool:
         True when one is the polity form and the other its demonym.
     """
     short, long_ = sorted((a, b), key=len)
-    root = short.rstrip("aeys")
-    if len(root) < _MIN_STEM_LENGTH or not long_.startswith(root):
-        return False
-    return long_[len(root) :] in _DEMONYM_SUFFIXES
+    if _is_demonym_of(short.rstrip("aeys"), long_):
+        return True
+    return any(
+        form.endswith("o") and _is_demonym_of(form[:-1], other) for form, other in ((a, b), (b, a))
+    )
+
+
+def _is_demonym_of(root: str, token: str) -> bool:
+    """Whether a token is a polity stem plus a known demonym ending.
+
+    Args:
+        root: A polity name with its final vowel removed.
+        token: A normalised token.
+
+    Returns:
+        True when the stem is long enough to be distinctive and what follows
+        it is a demonym ending.
+    """
+    return (
+        len(root) >= _MIN_STEM_LENGTH
+        and token.startswith(root)
+        and token[len(root) :] in _DEMONYM_SUFFIXES
+    )
 
 
 def _contains_phrase(tokens: list[str], phrase: str) -> bool:
@@ -660,9 +743,11 @@ def _commander_tokens(side: SideExtraction) -> list[str]:
 def _victor_groups(victor: str) -> list[list[str]]:
     """Split a victor label into the groups that must each be matched.
 
-    "Russo-Austrian" names two polities, so a side that matches only one of
-    them did not win alone; every group must point at the same side. A plain
-    "Imperial French" is one group, any token of which may identify the side.
+    "Russo-Austrian" names two polities. A side is a winner when at least one
+    group points at it, so "Prusso-Russian" still finds Prussia when the other
+    side is Austria; the label is only ambiguous when its groups point at
+    different sides. A plain "Imperial French" is one group, any token of
+    which may identify the side.
 
     Args:
         victor: The victor as the source wrote it.
@@ -671,11 +756,31 @@ def _victor_groups(victor: str) -> list[list[str]]:
         Groups of normalised content tokens, empty groups removed.
     """
     groups = []
-    for part in _COMPOUND_VICTOR_RE.split(victor):
+    for part in _COMPOUND_VICTOR_RE.split(_POSSESSIVE_RE.sub("", victor)):
         tokens = [t for t in normalise_label(part).split() if t not in _VICTOR_NOISE]
         if tokens:
             groups.append(tokens)
     return groups
+
+
+_COALITION_WORDS: Final[frozenset[str]] = frozenset({"coalition", "allied", "allies", "alliance"})
+_ORDINALS: Final[frozenset[str]] = frozenset(
+    {"first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth"}
+)
+
+
+def _is_coalition_victor(groups: Sequence[Sequence[str]]) -> bool:
+    """Whether a victor label only says that an alliance won.
+
+    Args:
+        groups: The label's token groups.
+
+    Returns:
+        True for "Coalition", "Allied" or "Seventh Coalition": a coalition
+        word, optionally with an ordinal, and nothing that names a polity.
+    """
+    tokens = {token for group in groups for token in group}
+    return bool(tokens & _COALITION_WORDS) and tokens <= _COALITION_WORDS | _ORDINALS
 
 
 def _winning_sides(victor: str, sides: Sequence[SideExtraction]) -> list[SideExtraction]:
@@ -700,7 +805,7 @@ def _winning_sides(victor: str, sides: Sequence[SideExtraction]) -> list[SideExt
         return [
             side
             for index, side in enumerate(sides)
-            if all(
+            if any(
                 any(_token_names_side(token, names_for[index]) for token in group)
                 for group in groups
             )
@@ -714,11 +819,17 @@ def _winning_sides(victor: str, sides: Sequence[SideExtraction]) -> list[SideExt
     if winners:
         return winners
 
+    if _is_coalition_victor(groups):
+        # "Coalition victory" names no polity. It points at the side the
+        # infobox shows as a coalition, but only when exactly one side is.
+        coalitions = [side for side in sides if side.belligerents > 1]
+        return coalitions if len(coalitions) == 1 else []
+
     by_commander = {index: _commander_tokens(side) for index, side in enumerate(sides)}
     return [
         side
         for index, side in enumerate(sides)
-        if all(
+        if any(
             any(
                 token == name or _stem_related(token, name)
                 for token in group
@@ -763,8 +874,19 @@ def _assign_outcomes(sides: Sequence[SideExtraction], facts: BattleFacts) -> Non
         )
         return
 
+    apply_winner(sides, winners[0], level)
+
+
+def apply_winner(sides: Sequence[SideExtraction], winner: SideExtraction, level: str) -> None:
+    """Give the winner the outcome level and every other side its mirror.
+
+    Args:
+        sides: The merged sides, modified in place.
+        winner: The side that won; one of ``sides``.
+        level: The winner's outcome level, e.g. ``decisive_victory``.
+    """
     for side in sides:
-        side.outcome = level if side is winners[0] else _VICTORY_MIRROR.get(level)
+        side.outcome = level if side is winner else _VICTORY_MIRROR.get(level)
 
 
 def missing_fields(battle: BattleExtraction) -> list[MissingField]:

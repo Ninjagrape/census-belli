@@ -641,6 +641,39 @@ def test_a_battle_written_twice_in_one_run_skips_stale_cleanup(conn: Any) -> Non
     assert counts.stale_sides_removed == 0
 
 
+def _with_outcomes(battle: Any, outcome: str | None) -> Any:
+    """Copy a battle with every side's outcome set to ``outcome``."""
+    return replace(battle, sides=[replace(s, outcome=outcome) for s in battle.sides])
+
+
+def _outcomes(conn: Any, battle_id: int) -> list[str | None]:
+    rows = conn.execute(
+        text("SELECT outcome FROM battle_sides WHERE battle_id = :id ORDER BY side_id"),
+        {"id": battle_id},
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def test_a_rerun_with_no_outcome_clears_a_stored_one(conn: Any) -> None:
+    record = _actium()
+    battle_id = write_battle(conn, _with_outcomes(record, "victory"))
+    assert set(_outcomes(conn, battle_id)) == {"victory"}
+
+    write_battle(conn, _with_outcomes(record, None))
+
+    assert set(_outcomes(conn, battle_id)) == {None}
+
+
+def test_a_second_record_in_one_run_does_not_clear_the_first_ones_outcome(conn: Any) -> None:
+    record = _actium()
+    counts = ExtractWriteCounts()
+    battle_id = write_battle(conn, _with_outcomes(record, "victory"), counts)
+
+    write_battle(conn, _with_outcomes(record, None), counts)
+
+    assert set(_outcomes(conn, battle_id)) == {"victory"}
+
+
 def test_stale_removal_counts_rows_extract_did_not_own(conn: Any) -> None:
     import structlog
 
