@@ -41,9 +41,16 @@ The table's corpus column predates 2026-10-16. Corpus state now
 0 deferred; reconcile passes every error gate (spread 0.65; warnings:
 prior_predictive 0.062 vs 0.05, calibration set empty); classify 0 deferred,
 attribution llm 267 sides / rule_single 133 / default_split 17; impute run 57
-(rhat 1.004, ESS 1375, 156 of 420 sides imputed). A model fit was started on
-this state as a diagnostic only (`data/logs/corpus2_model_20261016.log`); its
-ranking is not valid (§7).
+(rhat 1.004, ESS 1375, 156 of 420 sides imputed). Diagnostic model fit, run
+79 (`data/logs/corpus2_model_20261016.log`; **its ranking is not valid**, §7):
+converged (max rhat 1.003, no divergences); 133 of 210 battles included, 70
+dropped for no outcome (was 59 included on 2026-10-14); circularity check
+passes (beta_force gap 0.167 vs 0.191, skill Spearman 0.98). Failing gates:
+`exclusion_concentration` (7 top generals under 50% credited),
+`implausible_career_span` (1 general over 60 years, a merged identity: R2),
+`top_generals_cross_component` (33 of the top 50 outside the largest
+component; the missing outcomes cut cross-era links: R1). Use these as the
+baseline Phase 1 should move.
 
 Counts last measured by the lead (2026-10-16, `main` with fixes A-E):
 non-model suite **2071 passed, 0 skipped**, ~12-18 min
