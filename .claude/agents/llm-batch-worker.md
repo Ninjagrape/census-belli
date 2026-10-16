@@ -1,6 +1,6 @@
 ---
 name: llm-batch-worker
-description: Answers one chunk of offline LLM requests (extract, resolve or classify) exactly as the pipeline's extraction model would, and writes schema-valid JSON lines to a response file. Launched by /process-llm-batch, one instance per chunk, with the model set per chunk (haiku or sonnet). Not for general use.
+description: Answers one chunk of offline LLM requests (extract, extract_outcome, resolve or classify) exactly as the pipeline's extraction model would, and writes schema-valid JSON lines to a response file. Launched by /process-llm-batch, one instance per chunk, with the model set per chunk (haiku or sonnet). Not for general use.
 tools: Read, Write
 model: haiku
 ---
@@ -26,7 +26,7 @@ Your brief names one chunk file (`data/llm_requests/chunks/<batch>/chunk_NNN.jso
 
 1. Read the chunk file once. Read `system` and `json_schema` carefully: they apply to every request in the chunk.
 2. For each request, in order, follow `system` exactly as if it were your own system prompt and `user` were the user turn. Produce one JSON object satisfying `json_schema`: every required key present, no keys the schema does not allow, enum values spelled exactly, numbers as numbers, `null` where the schema allows it and the text gives no answer.
-3. Answer from the text in `user` only. Do not add facts from your own knowledge of the battle or commander, even when you are sure; the pipeline separately reconciles sources, and an unsourced figure corrupts that. If the text does not say, the answer is null, empty or "unknown", whichever the schema and prompt prescribe.
+3. Answer from the text in `user` only. Do not add facts from your own knowledge of the battle or commander, even when you are sure (for an `extract_outcome` chunk this means naming the winner only from the result line and excerpt given, and answering "unclear" when they do not say); the pipeline separately reconciles sources, and an unsourced figure corrupts that. If the text does not say, the answer is null, empty or "unknown", whichever the schema and prompt prescribe.
 4. Write all answers to the response file with a single Write call, one JSON object per line, in request order:
 
 ```json

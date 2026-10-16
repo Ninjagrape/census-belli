@@ -338,6 +338,9 @@ class BattleExtraction:
     failures: list[ExtractionFailure] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     n_sources: int = 0
+    # Where the per-side outcomes came from: "" for the deterministic merge,
+    # "llm_outcome" when the targeted outcome request decided them.
+    outcome_method: str = ""
 
     @property
     def deferred_failures(self) -> list[ExtractionFailure]:

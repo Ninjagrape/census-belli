@@ -45,6 +45,7 @@ from pipeline.extractors.infobox import (
     parse_infobox_html,
 )
 from pipeline.extractors.merger import SOURCE_PRIORITY, merge_battle, missing_fields
+from pipeline.extractors.outcome import OutcomePass, resolve_outcome
 from pipeline.extractors.records import (
     BattleExtraction,
     BattleFacts,
@@ -85,6 +86,7 @@ __all__ = [
     "ExtractWriteCounts",
     "ExtractionFailure",
     "MissingField",
+    "OutcomePass",
     "Passage",
     "Provenance",
     "Quantity",
@@ -112,6 +114,7 @@ __all__ = [
     "parse_quantities",
     "payload_to_extraction",
     "render_template",
+    "resolve_outcome",
     "resolve_scope",
     "strip_markup",
     "to_jsonable",

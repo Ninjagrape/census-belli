@@ -31,6 +31,7 @@ from pipeline.db import (
 )
 from pipeline.extractors import (
     ExtractWriteCounts,
+    MissingField,
     map_entity,
     merge_battle,
     parse_infobox,
@@ -639,6 +640,111 @@ def test_a_battle_written_twice_in_one_run_skips_stale_cleanup(conn: Any) -> Non
 
     assert "C" in _side_rows(conn, battle_id)
     assert counts.stale_sides_removed == 0
+
+
+def _with_outcomes(battle: Any, outcome: str | None) -> Any:
+    """Copy a battle with every side's outcome set to ``outcome``."""
+    return replace(battle, sides=[replace(s, outcome=outcome) for s in battle.sides])
+
+
+def _outcomes(conn: Any, battle_id: int) -> list[str | None]:
+    rows = conn.execute(
+        text("SELECT outcome FROM battle_sides WHERE battle_id = :id ORDER BY side_id"),
+        {"id": battle_id},
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def test_a_rerun_with_no_outcome_clears_a_stored_one(conn: Any) -> None:
+    record = _actium()
+    battle_id = write_battle(conn, _with_outcomes(record, "victory"))
+    assert set(_outcomes(conn, battle_id)) == {"victory"}
+
+    write_battle(conn, _with_outcomes(record, None))
+
+    assert set(_outcomes(conn, battle_id)) == {None}
+
+
+def test_a_second_record_in_one_run_does_not_clear_the_first_ones_outcome(conn: Any) -> None:
+    record = _actium()
+    counts = ExtractWriteCounts()
+    battle_id = write_battle(conn, _with_outcomes(record, "victory"), counts)
+
+    write_battle(conn, _with_outcomes(record, None), counts)
+
+    assert set(_outcomes(conn, battle_id)) == {"victory"}
+
+
+def _outcome_gap_rows(conn: Any, battle_id: int) -> list[tuple[str, int | None]]:
+    rows = conn.execute(
+        text(
+            "SELECT field_name, side_id FROM missing_data_log "
+            "WHERE battle_id = :id AND field_name IN ('outcome', 'outcome_level')"
+        ),
+        {"id": battle_id},
+    ).fetchall()
+    return [(r[0], r[1]) for r in rows]
+
+
+def test_a_second_record_does_not_log_a_gap_for_an_outcome_it_kept(conn: Any) -> None:
+    record = _actium()
+    counts = ExtractWriteCounts()
+    battle_id = write_battle(conn, _with_outcomes(record, "victory"), counts)
+    second = replace(
+        _with_outcomes(record, None),
+        missing=[
+            *(MissingField(field_name="outcome", side_label=s.label) for s in record.sides),
+            MissingField(field_name="outcome_level"),
+            MissingField(field_name="terrain"),
+        ],
+    )
+
+    write_battle(conn, second, counts)
+
+    assert set(_outcomes(conn, battle_id)) == {"victory"}
+    assert _outcome_gap_rows(conn, battle_id) == []
+    assert (
+        conn.execute(
+            text("SELECT COUNT(*) FROM missing_data_log WHERE battle_id = :id"),
+            {"id": battle_id},
+        ).scalar_one()
+        == 1
+    )
+
+
+def test_a_second_record_still_logs_the_gap_for_a_side_with_no_outcome(conn: Any) -> None:
+    record = _actium()
+    counts = ExtractWriteCounts()
+    battle_id = write_battle(conn, _with_outcomes(record, None), counts)
+    second = replace(
+        _with_outcomes(record, None),
+        missing=[MissingField(field_name="outcome", side_label=record.sides[0].label)],
+    )
+
+    write_battle(conn, second, counts)
+
+    assert len(_outcome_gap_rows(conn, battle_id)) == 1
+
+
+def test_a_failed_write_does_not_leave_its_battle_id_in_the_written_set(
+    conn: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pipeline.extractors import store
+
+    def _write_then_fail(_conn: Any, _battle: Any, tally: ExtractWriteCounts, _cache: Any) -> int:
+        tally.written_battle_ids.add(987654)
+        tally.battles += 1
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(store, "write_battle", _write_then_fail)
+    counts = ExtractWriteCounts()
+    counts.written_battle_ids.add(111)
+
+    store.write_battle_isolated(conn, _actium(), counts, {})
+
+    assert counts.written_battle_ids == {111}
+    assert counts.failed_battles == 1
+    assert counts.battles == 0
 
 
 def test_stale_removal_counts_rows_extract_did_not_own(conn: Any) -> None:

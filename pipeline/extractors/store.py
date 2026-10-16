@@ -146,7 +146,13 @@ _INSERT_SIDE = text(
     "VALUES (:battle_id, :side_label, :polity, CAST(:outcome AS outcome_level)) "
     "RETURNING side_id"
 )
+# Extract owns outcome, so a run that finds none must clear an earlier value.
 _UPDATE_SIDE = text(
+    "UPDATE battle_sides SET polity = COALESCE(:polity, polity), "
+    "outcome = CAST(:outcome AS outcome_level) WHERE side_id = :side_id"
+)
+# A battle reached by a second record in the same run keeps what the first set.
+_UPDATE_SIDE_KEEP_OUTCOME = text(
     "UPDATE battle_sides SET polity = COALESCE(:polity, polity), "
     "outcome = COALESCE(CAST(:outcome AS outcome_level), outcome) WHERE side_id = :side_id"
 )
@@ -241,6 +247,10 @@ _INSERT_CASUALTY = text(
 _CLEAR_MISSING = text(
     "DELETE FROM missing_data_log WHERE battle_id = :battle_id AND was_imputed = FALSE"
 )
+_STORED_OUTCOMES = text(
+    "SELECT side_id FROM battle_sides WHERE battle_id = :battle_id AND outcome IS NOT NULL"
+)
+_OUTCOME_GAP_FIELDS = frozenset({"outcome", "outcome_level"})
 _INSERT_MISSING = text(
     """
     INSERT INTO missing_data_log (battle_id, side_id, field_name, notes)
@@ -462,13 +472,17 @@ def reserve_battle_id(conn: Any, slug: str, name: str) -> int | None:
         return None
 
 
-def _upsert_side(conn: Any, battle_id: int, side: SideExtraction) -> int:
+def _upsert_side(
+    conn: Any, battle_id: int, side: SideExtraction, *, keep_outcome: bool = False
+) -> int:
     """Insert or update one ``battle_sides`` row.
 
     Args:
         conn: An open database connection.
         battle_id: The battle this side belongs to.
         side: The merged side.
+        keep_outcome: Keep a stored outcome when this side has none. Set when
+            another record already wrote the battle this run.
 
     Returns:
         The side id.
@@ -488,7 +502,8 @@ def _upsert_side(conn: Any, battle_id: int, side: SideExtraction) -> int:
         return int(row[0])
 
     side_id = int(existing[0])
-    conn.execute(_UPDATE_SIDE, {**params, "side_id": side_id})
+    update = _UPDATE_SIDE_KEEP_OUTCOME if keep_outcome else _UPDATE_SIDE
+    conn.execute(update, {**params, "side_id": side_id})
     return side_id
 
 
@@ -604,8 +619,9 @@ def write_battle(
     tally.battles += 1
 
     side_ids: dict[str, int] = {}
+    written_before = battle_id in tally.written_battle_ids
     for side in battle.sides:
-        side_id = _upsert_side(conn, battle_id, side)
+        side_id = _upsert_side(conn, battle_id, side, keep_outcome=written_before)
         side_ids[side.label] = side_id
         tally.sides += 1
 
@@ -661,7 +677,18 @@ def write_battle(
     tally.written_battle_ids.add(battle_id)
 
     conn.execute(_CLEAR_MISSING, {"battle_id": battle_id})
+    # A kept outcome came from the first record, whose own gap list is gone
+    # now; this record's list can still name it as missing.
+    decided_sides = (
+        {int(r[0]) for r in conn.execute(_STORED_OUTCOMES, {"battle_id": battle_id})}
+        if written_before
+        else set()
+    )
     for missing in battle.missing:
+        if missing.field_name in _OUTCOME_GAP_FIELDS and decided_sides:
+            gap_side = side_ids.get(missing.side_label) if missing.side_label else None
+            if gap_side is None or gap_side in decided_sides:
+                continue
         conn.execute(
             _INSERT_MISSING,
             {
@@ -702,6 +729,7 @@ def write_battle_isolated(
     """
     before_counts = counts.as_dict()
     before_cache = dict(source_cache)
+    before_written = set(counts.written_battle_ids)
     try:
         with conn.begin_nested():
             return write_battle(conn, battle, counts, source_cache)
@@ -713,6 +741,8 @@ def write_battle_isolated(
             error_type=type(exc).__name__,
         )
         _restore(counts, before_counts)
+        counts.written_battle_ids.clear()
+        counts.written_battle_ids.update(before_written)
         source_cache.clear()
         source_cache.update(before_cache)
         counts.failed_battles += 1

@@ -220,6 +220,10 @@ def test_the_infobox_column_decides_which_side_holds_a_commander() -> None:
             "victory",
         ),
         ("Decisive Prussian victory", "Prussian", "decisive_victory"),
+        ("Roman pyrrhic victory", "Roman", "pyrrhic_victory"),
+        ("Strategic Soviet victory", "Soviet", "victory"),
+        ("Decisive victory for Octavian", "Octavian", "decisive_victory"),
+        ("Decisive Macedonian victory", "Macedonian", "decisive_victory"),
         ("See § Aftermath", None, None),
     ],
 )
@@ -287,8 +291,8 @@ def test_a_commander_name_victor_matches_the_side_that_commander_served() -> Non
     assert outcomes == {"Populares": "victory", "Optimates": "defeat"}
 
 
-def test_a_compound_victor_must_match_every_part_on_one_side() -> None:
-    outcomes = _sides_outcomes("Russo-Austrian", ["Prussia", "Russia"])
+def test_a_compound_victor_whose_parts_name_different_sides_stays_blank() -> None:
+    outcomes = _sides_outcomes("Russo-Prussian", ["Prussia", "Russia"])
 
     assert all(o is None for o in outcomes.values())
 

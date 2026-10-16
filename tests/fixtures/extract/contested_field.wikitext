@@ -1,0 +1,22 @@
+{{Infobox military conflict
+| conflict    = Battle of the Contested Field
+| date        = 14 June 1250
+| place       = near [[Aldermere]]; open ground
+| result      = Contested; see Aftermath
+| combatant1  = [[Kingdom of Varra]]
+| combatant2  = [[Duchy of Selm]]
+| commander1  = [[Aldric of Varra]]
+| commander2  = [[Berengar of Selm]]
+}}
+
+The '''Battle of the Contested Field''' (14 June 1250) was fought between the
+Kingdom of Varra under Aldric and the Duchy of Selm under Berengar. The ducal
+army left the field at dusk and Varra held the ground the next morning.
+
+== The battle ==
+
+Aldric kept his cavalry in reserve until the ducal line wavered.
+
+== References ==
+
+{{reflist}}
