@@ -27,6 +27,7 @@ from pipeline.extractors.records import (
     Provenance,
     SideExtraction,
 )
+from pipeline.extractors.wars import classify_part_of
 
 __all__ = [
     "ExtractWriteCounts",
@@ -73,12 +74,12 @@ _INSERT_BATTLE = text(
     """
     INSERT INTO battles (
         name, source_slug, wikidata_id, wikipedia_url, date_start, date_end, date_precision,
-        latitude, longitude, location_name, battle_type, terrain, fortified,
+        date_circa, latitude, longitude, location_name, battle_type, terrain, fortified,
         weather, n_sources, needs_review, review_notes
     ) VALUES (
         :name, :source_slug, :wikidata_id, :wikipedia_url,
         CAST(:date_start AS DATE), CAST(:date_end AS DATE), :date_precision,
-        :latitude, :longitude, :location_name,
+        :date_circa, :latitude, :longitude, :location_name,
         CAST(COALESCE(:battle_type, 'unknown') AS battle_type), :terrain, :fortified,
         :weather, :n_sources, :needs_review, :review_notes
     )
@@ -96,6 +97,9 @@ _UPDATE_BATTLE = text(
         date_start = COALESCE(CAST(:date_start AS DATE), date_start),
         date_end = COALESCE(CAST(:date_end AS DATE), date_end),
         date_precision = COALESCE(:date_precision, date_precision),
+        -- circa describes the date_start it arrived with, so it moves with it.
+        date_circa = CASE WHEN CAST(:date_start AS DATE) IS NULL THEN date_circa
+                          ELSE :date_circa END,
         latitude = COALESCE(:latitude, latitude),
         longitude = COALESCE(:longitude, longitude),
         location_name = COALESCE(:location_name, location_name),
@@ -109,6 +113,23 @@ _UPDATE_BATTLE = text(
         updated_at = now()
     WHERE battle_id = :battle_id
     """
+)
+
+# wars and campaigns have no UNIQUE name, so the link is select-then-insert.
+_FIND_WAR = text("SELECT war_id FROM wars WHERE name = :name ORDER BY war_id LIMIT 1")
+_INSERT_WAR = text("INSERT INTO wars (name) VALUES (:name) RETURNING war_id")
+_FIND_CAMPAIGN = text(
+    "SELECT campaign_id FROM campaigns WHERE name = :name "
+    "AND war_id IS NOT DISTINCT FROM CAST(:war_id AS INT) ORDER BY campaign_id LIMIT 1"
+)
+_INSERT_CAMPAIGN = text(
+    "INSERT INTO campaigns (name, war_id) VALUES (:name, CAST(:war_id AS INT)) "
+    "RETURNING campaign_id"
+)
+# COALESCE so a re-run whose sources named nothing never undoes an earlier link.
+_LINK_BATTLE = text(
+    "UPDATE battles SET war_id = COALESCE(CAST(:war_id AS INT), war_id), "
+    "campaign_id = COALESCE(CAST(:campaign_id AS INT), campaign_id) WHERE battle_id = :battle_id"
 )
 
 _FIND_SIDE = text(
@@ -249,6 +270,7 @@ def _upsert_battle(conn: Any, battle: BattleExtraction) -> int:
         "date_start": date_start,
         "date_end": date_end,
         "date_precision": date_precision,
+        "date_circa": bool(facts.date_circa) and date_start is not None,
         "latitude": facts.latitude,
         "longitude": facts.longitude,
         "location_name": facts.location_name,
@@ -289,6 +311,43 @@ def _upsert_battle(conn: Any, battle: BattleExtraction) -> int:
             params["wikidata_id"] = None
     conn.execute(_UPDATE_BATTLE, {**params, "battle_id": battle_id})
     return battle_id
+
+
+def _find_or_insert(conn: Any, find: Any, insert: Any, params: dict[str, Any]) -> int:
+    """Return the id of the row ``find`` matches, inserting it when absent."""
+    row = conn.execute(find, params).fetchone()
+    if row is None:
+        row = conn.execute(insert, params).fetchone()
+    return int(row[0])
+
+
+def _link_war_and_campaign(conn: Any, battle_id: int, battle: BattleExtraction) -> None:
+    """Write the battle's war and campaign rows and point the battle at them.
+
+    Args:
+        conn: An open database connection.
+        battle_id: The battle to link.
+        battle: The merged battle, whose ``part_of`` names are classified.
+    """
+    chosen = classify_part_of(battle.facts.part_of)
+    if chosen.war is None and chosen.campaign is None:
+        return
+
+    war_id = (
+        _find_or_insert(conn, _FIND_WAR, _INSERT_WAR, {"name": chosen.war})
+        if chosen.war is not None
+        else None
+    )
+    campaign_id = (
+        _find_or_insert(
+            conn, _FIND_CAMPAIGN, _INSERT_CAMPAIGN, {"name": chosen.campaign, "war_id": war_id}
+        )
+        if chosen.campaign is not None
+        else None
+    )
+    conn.execute(
+        _LINK_BATTLE, {"battle_id": battle_id, "war_id": war_id, "campaign_id": campaign_id}
+    )
 
 
 def reserve_battle_id(conn: Any, slug: str, name: str) -> int | None:
@@ -377,6 +436,7 @@ def write_battle(
     cache = source_cache if source_cache is not None else {}
 
     battle_id = _upsert_battle(conn, battle)
+    _link_war_and_campaign(conn, battle_id, battle)
     tally.battles += 1
 
     side_ids: dict[str, int] = {}

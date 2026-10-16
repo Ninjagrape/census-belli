@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from pipeline.crawlers import citations
 from pipeline.crawlers.wikipedia import article_filename
 from pipeline.extractors.article import (
     build_passages,
@@ -53,6 +54,24 @@ def test_a_citation_with_a_unicode_line_separator_stays_one_record(tmp_path: Pat
 
     assert [r["url"] for r in records] == ["https://example.org/a", "https://example.org/b"]
     assert records[0]["content"] == "first half second half\x85end"
+
+
+@pytest.mark.parametrize("separator", ["\x85", " ", " "])
+def test_writer_output_with_a_separator_in_page_text_is_read_back_whole(
+    tmp_path: Path, separator: str
+) -> None:
+    """The pilot's 11,337 warnings: 11,170 NEL, 37 LS and 30 PS inside page text.
+
+    ``json.dumps(ensure_ascii=False)`` leaves these raw, so the writer's line
+    is valid JSON; a reader that splits with ``str.splitlines`` cut it in two.
+    """
+    records = [
+        {"url": "https://example.org/a", "content": f"before{separator}after", "n": 1},
+        {"url": "https://example.org/b", "content": f"x{separator}y{separator}z", "n": 2},
+    ]
+    path = citations.write_citation_records(tmp_path, ACTIUM_URL, records)
+
+    assert extract_stage._citation_records(path) == records
 
 
 def test_a_genuinely_malformed_citation_line_is_still_skipped(tmp_path: Path) -> None:

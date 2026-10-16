@@ -69,14 +69,61 @@ _LIST_TEMPLATES: Final[frozenset[str]] = frozenset(
         "flatlist",
         "collapsible list",
         "bulleted list",
+        "bulletedlist",
+        "blist",
+        "bdl",
+        "udl",
+        "unbulletedlist",
+        "ublist",
+        "indented plainlist",
+        "ordered list",
+        "olist",
+        "ubli",
     }
 )
+
+# Keyed parameters of the list templates that format the list instead of
+# holding an item. Any other keyed parameter is an item whose text contained an
+# "=" (or, for ``bdl|wrap=``, a definition list), so it is kept.
+_LIST_OPTION_RE: Final = re.compile(
+    r"^(?:class|style|title|bullets|padding|margin|list_?style|item\d*_?style|indent|hlist.*|ul_?style|li_?style"
+    r"|start|type|collapsed|expanded|framestyle|titlestyle|liststyle)$"
+)
+# Definition-list prefixes ("; Livy" / ": 48,200 killed") that survive as text.
+_DEFINITION_PREFIX_RE: Final = re.compile(r"^[ 	]*[;:]+[ 	]*", re.MULTILINE)
 
 # Templates that wrap content for presentation only; their first positional
 # parameter is the content and should survive.
 _PASSTHROUGH_TEMPLATES: Final[frozenset[str]] = frozenset(
-    {"nowrap", "nobold", "noitalic", "small", "big", "nobr", "nsmdns"}
+    {"nowrap", "nobold", "noitalic", "small", "big", "nobr", "nsmdns", "center", "centre"}
 )
+
+# Templates that render a flag followed by the country's name. The flag is an
+# image and is dropped, but the name is text the rendered page shows, so the
+# first positional parameter survives. The icon-only siblings (flagicon,
+# flagdeco, flagicon image, symbol) are deliberately absent: they render no
+# text and fall through to strip_code, which drops them.
+_FLAG_NAME_TEMPLATES: Final[frozenset[str]] = frozenset(
+    {"flag", "flagcountry", "flagu", "flag country"}
+)
+
+# Templates whose rendered output is a fixed glyph.
+_LITERAL_TEMPLATES: Final[dict[str, str]] = {
+    "ndash": "–",
+    "mdash": "—",
+    "nbsp": " ",
+    "snd": " – ",
+    "*": "•",
+    "•": "•",
+    "bull": "•",
+    "!": "|",
+}
+
+# Interlanguage-link wrappers: the displayed text is a named positional.
+_TEXT_PARAM_TEMPLATES: Final[dict[str, int]] = {"ill": 0, "lang": 1}
+
+# Namespaces whose links are images, never text.
+_MEDIA_LINK_RE: Final = re.compile(r"^\s*:?\s*(?:file|image|media)\s*:", re.IGNORECASE)
 
 # Fate and status markers on commander names. Kept as a note rather than
 # discarded: whether a commander was killed mid-battle is a real signal, and
@@ -91,9 +138,14 @@ _MARKER_TEMPLATES: Final[dict[str, str]] = {
     "mia": "MIA",
     "executed": "executed",
     "surrendered": "surrendered",
+    "surrender": "surrendered",
+    "dow": "DOW",
+    "died of wounds": "DOW",
 }
 
-_CIRCA_TEMPLATES: Final[frozenset[str]] = frozenset({"circa", "c.", "ca", "ca.", "approx"})
+_CIRCA_TEMPLATES: Final[frozenset[str]] = frozenset(
+    {"circa", "c.", "ca", "ca.", "approx", "approximately"}
+)
 
 
 def _expand_templates(raw: str) -> str:
@@ -112,7 +164,11 @@ def _expand_templates(raw: str) -> str:
         name = str(template.name).strip().lower()
 
         if name in _LIST_TEMPLATES:
-            items = [str(p.value).strip() for p in template.params if not p.showkey]
+            items = [
+                _DEFINITION_PREFIX_RE.sub("", str(p.value).strip())
+                for p in template.params
+                if not p.showkey or not _LIST_OPTION_RE.match(str(p.name).strip().lower())
+            ]
             code.replace(template, "\n" + "\n".join(i for i in items if i) + "\n")
         elif name in _PASSTHROUGH_TEMPLATES and template.params:
             code.replace(template, str(template.params[0].value))
@@ -121,7 +177,41 @@ def _expand_templates(raw: str) -> str:
         elif name in _CIRCA_TEMPLATES:
             rest = str(template.params[0].value) if template.params else ""
             code.replace(template, f"c. {rest}")
+        elif name in _FLAG_NAME_TEMPLATES and template.params:
+            code.replace(template, str(template.params[0].value))
+        elif name in _TEXT_PARAM_TEMPLATES:
+            positional = [p for p in template.params if not p.showkey]
+            index = _TEXT_PARAM_TEMPLATES[name]
+            if index < len(positional):
+                code.replace(template, str(positional[index].value))
+        elif name in _LITERAL_TEMPLATES:
+            code.replace(template, _LITERAL_TEMPLATES[name])
 
+    return _drop_media_links(str(code))
+
+
+def _drop_media_links(text: str) -> str:
+    """Remove ``[[File:...]]`` and ``[[Image:...]]`` links entirely.
+
+    ``strip_code`` keeps a wikilink's display text, and for a file link the
+    last pipe-separated option is that text, so ``[[File:Flag.svg|border|25px]]``
+    leaked ``border|25px`` into commander names and ``25px`` into troop counts.
+
+    Args:
+        text: Wikitext after template expansion.
+
+    Returns:
+        The text without any media link.
+    """
+    code = mwparserfromhell.parse(text)
+    for link in reversed(code.filter_wikilinks(recursive=True)):
+        if not _MEDIA_LINK_RE.match(str(link.title)):
+            continue
+        try:
+            code.remove(link)
+        except ValueError:
+            # Already removed along with an enclosing media link's caption.
+            continue
     return str(code)
 
 

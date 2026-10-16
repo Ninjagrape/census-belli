@@ -177,9 +177,7 @@ _GOOD_PAYLOAD = json.dumps(
                 "context_quote": "Kutuzov could call upon some 110,000 men in the theatre",
             }
         ],
-        "casualty_reports": [
-            {"side": "French Empire", "casualty_type": "killed", "value": 1305}
-        ],
+        "casualty_reports": [{"side": "French Empire", "casualty_type": "killed", "value": 1305}],
         "terrain": ["ridge", "fog"],
         "outcome": {"victor": "French Empire", "outcome_level": "decisive_victory"},
     }
@@ -223,7 +221,7 @@ def test_scaled_and_grouped_numbers_are_read() -> None:
 
 
 def test_formation_counts_are_not_troop_numbers() -> None:
-    """"12 legions" counts units, not men, and must not reach troop_reports."""
+    """ "12 legions" counts units, not men, and must not reach troop_reports."""
     quantities = parse_quantities("12 legions, around 60,000 men engaged")
 
     assert [q.value for q in quantities] == [60000.0]
@@ -401,9 +399,7 @@ def test_siege_relief_force_range_is_recorded_as_available_not_engaged() -> None
 
     assert extraction is not None
     relief = [
-        r
-        for r in extraction.sides[1].troop_reports
-        if r.page_or_section == "infobox:strength2"
+        r for r in extraction.sides[1].troop_reports if r.page_or_section == "infobox:strength2"
     ]
     assert {r.scope for r in relief} == {"available"}
 
@@ -444,6 +440,58 @@ def test_rendered_infobox_reads_side_indexed_rows() -> None:
     assert extraction.facts.part_of == ["Second Punic War"]
     assert extraction.facts.victor == "Carthaginian"
     assert extraction.facts.outcome_level == "decisive_victory"
+
+
+def test_infobox_commanders_carry_a_zero_based_order_per_side() -> None:
+    extraction = parse_infobox(_fixture("austerlitz.wikitext"), source_ref="f", source_title="t")
+
+    assert extraction is not None
+    for side in extraction.sides:
+        assert [c.infobox_order for c in side.commanders] == list(range(len(side.commanders)))
+
+
+def test_rendered_infobox_commanders_carry_an_order() -> None:
+    extraction = parse_infobox_html(_fixture("cannae_rendered.html"))
+
+    assert extraction is not None
+    romans = extraction.sides[0]
+    assert [c.infobox_order for c in romans.commanders] == [0, 1]
+
+
+def test_body_commanders_have_no_infobox_order_and_merge_keeps_the_infobox_one() -> None:
+    from pipeline.extractors import CommanderMention
+
+    infobox_side = SideExtraction(label="Octavian")
+    body_side = SideExtraction(label="Octavian")
+    infobox_side.commanders.append(
+        CommanderMention(
+            side_label="Octavian",
+            name="Agrippa",
+            provenance=Provenance(
+                source_type="wikipedia_infobox", extraction_method="infobox_parser"
+            ),
+            infobox_order=1,
+        )
+    )
+    body_side.commanders.extend(
+        CommanderMention(
+            side_label="Octavian",
+            name=name,
+            provenance=Provenance(source_type="wikipedia_body", extraction_method="llm_extraction"),
+        )
+        for name in ("Agrippa", "Maecenas")
+    )
+
+    merged = merge_battle(
+        "actium",
+        [
+            _source("wikipedia_body", sides=[body_side]),
+            _source("wikipedia_infobox", sides=[infobox_side]),
+        ],
+    )
+
+    orders = {c.name: c.infobox_order for c in merged.sides[0].commanders}
+    assert orders == {"Agrippa": 1, "Maecenas": None}
 
 
 def test_rendered_infobox_splits_commanders_on_line_breaks() -> None:
@@ -894,9 +942,7 @@ def test_a_stated_role_replaces_unclear_when_the_same_person_recurs() -> None:
         CommanderMention(
             side_label="Octavian",
             name="Agrippa",
-            provenance=Provenance(
-                source_type="wikipedia_body", extraction_method="llm_extraction"
-            ),
+            provenance=Provenance(source_type="wikipedia_body", extraction_method="llm_extraction"),
             apparent_role="field_commander",
             role_evidence="Agrippa commanded the fleet",
         )
@@ -999,9 +1045,7 @@ def test_the_stage_module_satisfies_the_runner_contract() -> None:
     check_conforms(extract_stage)
 
 
-def test_run_with_no_raw_input_logs_and_returns(
-    spec: dict[str, Any], tmp_path: Path
-) -> None:
+def test_run_with_no_raw_input_logs_and_returns(spec: dict[str, Any], tmp_path: Path) -> None:
     """A stage run before the crawl stage must not crash the pipeline."""
     overridden = {
         **spec,
@@ -1134,15 +1178,21 @@ def test_run_writes_the_four_processed_files(spec: dict[str, Any], tmp_path: Pat
     ]
     assert troops and {t["scope"] for t in troops} >= {"engaged", "on_paper"}
 
+    commanders = [
+        json.loads(line)
+        for line in (processed / "commanders_raw.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    infobox_rows = [c for c in commanders if c["provenance"]["source_type"] == "wikipedia_infobox"]
+    assert infobox_rows
+    assert all(isinstance(c["infobox_order"], int) for c in infobox_rows)
+
 
 def test_extract_battle_runs_the_llm_pass_when_a_service_is_given(
     spec: dict[str, Any], tmp_path: Path
 ) -> None:
     raw = tmp_path / "raw"
     _write_raw_corpus(raw)
-    (battle,) = [
-        b for b in extract_stage.discover_battles(raw) if b.slug == _slug(AUSTERLITZ_URL)
-    ]
+    (battle,) = [b for b in extract_stage.discover_battles(raw) if b.slug == _slug(AUSTERLITZ_URL)]
 
     provider = ScriptedProvider([_GOOD_PAYLOAD, _GOOD_PAYLOAD, _GOOD_PAYLOAD])
     service = LLMService(stage="extract", provider=provider, db_conn=None)
@@ -1262,7 +1312,7 @@ def test_dbpedia_never_invents_sides() -> None:
 
 
 def test_dbpedia_leaves_outcome_level_to_a_stage_that_can_judge_it() -> None:
-    """"Octavian victory" says who won, not how decisively.
+    """ "Octavian victory" says who won, not how decisively.
 
     outcome_level is the model's five-level ordinal. Filling it from a two
     word result string would put a fabricated gradation into the response
@@ -1342,9 +1392,7 @@ def test_dbpedia_reaches_the_merged_record(tmp_path: Path) -> None:
     )
 
     battle = extract_stage.discover_battles(raw)[0]
-    merged = extract_stage.extract_battle(
-        battle, None, system="s", template="t", schema={}
-    )
+    merged = extract_stage.extract_battle(battle, None, system="s", template="t", schema={})
 
     assert merged.facts.date_start == "0031-09-02 BC"
     assert merged.facts.latitude is not None

@@ -72,7 +72,12 @@ _ALTERNATIVE_DAYS_RE: Final = re.compile(r"\b(\d{1,2})\s*(?:/|\band\b|\bor\b)\s*
 _ERA_RE: Final = re.compile(
     r"\b(B\.?\s?C\.?(?:\s?E\.?)?|A\.?\s?D\.?|C\.?\s?E\.?)(?![A-Za-z])", re.I
 )
-_TOKEN_RE: Final = re.compile(r"[A-Za-z]+\.?|\d+(?:st|nd|rd|th)?|[,/-]")
+_TOKEN_RE: Final = re.compile(r"[A-Za-z]+\.?|\d+(?:st|nd|rd|th|s)?|[,/-]")
+# "1250s": a decade named by its first year. Three or four digits only, so "1800s"
+# is a decade and a bare "s" suffix on a short number is not.
+_DECADE_RE: Final = re.compile(r"^(\d{3,4})s$", re.IGNORECASE)
+# "1805 or 1806" after filler words are dropped: two adjacent years, no month.
+_YEAR_PAIR_RE: Final = re.compile(r"^(\d{3,4}) (\d{3,4})$")
 _DAY_RANGE_DMY_RE: Final = re.compile(r"^(\d{1,2})\s*-\s*(\d{1,2})\s+([A-Za-z.]+)\s+(\d+)$")
 _DAY_RANGE_MDY_RE: Final = re.compile(r"^([A-Za-z.]+)\s+(\d{1,2})\s*-\s*(\d{1,2}),?\s+(\d+)$")
 
@@ -85,11 +90,15 @@ class ParsedDate:
         date_start: First day, as ``YYYY-MM-DD`` with a `` BC`` suffix for BC.
         date_end: Last day of a range, or None for a single date.
         precision: One of :data:`PRECISIONS`.
+        circa: Whether the source marked the date approximate ("c. 1200 BC",
+            "1805 or 1806", a decade). It qualifies the date, so a circa date
+            keeps whatever precision its text supports.
     """
 
     date_start: str
     date_end: str | None
     precision: str
+    circa: bool = False
 
 
 @dataclass(frozen=True)
@@ -164,15 +173,26 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip(" ,;.")
 
 
-def _extract_flags(text: str) -> tuple[str, bool | None, bool, bool] | None:
+@dataclass(frozen=True)
+class _Flags:
+    """What the non-numeric words of a date text said."""
+
+    body: str
+    bc: bool | None
+    vague: bool
+    circa: bool
+    decade: bool
+
+
+def _extract_flags(text: str) -> _Flags | None:
     """Remove era markers, seasons, qualifiers and filler words.
 
     Args:
         text: Cleaned date text.
 
     Returns:
-        (remaining text, bc, season_or_vague, circa), or None when a word the
-        parser does not know is left over.
+        The remaining numeric text and the flags found, or None when a word
+        the parser does not know is left over.
     """
     bc: bool | None = None
     for era in _ERA_RE.findall(text):
@@ -184,10 +204,17 @@ def _extract_flags(text: str) -> tuple[str, bool | None, bool, bool] | None:
 
     vague = False
     circa = False
+    decade = False
     kept: list[str] = []
     for token in _TOKEN_RE.findall(text):
         word = token.lower().rstrip(".")
-        if word in _SEASONS:
+        decade_match = _DECADE_RE.match(token)
+        if decade_match is not None:
+            if decade or int(decade_match.group(1)) % 10:
+                return None
+            decade = True
+            kept.append(decade_match.group(1))
+        elif word in _SEASONS:
             vague = True
         elif word in _QUALIFIERS:
             continue
@@ -201,7 +228,7 @@ def _extract_flags(text: str) -> tuple[str, bool | None, bool, bool] | None:
             kept.append(token)
         else:
             return None
-    return " ".join(kept), bc, vague, circa
+    return _Flags(" ".join(kept), bc, vague, circa, decade)
 
 
 def _ordinal_free(token: str) -> int:
@@ -266,7 +293,8 @@ def _resolve_range(
         # An end part carries the year (and era) the start part leaves out.
         first = _Part(
             year=first.year if first.year is not None else last.year,
-            month=first.month,
+            # "1-3 May": the start day names no month of its own.
+            month=first.month if first.month is not None or first.day is None else last.month,
             day=first.day,
             bc=bc,
         )
@@ -282,17 +310,17 @@ def _resolve_range(
     has_end = last is not None
     year_only = vague or circa or first.month is None
     if year_only and not has_end:
-        return ParsedDate(_literal(first.year, 1, 1, bc), None, "year")
+        return ParsedDate(_literal(first.year, 1, 1, bc), None, "year", circa)
 
     month = first.month or 1
     day = first.day
     if not has_end and day is None:
         if not _valid(first.year, month, 1, bc):
             return None
-        return ParsedDate(_literal(first.year, month, 1, bc), None, "month")
+        return ParsedDate(_literal(first.year, month, 1, bc), None, "month", circa)
     if not has_end:
         text = _single_day_text(first, bc)
-        return ParsedDate(text, None, "day") if text else None
+        return ParsedDate(text, None, "day", circa) if text else None
 
     assert last is not None
     if last.year is None:
@@ -309,10 +337,10 @@ def _resolve_range(
         if start_precision == end_precision == "day"
         else ("year" if "year" in (start_precision, end_precision) else "month")
     )
-    return ParsedDate(start, _literal(last.year, end_month, end_day, bc), precision)
+    return ParsedDate(start, _literal(last.year, end_month, end_day, bc), precision, circa)
 
 
-def _parse_compact_day_range(text: str, bc: bool) -> ParsedDate | None:
+def _parse_compact_day_range(text: str, bc: bool, circa: bool = False) -> ParsedDate | None:
     """Read ``21-22 May 1809`` and ``May 5-7, 1864`` same-month day ranges."""
     match = _DAY_RANGE_DMY_RE.match(text)
     if match is not None:
@@ -331,6 +359,7 @@ def _parse_compact_day_range(text: str, bc: bool) -> ParsedDate | None:
         _literal(int(year), month, int(day_a), bc),
         _literal(int(year), month, int(day_b), bc),
         "day",
+        circa,
     )
 
 
@@ -363,16 +392,48 @@ def parse_date_text(raw: str | None) -> ParsedDate | None:
     flags = _extract_flags(cleaned)
     if flags is None:
         return None
-    body, era, vague, circa = flags
-    bc = bool(era)
-
-    return _parse_body(body, bc, vague=vague, circa=circa)
+    return _parse_body(flags.body, bool(flags.bc), flags)
 
 
-def _parse_body(body: str, bc: bool, *, vague: bool, circa: bool) -> ParsedDate | None:
+def _parse_decade(body: str, bc: bool) -> ParsedDate | None:
+    """Read a lone decade such as ``1250`` from ``late 1250s BC``.
+
+    The year written is the decade's representative year; "early", "mid" and
+    "late" do not shift it, because a decade-precision date only claims the
+    decade. Circa is always set, since the text names no year.
+    """
+    if not body.isdigit() or not 1 <= int(body) <= _MAX_YEAR:
+        return None
+    return ParsedDate(_literal(int(body), 1, 1, bc), None, "decade", True)
+
+
+def _parse_year_alternatives(body: str, bc: bool) -> ParsedDate | None:
+    """Read ``1805 or 1806``, keeping the earlier year as an approximate year.
+
+    The earlier year in time is the larger number in BC and the smaller in AD.
+    """
+    match = _YEAR_PAIR_RE.match(body)
+    if match is None:
+        return None
+    years = (int(match.group(1)), int(match.group(2)))
+    year = max(years) if bc else min(years)
+    if not 1 <= year <= _MAX_YEAR:
+        return None
+    return ParsedDate(_literal(year, 1, 1, bc), None, "year", True)
+
+
+def _parse_body(body: str, bc: bool, flags: _Flags) -> ParsedDate | None:
     """Parse the era- and word-stripped body of a date text."""
-    if not (vague or circa):
-        compact = _parse_compact_day_range(body, bc)
+    vague, circa = flags.vague, flags.circa
+    if flags.decade:
+        return None if vague else _parse_decade(body, bc)
+
+    alternatives = _parse_year_alternatives(body, bc)
+    if alternatives is not None:
+        return alternatives
+
+    if not vague:
+        compact = _parse_compact_day_range(body, bc, circa)
         if compact is not None:
             return compact
 

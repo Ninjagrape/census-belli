@@ -223,6 +223,9 @@ class CommanderMention:
     role_evidence: str = ""
     note: str = ""
     mentions: int = 1
+    # 0-based position among the side's infobox commanders; None for every
+    # other source. Infobox editors list the principal commander first.
+    infobox_order: int | None = None
 
 
 @dataclass
@@ -235,6 +238,8 @@ class BattleFacts:
     date_start: str | None = None
     date_end: str | None = None
     date_precision: str | None = None
+    # True when the source marked the date approximate; None when it said nothing.
+    date_circa: bool | None = None
     latitude: float | None = None
     longitude: float | None = None
     location_name: str | None = None

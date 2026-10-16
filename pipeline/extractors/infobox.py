@@ -339,7 +339,7 @@ def _parse_result(result_text: str) -> tuple[str | None, str | None]:
 
 
 def _commander_mentions(
-    value: str, side_label: str, provenance: Provenance
+    value: str, side_label: str, provenance: Provenance, first_order: int = 0
 ) -> list[CommanderMention]:
     """Split a commander field into one mention per named person.
 
@@ -347,6 +347,8 @@ def _commander_mentions(
         value: Cleaned text of a ``commanderN`` field.
         side_label: The side these commanders served.
         provenance: Where the field came from.
+        first_order: ``infobox_order`` of the first mention, so a side with
+            several commander fields keeps one running order.
 
     Returns:
         One mention per item. Roles stay ``unclear``: an infobox lists who
@@ -356,9 +358,11 @@ def _commander_mentions(
     mentions: list[CommanderMention] = []
 
     for item in split_list_items(value):
-        note_match = re.search(r"\((KIA|WIA|POW|MIA|executed|surrendered)\)", item, re.IGNORECASE)
+        note_match = re.search(
+            r"\((KIA|WIA|POW|MIA|DOW|executed|surrendered)\)", item, re.IGNORECASE
+        )
         note = note_match.group(1) if note_match else ""
-        name = re.sub(r"\((?:KIA|WIA|POW|MIA|executed|surrendered)\)", "", item, flags=re.I)
+        name = re.sub(r"\((?:KIA|WIA|POW|MIA|DOW|executed|surrendered)\)", "", item, flags=re.I)
         name = name.strip(" \t†*-–—,")
         if not name or name.lower() in ("unknown", "various", "none"):
             continue
@@ -370,6 +374,7 @@ def _commander_mentions(
                 apparent_role="unclear",
                 role_evidence=value[:500],
                 note=note.upper() if note else "",
+                infobox_order=first_order + len(mentions),
             )
         )
 
@@ -676,6 +681,7 @@ def _build_extraction(
         date_start=parsed_date.date_start if parsed_date else None,
         date_end=parsed_date.date_end if parsed_date else None,
         date_precision=parsed_date.precision if parsed_date else None,
+        date_circa=parsed_date.circa if parsed_date else None,
         location_name=place or None,
         battle_type=variant.battle_type,
         terrain=sorted({m.group(0).lower() for m in _TERRAIN_RE.finditer(terrain_source)}),
@@ -707,7 +713,9 @@ def _build_extraction(
             polity=label if labels else None,
         )
         for _, value in commanders.get(index, []):
-            side.commanders.extend(_commander_mentions(value, label, provenance))
+            side.commanders.extend(
+                _commander_mentions(value, label, provenance, len(side.commanders))
+            )
         side.troop_reports = _side_troop_reports(
             strengths.get(index, []), variant, label, provenance
         )

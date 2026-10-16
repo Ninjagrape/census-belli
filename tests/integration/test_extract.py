@@ -16,6 +16,7 @@ distinction the force-ratio covariate depends on surviving the round trip.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -157,6 +158,74 @@ def test_a_bc_date_survives_the_round_trip(conn: Any) -> None:
     assert stored[0].endswith("BC")
     assert "0031" in stored[0]
     assert stored[1] == "day"
+
+
+def test_date_circa_is_written_on_insert_and_follows_the_date_on_update(conn: Any) -> None:
+    battle = _actium()
+    battle.facts.date_circa = True
+    battle_id = write_battle(conn, battle)
+
+    def circa() -> bool:
+        return bool(
+            conn.execute(
+                text("SELECT date_circa FROM battles WHERE battle_id = :id"), {"id": battle_id}
+            ).scalar()
+        )
+
+    assert circa() is True
+
+    battle.facts.date_circa = False
+    write_battle(conn, battle)
+    assert circa() is False
+
+    # A re-run that read no date leaves the stored date, and so its circa flag.
+    battle.facts.date_circa = True
+    write_battle(conn, battle)
+    battle.facts.date_start = None
+    battle.facts.date_end = None
+    battle.facts.date_circa = False
+    write_battle(conn, battle)
+    assert circa() is True
+
+
+def test_part_of_becomes_a_war_and_a_campaign_shared_between_battles(conn: Any) -> None:
+    first = _actium()
+    first.facts.part_of = ["Q1", "Second Punic War", "Italian campaign"]
+    second = replace(
+        first,
+        slug="other",
+        name="Battle of Other",
+        facts=replace(first.facts, wikidata_id=None, name="Battle of Other"),
+    )
+
+    first_id = write_battle(conn, first)
+    second_id = write_battle(conn, second)
+    write_battle(conn, first)
+
+    assert conn.execute(text("SELECT COUNT(*) FROM wars")).scalar() == 1
+    assert conn.execute(text("SELECT COUNT(*) FROM campaigns")).scalar() == 1
+    rows = conn.execute(
+        text(
+            "SELECT b.battle_id, w.name, c.name, c.war_id = w.war_id FROM battles b "
+            "JOIN wars w ON w.war_id = b.war_id JOIN campaigns c ON c.campaign_id = b.campaign_id"
+        )
+    ).fetchall()
+    assert {row[0] for row in rows} == {first_id, second_id}
+    assert {(row[1], row[2], row[3]) for row in rows} == {
+        ("Second Punic War", "Italian campaign", True)
+    }
+
+
+def test_a_battle_with_no_war_like_part_of_keeps_null_links(conn: Any) -> None:
+    battle = _actium()
+    battle.facts.part_of = ["Q6271"]
+    battle_id = write_battle(conn, battle)
+
+    row = conn.execute(
+        text("SELECT war_id, campaign_id FROM battles WHERE battle_id = :id"), {"id": battle_id}
+    ).fetchone()
+    assert row is not None
+    assert tuple(row) == (None, None)
 
 
 def test_troop_report_scope_and_bounds_reach_the_database(conn: Any) -> None:

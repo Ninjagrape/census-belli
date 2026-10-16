@@ -157,3 +157,49 @@ def test_an_unparseable_infobox_date_is_null_and_remembered() -> None:
     assert source.facts.date_start is None
     assert source.facts.date_precision is None
     assert source.unparsed_date_text == "sometime"
+
+
+# (raw text, date_start, date_end, precision, circa)
+CIRCA_CASES = [
+    ("c. 1200 BC", "1200-01-01 BC", None, "year", True),
+    ("circa 1450 BC", "1450-01-01 BC", None, "year", True),
+    # Circa qualifies the year; the day range is still read in full.
+    ("1-3 May c. 1450 BC", "1450-05-01 BC", "1450-05-03 BC", "day", True),
+    ("c. 1-3 May 1450 BC", "1450-05-01 BC", "1450-05-03 BC", "day", True),
+    # A decade keeps its named year; the qualifier does not shift it.
+    ("late 1250s BC", "1250-01-01 BC", None, "decade", True),
+    ("1250s", "1250-01-01", None, "decade", True),
+    # The earlier year in time: smaller number in AD, larger in BC.
+    ("1805 or 1806", "1805-01-01", None, "year", True),
+    ("216 or 215 BC", "0216-01-01 BC", None, "year", True),
+    ("1-3 May 1450 BC", "1450-05-01 BC", "1450-05-03 BC", "day", False),
+    ("212 BC", "0212-01-01 BC", None, "year", False),
+]
+
+
+@pytest.mark.parametrize(("raw", "start", "end", "precision", "circa"), CIRCA_CASES)
+def test_circa_is_carried_on_the_parsed_date(
+    raw: str, start: str, end: str | None, precision: str, circa: bool
+) -> None:
+    parsed = parse_date_text(raw)
+
+    assert parsed is not None
+    assert (parsed.date_start, parsed.date_end, parsed.precision, parsed.circa) == (
+        start,
+        end,
+        precision,
+        circa,
+    )
+
+
+@pytest.mark.parametrize("raw", ["1255s", "1250s - 1260s", "May 1805 or 1806", "Spring 1250s"])
+def test_malformed_decades_and_alternatives_stay_unreadable(raw: str) -> None:
+    assert parse_date_text(raw) is None
+
+
+def test_the_infobox_parser_carries_circa_to_the_facts() -> None:
+    source = parse_infobox(_wikitext("c. 1200 BC"), source_ref="x", source_title="Battle of Test")
+
+    assert source is not None
+    assert source.facts.date_circa is True
+    assert source.facts.date_precision == "year"

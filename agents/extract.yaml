@@ -41,7 +41,6 @@ params:
   llm_mode: offline
   llm_max_tokens: 4096
   batch_size: 50               # process this many articles per LLM batch
-  log_all_llm_calls: true
 
 prompt:
   system: |

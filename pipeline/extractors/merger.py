@@ -233,6 +233,12 @@ def _merge_scalars(
                 )
             )
 
+    # Circa qualifies a date, so it comes from the source that supplied the
+    # merged date_start; a lower-priority source's circa says nothing about it.
+    dated = next((s for s in ordered if s.facts.date_start), None)
+    if dated is not None:
+        merged.date_circa = dated.facts.date_circa
+
     # List-valued fields are a union: two sources naming different terrain
     # features are both right far more often than either is wrong.
     terrain: list[str] = []
@@ -272,6 +278,9 @@ def _merge_commanders(mentions: Sequence[CommanderMention]) -> list[CommanderMen
             continue
 
         existing.mentions += 1
+        # Only the infobox carries an order; keep it whichever source came first.
+        if existing.infobox_order is None:
+            existing.infobox_order = mention.infobox_order
         # An infobox lists presence; the body pass says what someone did. So
         # a stated role replaces "unclear" regardless of source priority.
         if existing.apparent_role == "unclear" and mention.apparent_role != "unclear":
