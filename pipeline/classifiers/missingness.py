@@ -17,6 +17,7 @@ overwriting a decision another stage already made for a different reason.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Final
 
@@ -40,6 +41,90 @@ _TEMPLATE_FIELDS: Final[frozenset[str]] = frozenset({"battle_type", "terrain", "
 _ANCIENT_MEDIEVAL_CUTOFF: Final[int] = 1500
 _MAR_ERA_START: Final[int] = 1700
 _MAR_ERA_END: Final[int] = 1914
+
+# First year of the post-1914 regime rule: wartime states from the First World
+# War on had the means (censorship, ministries of information) to suppress or
+# inflate their own figures.
+_REGIME_ERA_START: Final[int] = 1914
+
+# Why a regime's own figures go missing. Two different mechanisms, kept apart
+# because impute and a reader of the log should not read them as one.
+_SUPPRESSION: Final[str] = (
+    "an authoritarian state that suppressed or distorted its own strength and loss "
+    "figures; whether the number is published depends on the number"
+)
+_RECORDS_LOST: Final[str] = (
+    "German forces in 1944-45, whose records were largely destroyed or never "
+    "compiled in the collapse of the authoritarian state; the gap tracks how "
+    "catastrophic the situation was, which the missing figure itself reflects"
+)
+
+# Authoritarian regimes whose own strength and loss figures were suppressed,
+# distorted or lost, as (pattern, first year, last year, reason). The pattern is
+# matched against the whole of the side's polity (see _normalise), never as a
+# substring: "Coalition forces in Iraq" is not Iraq. Years are inclusive and
+# whole years, because the input carries only a year; a regime that began
+# mid-year is listed from that year. A curated list, not a classifier of
+# regimes: a state is here only for the years it was one, so "Germany" counts in
+# 1933-1945 and not in 1870. Extend it with a reason, not by guesswork.
+_AUTHORITARIAN_STATES: Final[tuple[tuple[re.Pattern[str], int, int, str], ...]] = tuple(
+    (re.compile(pattern, re.IGNORECASE), first, last, reason)
+    for pattern, first, last, reason in (
+        (
+            r"(?:the )?(?:soviet union|ussr|soviet russia|union of soviet socialist republics)",
+            1917,
+            1991,
+            _SUPPRESSION,
+        ),
+        (r"(?:nazi germany|third reich|german reich|germany)", 1933, 1943, _SUPPRESSION),
+        (r"(?:nazi germany|third reich|german reich|germany)", 1944, 1945, _RECORDS_LOST),
+        (r"(?:imperial japan|empire of japan|japan)", 1931, 1945, _SUPPRESSION),
+        (r"(?:fascist italy|kingdom of italy|italy)", 1922, 1943, _SUPPRESSION),
+        (
+            r"(?:italian social republic|republic of sal[oò]|sal[oò] republic)",
+            1943,
+            1945,
+            _SUPPRESSION,
+        ),
+        (r"(?:north korea|democratic people's republic of korea|dprk)", 1948, 2100, _SUPPRESSION),
+        (r"(?:people's republic of china|prc|communist china)", 1949, 2100, _SUPPRESSION),
+        (
+            r"(?:chinese communist party|communist party of china|ccp|people's liberation army"
+            r"|pla|chinese communists?|communists?|red army of china)",
+            1927,
+            1949,
+            _SUPPRESSION,
+        ),
+        (r"(?:viet ?minh|democratic republic of vietnam)", 1945, 1954, _SUPPRESSION),
+        (
+            r"(?:north vietnam|vietnam|viet ?cong|democratic republic of vietnam"
+            r"|socialist republic of vietnam)",
+            1954,
+            1979,
+            _SUPPRESSION,
+        ),
+        (
+            r"(?:francoist spain|nationalist spain|spanish state|francoist faction)",
+            1936,
+            1975,
+            _SUPPRESSION,
+        ),
+        (r"(?:egypt|republic of egypt|united arab republic)", 1952, 2100, _SUPPRESSION),
+        (r"(?:ba'?athist syria|syria|syrian arab republic)", 1963, 2100, _SUPPRESSION),
+        (r"(?:ba'?athist iraq|iraq)", 1968, 2003, _SUPPRESSION),
+        (r"(?:khmer rouge|democratic kampuchea)", 1975, 1979, _SUPPRESSION),
+        (r"(?:iran|islamic republic of iran)", 1979, 2100, _SUPPRESSION),
+        (r"(?:argentina|argentine junta)", 1976, 1983, _SUPPRESSION),
+        (
+            r"(?:serbia|fr yugoslavia|federal republic of yugoslavia|serbia and montenegro"
+            r"|yugoslavia)",
+            1989,
+            2000,
+            _SUPPRESSION,
+        ),
+        (r"(?:libya|libyan arab jamahiriya)", 1969, 2011, _SUPPRESSION),
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -69,6 +154,10 @@ class MissingnessInput:
             different heuristics below.
         side_outcome: 'winner', 'loser', or None when the side's outcome
             relative to this battle is not known.
+        side_polity: The side's ``polity``, or None. The post-1914 regime rule
+            reads this alone.
+        side_label: The side's ``side_label``, or None. Not consulted by the
+            regime rule: labels are free text ("Coalition forces in Iraq").
     """
 
     log_id: int
@@ -79,6 +168,42 @@ class MissingnessInput:
     other_side_has_troops: bool = False
     any_side_has_troops: bool = False
     side_outcome: str | None = None
+    side_polity: str | None = None
+    side_label: str | None = None
+
+
+def _normalise(polity: str) -> str:
+    """Fold a polity string for anchored matching.
+
+    Args:
+        polity: A ``battle_sides.polity`` value.
+
+    Returns:
+        The string with curly apostrophes straightened, surrounding space and a
+        trailing parenthetical dropped, and case folded.
+    """
+    straight = polity.replace("’", "'").replace("‘", "'").replace("ʼ", "'")
+    return re.sub(r"\s*\([^)]*\)\s*$", "", straight).strip().casefold()
+
+
+def _authoritarian_state(record: MissingnessInput) -> tuple[str, str] | None:
+    """Find the authoritarian regime a side belonged to, if any.
+
+    Args:
+        record: The missing field's inputs.
+
+    Returns:
+        ``(polity, reason)`` when the side's whole polity matches a curated regime
+        that held power in the battle's year (after 1914), else None.
+    """
+    year = record.year_astronomical
+    if year is None or year < _REGIME_ERA_START or not record.side_polity:
+        return None
+    polity = _normalise(record.side_polity)
+    for pattern, first_year, last_year, reason in _AUTHORITARIAN_STATES:
+        if first_year <= year <= last_year and pattern.fullmatch(polity) is not None:
+            return record.side_polity.strip(), reason
+    return None
 
 
 def classify_missingness(record: MissingnessInput) -> MissingnessDecision | None:
@@ -123,6 +248,40 @@ def classify_missingness(record: MissingnessInput) -> MissingnessDecision | None
         )
 
     # From here on, field_name is 'troop_total' or 'casualties'.
+
+    regime = _authoritarian_state(record)
+    if regime is not None:
+        polity, why = regime
+        return MissingnessDecision(
+            log_id=record.log_id,
+            missingness_class="mnar",
+            reason=f"post-1914 figure missing for a side of {polity!r}, {why}",
+        )
+
+    if record.field_name == "casualties" and record.this_side_has_troops:
+        # A different mechanism from a missing troop total. The side's strength
+        # is documented, so the casualty gap is not thin documentation: it is
+        # the loss figure itself that went unrecorded. For a defeated side that
+        # is plausibly because the losses were too heavy to count (an army
+        # destroyed in the field or on the retreat); for a victor it follows
+        # observed variables (era, size, how the battle is written up).
+        if record.side_outcome == "loser":
+            return MissingnessDecision(
+                log_id=record.log_id,
+                missingness_class="mnar",
+                reason=(
+                    "casualties missing although this side's strength is known, and the "
+                    "side lost; heavy losses are the figures most often left unrecorded"
+                ),
+            )
+        return MissingnessDecision(
+            log_id=record.log_id,
+            missingness_class="mar",
+            reason=(
+                "casualties missing although this side's strength is known; the gap "
+                "tracks era and how thoroughly the battle is written up, both observed"
+            ),
+        )
 
     if not record.any_side_has_troops and record.year_astronomical < _ANCIENT_MEDIEVAL_CUTOFF:
         return MissingnessDecision(

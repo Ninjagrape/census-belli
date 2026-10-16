@@ -29,6 +29,7 @@ __all__ = [
     "BattleTypeDecision",
     "ClassifyCounts",
     "CommanderRow",
+    "MissingnessContext",
     "MissingnessDecision",
     "RoleDecision",
     "SideGroup",
@@ -75,6 +76,7 @@ BATTLE_TYPES: Final[tuple[str, ...]] = (
     "combined",
     "amphibious",
     "guerrilla",
+    "campaign",
     "unknown",
 )
 
@@ -125,8 +127,14 @@ class CommanderRow:
             vocabulary (``APPARENT_ROLES``, extract's own guess) and because
             collapsing the two would lose the evidence that classify itself
             has not yet decided.
-        listing_order: Position in the infobox's commander list, 0 first.
-            Kept for display and stable ordering; not used to weight or rank commanders.
+        listing_order: Position of this row within the side after sorting by
+            ``infobox_order`` (``bc_id`` breaks ties and orders rows with no
+            infobox position), 0 first. Kept for display and stable ordering;
+            not used to weight or rank commanders.
+        infobox_order: ``battle_commanders.infobox_order``, the 0-based position
+            in the infobox commander list, or None when the row did not come
+            from an infobox or predates the column. Shown to the role prompt
+            only where known; ``listing_order`` is the fallback sort key.
         attribution_method: How the row's current weight was decided. A side
             whose rows all say ``llm`` is left alone on a re-run: its roles
             look internally consistent, and without this the fixed weight
@@ -143,6 +151,7 @@ class CommanderRow:
     apparent_role: str = "unclear"
     listing_order: int = 0
     attribution_method: str = "equal"
+    infobox_order: int | None = None
 
     def __post_init__(self) -> None:
         _check_enum(self.command_role, COMMAND_ROLES, "command_role")
@@ -161,7 +170,12 @@ class SideGroup:
         year_astronomical: The battle's year in astronomical numbering
             (negative for BC, matching docs/handover-log.md §4.5), or None when
             undated.
-        commanders: Every commander on this side, in listing order.
+        commanders: Every commander on this side, in infobox order where
+            known, then ``bc_id`` order.
+        unresolved_count: How many commander mentions on this side resolve
+            could not turn into a person (``commander_general_id`` rows in
+            ``missing_data_log``). Non-zero means the listed commanders are
+            not the whole command team, which the role prompt tells the model.
     """
 
     battle_id: int
@@ -170,6 +184,7 @@ class SideGroup:
     battle_name: str
     year_astronomical: int | None
     commanders: tuple[CommanderRow, ...] = ()
+    unresolved_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -224,6 +239,9 @@ class BattleTypeDecision:
         evidence: What specifically drove the decision (a category name, a
             matched vocabulary term, or "no signal found").
         confidence: 0..1.
+        replaces_rule_type: True for a campaign decision that may overwrite a
+            type an earlier classify run derived by rule (never one extract
+            or a person set). See ``write_battle_type_decisions``.
     """
 
     battle_id: int
@@ -231,6 +249,7 @@ class BattleTypeDecision:
     evidence: str
     confidence: float
     fortified: bool | None = None
+    replaces_rule_type: bool = False
 
     def __post_init__(self) -> None:
         _check_enum(self.battle_type, BATTLE_TYPES, "battle_type")
@@ -255,6 +274,48 @@ class MissingnessDecision:
         _check_enum(self.missingness_class, MISSINGNESS_CLASSES, "missingness_class")
 
 
+@dataclass(frozen=True)
+class MissingnessContext:
+    """What the missingness prompt is told about one missing field.
+
+    Holds only facts the classify stage itself never rewrites (no
+    ``battle_type``, ``terrain`` or ``fortified``): the request hash must be the
+    same before and after a run, or an answer imported between two runs would
+    never be found again.
+
+    Attributes:
+        log_id: The ``missing_data_log`` row.
+        battle_id: Its battle.
+        field_name: The missing field.
+        battle_name: The battle's name.
+        year_astronomical: The battle's year, or None when undated.
+        war_name: The war the battle belongs to, or None.
+        region: ``battles.location_name``, or None.
+        side_label: The side the field belongs to, or None for a battle-level field.
+        polity: The side's polity, or None.
+        outcome: The side's ``outcome``, or None.
+        this_side_has_troops: Whether reconcile gave the side a troop estimate.
+        other_side_has_troops: Whether it gave another side of the battle one.
+        this_side_has_casualties: Whether the side has a casualty estimate.
+        other_side_has_casualties: Whether another side has one.
+    """
+
+    log_id: int
+    battle_id: int
+    field_name: str
+    battle_name: str
+    year_astronomical: int | None = None
+    war_name: str | None = None
+    region: str | None = None
+    side_label: str | None = None
+    polity: str | None = None
+    outcome: str | None = None
+    this_side_has_troops: bool = False
+    other_side_has_troops: bool = False
+    this_side_has_casualties: bool = False
+    other_side_has_casualties: bool = False
+
+
 class ClassifyCounts:
     """Row and decision counts for one stage run, for the summary log.
 
@@ -277,12 +338,16 @@ class ClassifyCounts:
         self.battle_type_aerial = 0
         self.battle_type_amphibious = 0
         self.battle_type_field = 0
+        self.battle_type_campaign = 0
+        self.battle_type_guerrilla = 0
+        self.terrain_set = 0
         self.battle_type_unknown = 0
         self.troop_gaps_logged = 0
         self.defenders_set = 0
         self.missing_fields_seen = 0
         self.missingness_classified = 0
         self.missingness_left_unclassified = 0
+        self.missingness_llm_classified = 0
 
     def as_dict(self) -> dict[str, int]:
         """Render the counts for a structlog call.
@@ -304,12 +369,16 @@ class ClassifyCounts:
             "battle_type_aerial": self.battle_type_aerial,
             "battle_type_amphibious": self.battle_type_amphibious,
             "battle_type_field": self.battle_type_field,
+            "battle_type_campaign": self.battle_type_campaign,
+            "battle_type_guerrilla": self.battle_type_guerrilla,
+            "terrain_set": self.terrain_set,
             "battle_type_unknown": self.battle_type_unknown,
             "troop_gaps_logged": self.troop_gaps_logged,
             "defenders_set": self.defenders_set,
             "missing_fields_seen": self.missing_fields_seen,
             "missingness_classified": self.missingness_classified,
             "missingness_left_unclassified": self.missingness_left_unclassified,
+            "missingness_llm_classified": self.missingness_llm_classified,
         }
 
 

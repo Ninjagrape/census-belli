@@ -26,7 +26,7 @@ Typical use::
 
 from __future__ import annotations
 
-from pipeline.classifiers.battle_type import extract_categories, infer_battle_type
+from pipeline.classifiers.battle_type import extract_categories, infer_battle_type, infer_campaign
 from pipeline.classifiers.defender import SideLabel, besieged_place, infer_siege_defenders
 from pipeline.classifiers.load import (
     ARTICLE_SUFFIXES,
@@ -35,7 +35,9 @@ from pipeline.classifiers.load import (
     find_unclassified_battle_type_log_ids,
     load_battle_source_slugs,
     load_battle_wikipedia_urls,
+    load_battles_needing_terrain,
     load_battles_needing_type,
+    load_missingness_contexts,
     load_missingness_inputs,
     load_side_groups,
     load_siege_sides,
@@ -43,6 +45,7 @@ from pipeline.classifiers.load import (
     read_article_text,
 )
 from pipeline.classifiers.missingness import IMPUTE_FIELDS, MissingnessInput, classify_missingness
+from pipeline.classifiers.missingness_llm import apply_llm_missingness, build_missingness_request
 from pipeline.classifiers.records import (
     APPARENT_ROLES,
     BATTLE_TYPES,
@@ -51,6 +54,7 @@ from pipeline.classifiers.records import (
     BattleTypeDecision,
     ClassifyCounts,
     CommanderRow,
+    MissingnessContext,
     MissingnessDecision,
     RoleDecision,
     SideGroup,
@@ -61,6 +65,7 @@ from pipeline.classifiers.roles import (
     COMMAND_ROLE_RESPONSE_SCHEMA,
     apply_llm_classification,
     classify_side_roles,
+    llm_defender_flag,
     normalize_name,
 )
 from pipeline.classifiers.store import (
@@ -69,7 +74,9 @@ from pipeline.classifiers.store import (
     write_defender_flags,
     write_missingness_decisions,
     write_role_decisions,
+    write_terrain,
 )
+from pipeline.classifiers.terrain import infer_terrain
 
 __all__ = [
     "APPARENT_ROLES",
@@ -83,13 +90,16 @@ __all__ = [
     "BattleTypeDecision",
     "ClassifyCounts",
     "CommanderRow",
+    "MissingnessContext",
     "MissingnessDecision",
     "MissingnessInput",
     "RoleDecision",
     "SideGroup",
     "SideLabel",
     "apply_llm_classification",
+    "apply_llm_missingness",
     "besieged_place",
+    "build_missingness_request",
     "build_role_request",
     "classify_missingness",
     "classify_side_roles",
@@ -98,9 +108,14 @@ __all__ = [
     "load_battle_source_slugs",
     "find_unclassified_battle_type_log_ids",
     "infer_battle_type",
+    "infer_campaign",
     "infer_siege_defenders",
+    "infer_terrain",
+    "llm_defender_flag",
     "load_battle_wikipedia_urls",
+    "load_battles_needing_terrain",
     "load_battles_needing_type",
+    "load_missingness_contexts",
     "load_missingness_inputs",
     "load_side_groups",
     "load_siege_sides",
@@ -114,4 +129,5 @@ __all__ = [
     "write_defender_flags",
     "write_missingness_decisions",
     "write_role_decisions",
+    "write_terrain",
 ]

@@ -15,8 +15,8 @@ inputs:
 
 outputs:
   - db: battle_commanders (command_role, hierarchy_rank, reports_to_bc_id, attribution_weight updated)
-  - db: battles (battle_type, fortified)
-  - db: battle_sides (is_defender, only where a siege title names the besieged side)
+  - db: battles (battle_type, fortified, terrain; campaign may replace a rule-derived type)
+  - db: battle_sides (is_defender, from a siege title first, then the role answer, only where NULL)
   - db: missing_data_log (classes; also adds a troop_total row for any side with no estimate and no row)
 
 tools:
@@ -54,6 +54,21 @@ params:
   # Character budget for the article excerpt sent with a command-role
   # request; see pipeline.classifiers.requests.select_excerpt.
   excerpt_max_chars: 6000
+  # Output ceiling for one missingness request (a type and one sentence).
+  missingness_max_tokens: 512
+
+  # battle_type notes, kept here because the enum has members this stage
+  # deliberately does not produce:
+  # - campaign: a title naming a war or campaign without battle/siege/raid, or
+  #   (other than a "Battle of"/"Siege of" title) dates spanning more than 180 days at day precision. It wins over every
+  #   other type, and is the one type allowed to replace a rule-derived type
+  #   (found through the "classify: inferred" note on the battle_type log row).
+  #   The model excludes campaigns.
+  # - siege_defensive is never produced. Which side was besieged is
+  #   battle_sides.is_defender, per side; a second article-level value would
+  #   only repeat it. A siege is written siege_offensive + fortified.
+  # - combined is never produced: no clean rule separates it from the others.
+  # - amphibious and guerrilla only on strong signals (see battle_type.py).
 
 # ──── TASK A: COMMAND ROLE CLASSIFICATION ────────────────────────────────────
 
@@ -102,6 +117,23 @@ command_role_prompt:
       commander on this side, or null, and must never form a loop.
     - Weights must sum to 1.0 across the side.
 
+    Listing order and unresolved names: commanders are numbered "#1", "#2"
+    in the order the article's infobox gives them (no number means the
+    position is not recorded). The order is evidence about the infobox, not
+    about command: infoboxes list heads of state and senior names first, so
+    never rank or weight by position. The user message also says how many
+    further commanders the infobox named that could not be identified. When
+    that number is above zero, the listed people are not the whole command
+    team; still give weights across the listed commanders only (summing to
+    1.0), and lower your confidence if the missing names could have mattered.
+
+    Defender: also say whether this side was the DEFENDER ("is_defender"):
+    true when it held the position (a fortress, city, walled camp, ridge,
+    river line or other prepared ground) that the other side attacked;
+    false when it was the side attacking such a position; null for a meeting
+    engagement, a fluid battle, or when the text does not say. Do not infer
+    it from who won or from infobox order.
+
     Not a person: if a listed commander is not an individual (for example
     "Army Group B", "1st Ukrainian Front", a title or a formation), return
     command_role "unknown", attribution_weight 0, hierarchy_rank 1,
@@ -114,17 +146,79 @@ command_role_prompt:
     - "X commanded the left/right wing under Y" = subordinate reports to Y
     - "X directed the battle while Y remained at camp/on shore/in reserve"
       = X is field_commander, Y is nominal or sovereign
-    - Roman consuls who alternated daily command: co-field_commanders,
-      weighted equally, unless the article says one of them commanded on
-      the day of the battle (Varro at Cannae), in which case that one is the
-      field_commander and the other is a subordinate or nominal.
+    - No one commands in the field but one officer directed the battle from a
+      staff or headquarters post: give that officer theatre_commander and
+      rank 0, and the sovereign and army commanders rank 1 (see Königgrätz
+      below), but only when that officer held documented delegated command
+      authority over the armies. A chief of staff who planned and advised
+      without such authority (Ludendorff at Tannenberg, Eisenhower's staff)
+      is not pulled to rank 0 by default; rank the commander who issued the
+      orders.
+    - Roman consuls who alternated daily command, or any co-equal consuls:
+      both are rank-0 co-field_commanders with equal weight, as with any
+      co-field_commanders. Never mark the other consul subordinate or
+      nominal because of a day-command tradition (Varro commanding on the
+      day of Cannae is contested in the sources), unless the article states
+      that one consul formally yielded command.
+
+    Worked examples (illustrations of the reasoning; the facts are for the
+    battles named, not for the one you are asked about):
+
+    Battle of Actium (31 BC), side of Octavian. Listed: Marcus Vipsanius Agrippa, Octavian.
+    Answer: {"classifications": [
+      {"name": "Marcus Vipsanius Agrippa", "command_role": "field_commander", "hierarchy_rank": 0, "reports_to": null, "attribution_weight": 0.85, "confidence": 0.9, "reasoning": "Agrippa was the admiral who handled the fleet in the battle; Octavian held overall authority but did not direct the fleet action"},
+      {"name": "Octavian", "command_role": "supreme_commander", "hierarchy_rank": 1, "reports_to": null, "attribution_weight": 0.15, "confidence": 0.85, "reasoning": "overall political and strategic authority, aboard the fleet but not directing the manoeuvres"}],
+     "is_defender": null}
+
+    Battle of Munda (45 BC), side of Caesar. Listed: Julius Caesar, Quintus Fabius Maximus, Quintus Pedius.
+    Answer: {"classifications": [
+      {"name": "Julius Caesar", "command_role": "field_commander", "hierarchy_rank": 0, "reports_to": null, "attribution_weight": 0.9, "confidence": 0.5, "reasoning": "Caesar took personal command and rallied the line when it wavered"},
+      {"name": "Quintus Fabius Maximus", "command_role": "subordinate", "hierarchy_rank": 1, "reports_to": "Julius Caesar", "attribution_weight": 0.05, "confidence": 0.3, "reasoning": "present in theatre, not attested in the battle"},
+      {"name": "Quintus Pedius", "command_role": "subordinate", "hierarchy_rank": 1, "reports_to": "Julius Caesar", "attribution_weight": 0.05, "confidence": 0.3, "reasoning": "present in theatre, not attested in the battle"}],
+     "is_defender": false}
+
+    Battle of Mutina (43 BC), 21 April, Senate's side (a relief army mixed with a besieged garrison, so is_defender is null). Listed: Aulus Hirtius, Octavian, Decimus Junius Brutus Albinus.
+    Answer: {"classifications": [
+      {"name": "Aulus Hirtius", "command_role": "field_commander", "hierarchy_rank": 0, "reports_to": null, "attribution_weight": 0.5, "confidence": 0.65, "reasoning": "consul with imperium, commanded the relief army and fell in the assault on the besiegers' camp"},
+      {"name": "Octavian", "command_role": "subordinate", "hierarchy_rank": 1, "reports_to": "Aulus Hirtius", "attribution_weight": 0.3, "confidence": 0.6, "reasoning": "young propraetor leading his own legions beside the consul, junior to him"},
+      {"name": "Decimus Junius Brutus Albinus", "command_role": "subordinate", "hierarchy_rank": 1, "reports_to": null, "attribution_weight": 0.2, "confidence": 0.55, "reasoning": "commanded the besieged garrison whose sortie joined the fight; not under Hirtius' orders"}],
+     "is_defender": null}
+
+    Battle of Chaeronea (338 BC), Macedonian side. Listed: Philip II of Macedon, Alexander the Great.
+    Answer: {"classifications": [
+      {"name": "Philip II of Macedon", "command_role": "field_commander", "hierarchy_rank": 0, "reports_to": null, "attribution_weight": 0.65, "confidence": 0.85, "reasoning": "the king commanded one wing in person and directed the whole battle plan"},
+      {"name": "Alexander the Great", "command_role": "subordinate", "hierarchy_rank": 1, "reports_to": "Philip II of Macedon", "attribution_weight": 0.35, "confidence": 0.8, "reasoning": "led the cavalry on the other wing under his father and broke the Theban Sacred Band"}],
+     "is_defender": false}
+
+    Battle of Salamis (480 BC), Greek fleet. Listed: Eurybiades, Themistocles.
+    Answer: {"classifications": [
+      {"name": "Themistocles", "command_role": "field_commander", "hierarchy_rank": 0, "reports_to": null, "attribution_weight": 0.6, "confidence": 0.65, "reasoning": "pressed for the battle in the narrows and shaped the plan; contributed the largest squadron. De facto direction is contested in the sources"},
+      {"name": "Eurybiades", "command_role": "supreme_commander", "hierarchy_rank": 1, "reports_to": null, "attribution_weight": 0.4, "confidence": 0.65, "reasoning": "Spartan holding the formal command of the allied fleet, whose decisions followed a council Themistocles influenced"}],
+     "is_defender": null}
+
+    Battle of Mohi (1241), Mongol side. Listed: Batu Khan, Subutai.
+    Answer: {"classifications": [
+      {"name": "Subutai", "command_role": "field_commander", "hierarchy_rank": 0, "reports_to": null, "attribution_weight": 0.65, "confidence": 0.6, "reasoning": "the strategist who drew up the crossing plan and led the flanking force"},
+      {"name": "Batu Khan", "command_role": "supreme_commander", "hierarchy_rank": 1, "reports_to": null, "attribution_weight": 0.35, "confidence": 0.6, "reasoning": "titular commander of the western invasion; led the assault on the Sajo bridge. The sources split on credit: the Yuan Shi favours Subutai, Plano Carpini names Batu"}],
+     "is_defender": false}
+
+    Battle of Königgrätz (1866), Prussian side. Listed: Wilhelm I, Helmuth von Moltke, Prince Frederick Charles, Crown Prince Frederick William, Karl Eberhard Herwarth von Bittenfeld.
+    Answer: {"classifications": [
+      {"name": "Helmuth von Moltke", "command_role": "theatre_commander", "hierarchy_rank": 0, "reports_to": null, "attribution_weight": 0.43, "confidence": 0.8, "reasoning": "as chief of the general staff he directed the converging advance and the decision to fight, so he holds rank 0 though no field command"},
+      {"name": "Wilhelm I", "command_role": "sovereign", "hierarchy_rank": 1, "reports_to": null, "attribution_weight": 0.05, "confidence": 0.9, "reasoning": "the king was present and held nominal supreme command"},
+      {"name": "Prince Frederick Charles", "command_role": "subordinate", "hierarchy_rank": 1, "reports_to": "Helmuth von Moltke", "attribution_weight": 0.22, "confidence": 0.8, "reasoning": "First Army, held the frontal fight"},
+      {"name": "Crown Prince Frederick William", "command_role": "subordinate", "hierarchy_rank": 1, "reports_to": "Helmuth von Moltke", "attribution_weight": 0.22, "confidence": 0.8, "reasoning": "Second Army, whose flank attack decided the battle"},
+      {"name": "Karl Eberhard Herwarth von Bittenfeld", "command_role": "subordinate", "hierarchy_rank": 1, "reports_to": "Helmuth von Moltke", "attribution_weight": 0.08, "confidence": 0.7, "reasoning": "Elbe Army, the smaller force on the right of the line"}],
+     "is_defender": false}
 
   user_template: |
     Battle: {battle_name} ({date})
     Side: {side_label}
 
-    Commanders listed:
+    Commanders listed (infobox order where numbered):
     {commanders_formatted}
+
+    Commanders named in the infobox but not identified: {unresolved_formatted}
 
     Extracted role evidence:
     {role_evidence_formatted}
@@ -145,6 +239,7 @@ command_role_prompt:
           "reasoning": "..."
         }}
       ],
+      "is_defender": true/false/null,
       "needs_review": true/false,
       "review_reason": "..." or null
     }}
@@ -183,6 +278,20 @@ missingness_prompt:
       template inconsistency)
     - Battles where only the winner's numbers are known: likely MNAR
       (losers' records destroyed or suppressed)
+    - Casualties missing although the side's strength is known is a different
+      mechanism from a missing troop total: a defeated side's heaviest losses
+      are the figures most often left unrecorded (MNAR), while a victor's
+      follow era and how well the battle is written up (MAR)
+    - After 1914, figures missing for a side of an authoritarian wartime state
+      (the Soviet Union, Nazi Germany, Imperial Japan and similar) are MNAR:
+      the state suppressed or distorted its own strength and loss figures
+
+    The deterministic rules have already settled the cases above that have a
+    clean test. You are asked only about the rows they could not settle, so
+    weigh the evidence given and do not assume a pattern the facts do not
+    show. Prefer MAR over MCAR when the gap plausibly tracks documentation,
+    and choose MNAR only when the value itself plausibly caused the gap.
+    The "reason" is one sentence naming the evidence.
 
   user_template: |
     Battle: {battle_name} ({date}, {war}, {region})
@@ -192,7 +301,7 @@ missingness_prompt:
     {observed_fields_summary}
 
     Classify the missingness mechanism. Return JSON:
-    {{"missingness_class": "mcar|mar|mnar", "confidence": 0.0-1.0, "reasoning": "..."}}
+    {{"missingness_type": "mcar|mar|mnar", "reason": "..."}}
 
 quality_checks:
   - name: all_commanders_classified
@@ -214,6 +323,23 @@ quality_checks:
     threshold: "< 50"
     severity: warning
     description: "Attribution weights per side should sum close to 1.0"
+
+  # A proportion of the battles that have an article, not a count of the
+  # corpus: the corpus grows by orders of magnitude and a fixed count means
+  # nothing at 100 or 10,000 battles. An article that was read always yields at
+  # least 'field', so an 'unknown' with a source_slug is a file that went missing
+  # or would not parse. A corpus with no articles passes (nothing to measure).
+  - name: battle_type_unknown_share
+    check: >
+      SELECT COALESCE(
+        COUNT(*) FILTER (WHERE battle_type = 'unknown')::float
+          / NULLIF(COUNT(*), 0),
+        0)
+      FROM battles
+      WHERE source_slug IS NOT NULL
+    threshold: "< 0.10"
+    severity: warning
+    description: "Under 10% of battles with an article should still be typed unknown"
 
   - name: missing_data_all_logged
     check: >

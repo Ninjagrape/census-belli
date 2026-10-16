@@ -46,6 +46,7 @@ __all__ = [
     "COMMAND_ROLE_RESPONSE_SCHEMA",
     "apply_llm_classification",
     "classify_side_roles",
+    "llm_defender_flag",
     "normalize_name",
     "validate_side",
 ]
@@ -127,6 +128,11 @@ COMMAND_ROLE_RESPONSE_SCHEMA: Final[dict[str, Any]] = {
                 "required": ["name", "command_role", "hierarchy_rank", "attribution_weight"],
             },
         },
+        # Whether this side held the position (fortress, city, ridge, line) the
+        # other side attacked. Null for a meeting engagement or when the text
+        # does not say. Optional so an answer cached before the field existed
+        # still validates; the prompt always asks for it.
+        "is_defender": {"type": ["boolean", "null"]},
         "needs_review": {"type": "boolean"},
         "review_reason": {"type": ["string", "null"]},
     },
@@ -614,3 +620,24 @@ def apply_llm_classification(side: SideGroup, data: dict[str, Any]) -> list[Role
     if problem is not None:
         return _reject_llm_answer(side, problem)
     return decisions
+
+
+def llm_defender_flag(decisions: Sequence[RoleDecision], data: dict[str, Any]) -> bool | None:
+    """Read the side's ``is_defender`` from an accepted LLM answer.
+
+    Args:
+        decisions: What :func:`apply_llm_classification` returned for the side.
+        data: The same response body.
+
+    Returns:
+        True or False when the answer was accepted and states a boolean; None
+        when the answer was rejected (its decisions fall back to the
+        deterministic method, so nothing in it is trusted), omitted the field,
+        or answered null ("unclear" or a meeting engagement). A non-boolean
+        value is treated as null rather than coerced: ``"false"`` and ``0``
+        are not an answer to a yes/no question.
+    """
+    if not decisions or any(d.attribution_method != "llm" for d in decisions):
+        return None
+    value = data.get("is_defender")
+    return value if isinstance(value, bool) else None

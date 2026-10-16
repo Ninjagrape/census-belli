@@ -17,8 +17,10 @@ import structlog.testing
 
 from pipeline.classifiers.records import CommanderRow, RoleDecision, SideGroup
 from pipeline.classifiers.roles import (
+    COMMAND_ROLE_RESPONSE_SCHEMA,
     apply_llm_classification,
     classify_side_roles,
+    llm_defender_flag,
     normalize_name,
     validate_side,
 )
@@ -212,8 +214,14 @@ def test_overlord_supreme_commander_gets_a_tenth() -> None:
 
 def test_non_field_weights_are_scaled_down_to_the_thirty_percent_cap() -> None:
     # 3 supreme/theatre (0.10 each) + 3 subordinates (0.08) = 0.54 > 0.30.
-    roles = ["supreme_commander", "theatre_commander", "theatre_commander",
-             "subordinate", "subordinate", "subordinate"]
+    roles = [
+        "supreme_commander",
+        "theatre_commander",
+        "theatre_commander",
+        "subordinate",
+        "subordinate",
+        "subordinate",
+    ]
     side = _side(
         _commander(0, "Field", command_role="field_commander"),
         *(_commander(i + 1, f"Other {i}", command_role=r) for i, r in enumerate(roles)),
@@ -388,10 +396,18 @@ def test_llm_classification_is_case_and_whitespace_insensitive_on_names() -> Non
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "  octavian  ", "command_role": "sovereign", "hierarchy_rank": 1,
-             "attribution_weight": 0.1},
-            {"name": "AGRIPPA", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 0.9},
+            {
+                "name": "  octavian  ",
+                "command_role": "sovereign",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.1,
+            },
+            {
+                "name": "AGRIPPA",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.9,
+            },
         ],
     }
 
@@ -406,10 +422,20 @@ def test_reports_to_resolves_within_the_same_side_only() -> None:
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "Octavian", "command_role": "sovereign", "hierarchy_rank": 0,
-             "attribution_weight": 0.3, "reports_to": None},
-            {"name": "Agrippa", "command_role": "subordinate", "hierarchy_rank": 1,
-             "attribution_weight": 0.7, "reports_to": "Octavian"},
+            {
+                "name": "Octavian",
+                "command_role": "sovereign",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.3,
+                "reports_to": None,
+            },
+            {
+                "name": "Agrippa",
+                "command_role": "subordinate",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.7,
+                "reports_to": "Octavian",
+            },
         ],
     }
 
@@ -423,10 +449,20 @@ def test_reports_to_a_name_not_on_this_side_resolves_to_none() -> None:
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "Octavian", "command_role": "sovereign", "hierarchy_rank": 1,
-             "attribution_weight": 0.3, "reports_to": "Mark Antony"},
-            {"name": "Agrippa", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 0.7, "reports_to": None},
+            {
+                "name": "Octavian",
+                "command_role": "sovereign",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.3,
+                "reports_to": "Mark Antony",
+            },
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.7,
+                "reports_to": None,
+            },
         ],
     }
 
@@ -443,10 +479,20 @@ def test_a_self_reported_reports_to_resolves_to_none() -> None:
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "Octavian", "command_role": "sovereign", "hierarchy_rank": 1,
-             "attribution_weight": 0.5, "reports_to": "Octavian"},
-            {"name": "Agrippa", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 0.5, "reports_to": None},
+            {
+                "name": "Octavian",
+                "command_role": "sovereign",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.5,
+                "reports_to": "Octavian",
+            },
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.5,
+                "reports_to": None,
+            },
         ],
     }
 
@@ -460,10 +506,18 @@ def test_an_unrecognised_role_becomes_unknown_and_flags_review() -> None:
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "Octavian", "command_role": "emperor-for-life", "hierarchy_rank": 1,
-             "attribution_weight": 0.5},
-            {"name": "Agrippa", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 0.5},
+            {
+                "name": "Octavian",
+                "command_role": "emperor-for-life",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.5,
+            },
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.5,
+            },
         ],
     }
 
@@ -478,8 +532,12 @@ def test_an_unmatched_commander_rejects_the_whole_answer_for_the_side() -> None:
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "Agrippa", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 1.0},
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 1.0,
+            },
         ],
     }
 
@@ -497,8 +555,12 @@ def test_an_unmatched_commander_logs_a_warning_with_the_names() -> None:
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "Agrippa", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 1.0},
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 1.0,
+            },
         ],
     }
 
@@ -519,10 +581,18 @@ def test_a_surname_alone_matches_a_unique_commander() -> None:
     )
     data = {
         "classifications": [
-            {"name": "Octavian", "command_role": "sovereign", "hierarchy_rank": 1,
-             "attribution_weight": 0.15},
-            {"name": "Agrippa", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 0.85},
+            {
+                "name": "Octavian",
+                "command_role": "sovereign",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.15,
+            },
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.85,
+            },
         ],
     }
 
@@ -540,10 +610,18 @@ def test_a_surname_shared_by_two_commanders_is_not_a_match() -> None:
     )
     data = {
         "classifications": [
-            {"name": "Scipio", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 0.5},
-            {"name": "Lucius Scipio", "command_role": "subordinate", "hierarchy_rank": 1,
-             "attribution_weight": 0.5},
+            {
+                "name": "Scipio",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.5,
+            },
+            {
+                "name": "Lucius Scipio",
+                "command_role": "subordinate",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.5,
+            },
         ],
     }
 
@@ -556,10 +634,18 @@ def test_two_rank_zero_commanders_of_different_roles_reject_the_answer() -> None
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "Octavian", "command_role": "sovereign", "hierarchy_rank": 0,
-             "attribution_weight": 0.2},
-            {"name": "Agrippa", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 0.8},
+            {
+                "name": "Octavian",
+                "command_role": "sovereign",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.2,
+            },
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.8,
+            },
         ],
     }
 
@@ -573,10 +659,18 @@ def test_co_field_commanders_may_both_hold_rank_zero_in_an_llm_answer() -> None:
     side = _side(_commander(1, "Varro"), _commander(2, "Paullus"))
     data = {
         "classifications": [
-            {"name": "Varro", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 0.7},
-            {"name": "Paullus", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 0.3},
+            {
+                "name": "Varro",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.7,
+            },
+            {
+                "name": "Paullus",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.3,
+            },
         ],
     }
 
@@ -589,10 +683,18 @@ def test_no_rank_zero_commander_rejects_the_answer() -> None:
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "Octavian", "command_role": "sovereign", "hierarchy_rank": 1,
-             "attribution_weight": 0.2},
-            {"name": "Agrippa", "command_role": "field_commander", "hierarchy_rank": 1,
-             "attribution_weight": 0.8},
+            {
+                "name": "Octavian",
+                "command_role": "sovereign",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.2,
+            },
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.8,
+            },
         ],
     }
 
@@ -609,12 +711,27 @@ def test_a_reports_to_cycle_rejects_the_answer() -> None:
     )
     data = {
         "classifications": [
-            {"name": "A", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 0.6, "reports_to": "B"},
-            {"name": "B", "command_role": "subordinate", "hierarchy_rank": 1,
-             "attribution_weight": 0.2, "reports_to": "C"},
-            {"name": "C", "command_role": "subordinate", "hierarchy_rank": 1,
-             "attribution_weight": 0.2, "reports_to": "B"},
+            {
+                "name": "A",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.6,
+                "reports_to": "B",
+            },
+            {
+                "name": "B",
+                "command_role": "subordinate",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.2,
+                "reports_to": "C",
+            },
+            {
+                "name": "C",
+                "command_role": "subordinate",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.2,
+                "reports_to": "B",
+            },
         ],
     }
 
@@ -631,10 +748,19 @@ def test_a_non_person_listing_gets_zero_weight_and_does_not_break_the_hierarchy(
     )
     data = {
         "classifications": [
-            {"name": "Rommel", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 1.0},
-            {"name": "Army Group B", "command_role": "unknown", "hierarchy_rank": 1,
-             "attribution_weight": 0.0, "reasoning": "not_a_person: a formation"},
+            {
+                "name": "Rommel",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 1.0,
+            },
+            {
+                "name": "Army Group B",
+                "command_role": "unknown",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.0,
+                "reasoning": "not_a_person: a formation",
+            },
         ],
     }
 
@@ -681,12 +807,24 @@ def test_an_extra_name_not_on_the_side_is_ignored() -> None:
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "Octavian", "command_role": "sovereign", "hierarchy_rank": 1,
-             "attribution_weight": 0.3},
-            {"name": "Agrippa", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 0.7},
-            {"name": "Mark Antony", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 1.0},
+            {
+                "name": "Octavian",
+                "command_role": "sovereign",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.3,
+            },
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.7,
+            },
+            {
+                "name": "Mark Antony",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 1.0,
+            },
         ],
     }
 
@@ -700,10 +838,18 @@ def test_weights_are_clamped_before_renormalising() -> None:
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "Octavian", "command_role": "sovereign", "hierarchy_rank": 1,
-             "attribution_weight": -5.0},
-            {"name": "Agrippa", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 50.0},
+            {
+                "name": "Octavian",
+                "command_role": "sovereign",
+                "hierarchy_rank": 1,
+                "attribution_weight": -5.0,
+            },
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 50.0,
+            },
         ],
     }
 
@@ -718,10 +864,18 @@ def test_all_zero_weights_renormalise_to_an_equal_split() -> None:
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "Octavian", "command_role": "sovereign", "hierarchy_rank": 1,
-             "attribution_weight": 0.0},
-            {"name": "Agrippa", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 0.0},
+            {
+                "name": "Octavian",
+                "command_role": "sovereign",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.0,
+            },
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.0,
+            },
         ],
     }
 
@@ -735,10 +889,18 @@ def test_overall_needs_review_flag_propagates_to_every_matched_decision() -> Non
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "Octavian", "command_role": "sovereign", "hierarchy_rank": 1,
-             "attribution_weight": 0.3},
-            {"name": "Agrippa", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 0.7},
+            {
+                "name": "Octavian",
+                "command_role": "sovereign",
+                "hierarchy_rank": 1,
+                "attribution_weight": 0.3,
+            },
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 0.7,
+            },
         ],
         "needs_review": True,
         "review_reason": "ambiguous article text",
@@ -753,10 +915,19 @@ def test_malformed_response_fields_do_not_raise() -> None:
     side = _llm_side()
     data = {
         "classifications": [
-            {"name": "Octavian", "command_role": "sovereign", "hierarchy_rank": "not-a-number",
-             "attribution_weight": "also-not-a-number", "confidence": "nope"},
-            {"name": "Agrippa", "command_role": "field_commander", "hierarchy_rank": 0,
-             "attribution_weight": 1.0},
+            {
+                "name": "Octavian",
+                "command_role": "sovereign",
+                "hierarchy_rank": "not-a-number",
+                "attribution_weight": "also-not-a-number",
+                "confidence": "nope",
+            },
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "attribution_weight": 1.0,
+            },
         ],
     }
 
@@ -775,3 +946,72 @@ def test_empty_classifications_list_falls_back_for_every_commander() -> None:
     assert all(d.attribution_method == "default_split" for d in decisions)
     assert all(d.needs_review for d in decisions)
     assert _weights_sum(decisions) == pytest.approx(1.0, abs=1e-9)
+
+
+# ─── is_defender ────────────────────────────────────────────────────────────
+
+
+def _answer(**extra: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "classifications": [
+            {
+                "name": "Octavian",
+                "command_role": "sovereign",
+                "hierarchy_rank": 1,
+                "reports_to": None,
+                "attribution_weight": 0.15,
+                "confidence": 0.8,
+                "reasoning": "present",
+            },
+            {
+                "name": "Agrippa",
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "reports_to": None,
+                "attribution_weight": 0.85,
+                "confidence": 0.9,
+                "reasoning": "fleet",
+            },
+        ],
+        "needs_review": False,
+        "review_reason": None,
+    }
+    base.update(extra)
+    return base
+
+
+def test_schema_allows_a_boolean_or_null_is_defender() -> None:
+    props = COMMAND_ROLE_RESPONSE_SCHEMA["properties"]
+
+    assert props["is_defender"] == {"type": ["boolean", "null"]}
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_a_stated_defender_flag_is_read_from_an_accepted_answer(value: bool) -> None:
+    data = _answer(is_defender=value)
+    decisions = apply_llm_classification(_llm_side(), data)
+
+    assert llm_defender_flag(decisions, data) is value
+
+
+@pytest.mark.parametrize("value", [None, "true", 1, 0])
+def test_null_or_non_boolean_flag_is_no_answer(value: object) -> None:
+    data = _answer(is_defender=value)
+    decisions = apply_llm_classification(_llm_side(), data)
+
+    assert llm_defender_flag(decisions, data) is None
+
+
+def test_a_missing_flag_key_is_no_answer() -> None:
+    data = _answer()
+    decisions = apply_llm_classification(_llm_side(), data)
+
+    assert llm_defender_flag(decisions, data) is None
+
+
+def test_a_rejected_answer_yields_no_flag() -> None:
+    data = _answer(is_defender=True)
+    data["classifications"] = list(data["classifications"])[:1]  # type: ignore[call-overload]
+    decisions = apply_llm_classification(_llm_side(), data)
+
+    assert llm_defender_flag(decisions, data) is None

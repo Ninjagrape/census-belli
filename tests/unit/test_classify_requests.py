@@ -207,3 +207,54 @@ def test_select_excerpt_falls_back_to_the_top_of_the_article_when_no_name_matche
 
 def test_select_excerpt_of_no_passages_is_empty() -> None:
     assert select_excerpt([], ["Agrippa"], max_chars=1000) == ""
+
+
+# ─── Infobox order and unresolved commanders in the prompt ──────────────────
+
+_ORDER_SPEC: dict[str, object] = {
+    "command_role_prompt": {
+        "system": "s",
+        "user_template": "{commanders_formatted}\nUnresolved: {unresolved_formatted}",
+    }
+}
+
+
+def _ordered_side(
+    *, unresolved: int = 0, orders: tuple[int | None, int | None] = (1, 0)
+) -> SideGroup:
+    names = ("Second Name", "First Name")
+    return SideGroup(
+        battle_id=1,
+        side_id=2,
+        side_label="Side",
+        battle_name="Battle of Test",
+        year_astronomical=100,
+        unresolved_count=unresolved,
+        commanders=tuple(
+            CommanderRow(
+                bc_id=i + 1,
+                battle_id=1,
+                side_id=2,
+                general_id=i + 10,
+                name=name,
+                listing_order=i,
+                infobox_order=order,
+            )
+            for i, (name, order) in enumerate(zip(names, orders, strict=True))
+        ),
+    )
+
+
+def test_infobox_position_is_numbered_in_the_user_message() -> None:
+    request = build_role_request(_ordered_side(unresolved=2), "", _ORDER_SPEC)
+
+    assert "#2 Second Name" in request.user
+    assert "#1 First Name" in request.user
+    assert "2 further commanders" in request.user
+
+
+def test_a_row_without_an_infobox_position_is_left_unnumbered() -> None:
+    request = build_role_request(_ordered_side(orders=(None, None)), "", _ORDER_SPEC)
+
+    assert "#" not in request.user
+    assert "Unresolved: none" in request.user

@@ -91,10 +91,11 @@ def test_error_severity_failure_fails_the_stage(stub_stage) -> None:
     classify.yaml's checks in order:
       all_commanders_classified  "< 200"  warning
       attribution_weights_sum    "< 50"   warning
+      battle_type_unknown_share  "< 0.10" warning
       missing_data_all_logged    "= 0"    error   <- violated below
     """
     stub_stage("classify")
-    conn = ScriptedConnection([10, 2, 47])  # 47 sides missing a log entry
+    conn = ScriptedConnection([10, 2, 0.0, 47])  # 47 sides missing a log entry
 
     result = orchestrator.run_stage("classify", db_conn=conn)
 
@@ -145,13 +146,13 @@ def test_no_connection_fails_rather_than_passes(stub_stage) -> None:
 def test_failing_gate_does_not_retry_by_default(stub_stage) -> None:
     """classify.yaml leaves retry_on_gate_failure unset, so a gate failure is final."""
     stub_stage("classify")
-    conn = ScriptedConnection([10, 2, 47] * 3)
+    conn = ScriptedConnection([10, 2, 0.0, 47] * 3)
 
     result = orchestrator.run_stage("classify", db_conn=conn)
 
     assert result.success is False
     assert result.retries_used == 0
-    assert conn.calls == 3  # 3 checks x 1 attempt
+    assert conn.calls == 4  # 4 checks x 1 attempt
 
 
 def test_failing_gate_retries_when_policy_opts_in(stub_stage) -> None:
@@ -178,7 +179,7 @@ def test_continue_with_logging_does_not_halt_pipeline(stub_stage) -> None:
     """
     stub_stage("classify")
     stub_stage("impute")
-    conn = ScriptedConnection([10, 2, 47])  # classify fails its one attempt
+    conn = ScriptedConnection([10, 2, 0.0, 47])  # classify fails its one attempt
 
     results = orchestrator.run_pipeline(
         ["classify", "impute"],

@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Final
 
@@ -50,10 +51,13 @@ from pipeline.classifiers import (
     HTML_SUFFIXES,
     BattleTypeDecision,
     ClassifyCounts,
+    MissingnessContext,
     MissingnessDecision,
     RoleDecision,
     SideGroup,
     apply_llm_classification,
+    apply_llm_missingness,
+    build_missingness_request,
     build_role_request,
     classify_missingness,
     classify_side_roles,
@@ -61,10 +65,15 @@ from pipeline.classifiers import (
     find_article_path,
     find_unclassified_battle_type_log_ids,
     infer_battle_type,
+    infer_campaign,
     infer_siege_defenders,
+    infer_terrain,
+    llm_defender_flag,
     load_battle_source_slugs,
     load_battle_wikipedia_urls,
+    load_battles_needing_terrain,
     load_battles_needing_type,
+    load_missingness_contexts,
     load_missingness_inputs,
     load_side_groups,
     load_siege_sides,
@@ -76,6 +85,7 @@ from pipeline.classifiers import (
     write_defender_flags,
     write_missingness_decisions,
     write_role_decisions,
+    write_terrain,
 )
 from pipeline.db import get_connection
 from pipeline.extractors.article import clean_article_text
@@ -86,7 +96,12 @@ from pipeline.llm.factory import llm_params
 from pipeline.llm.offline import OfflineProvider
 from pipeline.stages.base import StageContext, StageOutcome
 
-__all__ = ["LazyService", "build_pending_role_requests", "run"]
+__all__ = [
+    "LazyService",
+    "build_pending_missingness_requests",
+    "build_pending_role_requests",
+    "run",
+]
 
 logger = structlog.get_logger()
 
@@ -336,6 +351,7 @@ def _resolve_pending_roles(
     counts: ClassifyCounts,
     dry_run: bool,
     offline: OfflineProvider | None = None,
+    defender_flags: dict[int, bool] | None = None,
 ) -> dict[int, list[RoleDecision]]:
     """Resolve every pending side's request, offline or live.
 
@@ -354,6 +370,9 @@ def _resolve_pending_roles(
         dry_run: When True, requests are counted but never looked up or sent.
         offline: Collects the offline-mode cache misses for the batch file.
             Without one, a miss is only left at the fallback.
+        defender_flags: When given, filled with ``side_id`` to the LLM's
+            ``is_defender`` answer for each side whose answer was accepted
+            and stated a boolean.
 
     Returns:
         Final role decisions for every side an answer was found for, keyed
@@ -371,7 +390,7 @@ def _resolve_pending_roles(
             digest = request_hash(request, provider, model)
             cached = find_completed_call(conn, digest)
             if cached is not None:
-                resolved[side.side_id] = apply_llm_classification(side, cached)
+                _record_answer(side, cached, resolved, defender_flags)
             elif offline is not None:
                 offline.complete(request)
             continue
@@ -387,9 +406,59 @@ def _resolve_pending_roles(
             temperature=request.temperature,
         )
         if response.ok and response.data is not None:
-            resolved[side.side_id] = apply_llm_classification(side, response.data)
+            _record_answer(side, response.data, resolved, defender_flags)
 
     return resolved
+
+
+def _record_answer(
+    side: SideGroup,
+    data: dict[str, Any],
+    resolved: dict[int, list[RoleDecision]],
+    defender_flags: dict[int, bool] | None,
+) -> None:
+    """Apply one parsed role answer and note its defender flag.
+
+    Args:
+        side: The side the answer is for.
+        data: The parsed response body.
+        resolved: Role decisions by ``side_id``, updated in place.
+        defender_flags: ``side_id`` to flag, updated in place; None to ignore flags.
+    """
+    decisions = apply_llm_classification(side, data)
+    resolved[side.side_id] = decisions
+    if defender_flags is None:
+        return
+    flag = llm_defender_flag(decisions, data)
+    if flag is not None:
+        defender_flags[side.side_id] = flag
+
+
+def _usable_llm_defender_flags(
+    flags: dict[int, bool], pairs: list[tuple[SideGroup, LLMRequest]]
+) -> dict[int, bool]:
+    """Drop LLM defender flags that contradict each other within a battle.
+
+    Args:
+        flags: ``side_id`` to the LLM's flag.
+        pairs: The sides the requests were built for, to find each side's battle.
+
+    Returns:
+        ``flags`` without any battle in which more than one side was answered
+        True: two defenders is not a reading of one engagement, and which of
+        them is wrong is not recoverable, so neither is written.
+    """
+    battle_of = {side.side_id: side.battle_id for side, _request in pairs}
+    defenders_per_battle: dict[int, int] = {}
+    for side_id, flag in flags.items():
+        if flag:
+            battle = battle_of[side_id]
+            defenders_per_battle[battle] = defenders_per_battle.get(battle, 0) + 1
+    return {
+        side_id: flag
+        for side_id, flag in flags.items()
+        if defenders_per_battle.get(battle_of[side_id], 0) <= 1
+    }
 
 
 def _tally_battle_type(decision: BattleTypeDecision, counts: ClassifyCounts) -> None:
@@ -409,6 +478,10 @@ def _tally_battle_type(decision: BattleTypeDecision, counts: ClassifyCounts) -> 
         counts.battle_type_amphibious += 1
     elif decision.battle_type == "field":
         counts.battle_type_field += 1
+    elif decision.battle_type == "campaign":
+        counts.battle_type_campaign += 1
+    elif decision.battle_type == "guerrilla":
+        counts.battle_type_guerrilla += 1
     else:
         counts.battle_type_unknown += 1
 
@@ -418,7 +491,7 @@ def _infer_battle_types(
     raw_root: Path,
     counts: ClassifyCounts,
 ) -> list[BattleTypeDecision]:
-    """Infer a type for every battle still 'unknown'.
+    """Infer a type for every battle still 'unknown', and spot campaigns.
 
     Args:
         conn: An open database connection.
@@ -426,22 +499,59 @@ def _infer_battle_types(
         counts: The run's counters.
 
     Returns:
-        One decision per battle read.
+        One decision per battle read. A battle an earlier run typed by rule is
+        revisited only for the campaign rule (title and dates, no article
+        read); the decision is marked ``replaces_rule_type`` and no other
+        decision is produced for it.
     """
     decisions: list[BattleTypeDecision] = []
     for battle in load_battles_needing_type(conn):
         battle_id = battle["battle_id"]
-        article_text, categories = _load_article(
-            raw_root, battle["wikipedia_url"], battle.get("source_slug")
-        )
-        branches, strengths = load_troop_evidence(conn, battle_id)
-        decision = infer_battle_type(
-            battle_id, battle["name"], article_text or None, categories, branches, strengths
-        )
+        if battle["current_type"] != "unknown":
+            campaign = infer_campaign(battle_id, battle["name"], battle["span_days"])
+            if campaign is None:
+                continue
+            decision = replace(campaign, replaces_rule_type=True)
+        else:
+            article_text, categories = _load_article(
+                raw_root, battle["wikipedia_url"], battle.get("source_slug")
+            )
+            branches, strengths = load_troop_evidence(conn, battle_id)
+            decision = infer_battle_type(
+                battle_id,
+                battle["name"],
+                article_text or None,
+                categories,
+                branches,
+                strengths,
+                battle["span_days"],
+            )
         decisions.append(decision)
         counts.battles_typed += 1
         _tally_battle_type(decision, counts)
     return decisions
+
+
+def _infer_terrain(conn: Any, raw_root: Path) -> dict[int, tuple[list[str], str]]:
+    """Read terrain tags for every battle whose ``terrain`` is still empty.
+
+    Args:
+        conn: An open database connection.
+        raw_root: The ``data/raw`` directory, or a test fixture root.
+
+    Returns:
+        ``battle_id`` to ``(tags, evidence)`` for battles whose article
+        supports at least one tag.
+    """
+    found: dict[int, tuple[list[str], str]] = {}
+    for battle in load_battles_needing_terrain(conn):
+        article_text, _categories = _load_article(
+            raw_root, battle["wikipedia_url"], battle.get("source_slug")
+        )
+        tags, evidence = infer_terrain(article_text)
+        if tags:
+            found[battle["battle_id"]] = (tags, evidence)
+    return found
 
 
 def _siege_defender_flags(conn: Any) -> dict[int, bool]:
@@ -463,14 +573,14 @@ def _siege_defender_flags(conn: Any) -> dict[int, bool]:
 
 def _classify_missingness_rows(
     conn: Any, counts: ClassifyCounts, *, exclude_log_ids: set[int]
-) -> list[MissingnessDecision]:
+) -> tuple[list[MissingnessDecision], list[int]]:
     """Classify every still-unclassified, in-scope ``missing_data_log`` row.
 
     Args:
         conn: An open database connection.
         counts: The run's counters.
-        exclude_log_ids: ``battle_type`` rows this same run's battle-type
-            pass already resolved (see :func:`pipeline.classifiers.load
+        exclude_log_ids: ``battle_type`` and ``terrain`` rows this same run's
+            passes already resolved (see :func:`pipeline.classifiers.load
             .find_unclassified_battle_type_log_ids`). Both passes read the
             database as it was before either wrote anything, so without this
             a row the battle-type pass is about to mark 'observed' would
@@ -480,11 +590,14 @@ def _classify_missingness_rows(
             keeps the counters honest rather than relying on write order.
 
     Returns:
-        One decision per row the heuristics reached a conclusion for. A row
-        left at None by :func:`pipeline.classifiers.missingness
-        .classify_missingness` is not represented, and stays 'unclassified'.
+        ``(decisions, undecided)``: one decision per row the heuristics
+        reached a conclusion for, and the ``log_id`` of each row they left at
+        None (:func:`pipeline.classifiers.missingness.classify_missingness`),
+        which the LLM step may still answer. A row nobody answers stays
+        'unclassified'.
     """
     decisions: list[MissingnessDecision] = []
+    undecided: list[int] = []
     inputs = [
         record for record in load_missingness_inputs(conn) if record.log_id not in exclude_log_ids
     ]
@@ -492,10 +605,114 @@ def _classify_missingness_rows(
     for record in inputs:
         decision = classify_missingness(record)
         if decision is None:
-            counts.missingness_left_unclassified += 1
+            undecided.append(record.log_id)
             continue
         decisions.append(decision)
         counts.missingness_classified += 1
+    return decisions, undecided
+
+
+def _build_missingness_pairs(
+    conn: Any, log_ids: list[int], spec: dict[str, Any]
+) -> list[tuple[MissingnessContext, LLMRequest]]:
+    """Build one missingness request per row the heuristics left open.
+
+    Args:
+        conn: An open database connection.
+        log_ids: The undecided ``missing_data_log`` rows.
+        spec: The loaded ``agents/classify.yaml``.
+
+    Returns:
+        ``(context, request)`` pairs in ``log_id`` order.
+    """
+    return [
+        (context, build_missingness_request(context, spec))
+        for context in load_missingness_contexts(conn, log_ids)
+    ]
+
+
+def build_pending_missingness_requests(
+    conn: Any, spec: dict[str, Any]
+) -> list[tuple[MissingnessContext, LLMRequest]]:
+    """Build the missingness request for every row the heuristics cannot settle.
+
+    The path ``scripts/llm_offline.py`` calls, so an exported request and the
+    one the stage builds hash alike. It does not know which ``battle_type`` or
+    ``terrain`` rows the stage's own inference will settle, so it may export a
+    request the stage then never needs; that costs one answer, never a miss.
+
+    Args:
+        conn: An open database connection.
+        spec: The loaded ``agents/classify.yaml``.
+
+    Returns:
+        ``(context, request)`` pairs in ``log_id`` order.
+    """
+    undecided = [
+        record.log_id
+        for record in load_missingness_inputs(conn)
+        if classify_missingness(record) is None
+    ]
+    return _build_missingness_pairs(conn, undecided, spec)
+
+
+def _resolve_pending_missingness(
+    pairs: list[tuple[MissingnessContext, LLMRequest]],
+    conn: Any,
+    *,
+    llm_mode: str,
+    provider: str,
+    model: str,
+    service: LazyService,
+    counts: ClassifyCounts,
+    dry_run: bool,
+    offline: OfflineProvider | None,
+) -> list[MissingnessDecision]:
+    """Answer the open missingness rows from the cache, offline or live.
+
+    Args:
+        pairs: Contexts and their requests.
+        conn: An open database connection, for the offline cache lookup.
+        llm_mode: 'offline' or 'api'.
+        provider: ``params.llm_provider``, for the hash.
+        model: ``params.llm_model``, for the hash.
+        service: The stage's deferred LLM client, used only in 'api' mode.
+        counts: The run's counters.
+        dry_run: When True, requests are counted and never looked up or sent.
+        offline: Collects offline cache misses for the batch file.
+
+    Returns:
+        A decision per row an accepted answer named a mechanism for. Every
+        other row stays 'unclassified'.
+    """
+    decisions: list[MissingnessDecision] = []
+    for context, request in pairs:
+        counts.llm_calls += 1
+        if dry_run:
+            continue
+        data: dict[str, Any] | None = None
+        if llm_mode == "offline":
+            data = find_completed_call(conn, request_hash(request, provider, model))
+            if data is None and offline is not None:
+                offline.complete(request)
+        else:
+            response = service.get().complete(
+                system=request.system,
+                user=request.user,
+                json_schema=request.json_schema,
+                schema_name=request.schema_name,
+                metadata=request.metadata,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+            )
+            if response.ok:
+                data = response.data
+        if data is None:
+            continue
+        decision = apply_llm_missingness(context.log_id, data)
+        if decision is not None:
+            decisions.append(decision)
+            counts.missingness_llm_classified += 1
     return decisions
 
 
@@ -554,6 +771,7 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
     )
 
     offline = OfflineProvider(provider, model) if llm_mode == "offline" else None
+    llm_defenders: dict[int, bool] = {}
     resolved = _resolve_pending_roles(
         pairs,
         conn,
@@ -564,6 +782,7 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
         counts=counts,
         dry_run=ctx.dry_run,
         offline=offline,
+        defender_flags=llm_defenders,
     )
     decisions_by_side.update(resolved)
 
@@ -574,22 +793,45 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
     battle_type_decisions = _infer_battle_types(conn, raw_root, counts)
     observed_battle_ids = {d.battle_id for d in battle_type_decisions if d.battle_type != "unknown"}
     exclude_log_ids = find_unclassified_battle_type_log_ids(conn, observed_battle_ids)
+    terrain_by_battle = _infer_terrain(conn, raw_root)
+    exclude_log_ids |= find_unclassified_battle_type_log_ids(
+        conn, set(terrain_by_battle), "terrain"
+    )
     if not ctx.dry_run:
         # Before the missingness read, so a newly logged gap is classified in
         # this same run rather than waiting for the next.
         counts.troop_gaps_logged = log_unlogged_troop_totals(conn)
-    missingness_decisions = _classify_missingness_rows(
+    missingness_decisions, undecided = _classify_missingness_rows(
         conn, counts, exclude_log_ids=exclude_log_ids
     )
+    missingness_decisions += _resolve_pending_missingness(
+        _build_missingness_pairs(conn, undecided, spec),
+        conn,
+        llm_mode=llm_mode,
+        provider=provider,
+        model=model,
+        service=service,
+        counts=counts,
+        dry_run=ctx.dry_run,
+        offline=offline,
+    )
+    counts.missingness_left_unclassified = len(undecided) - counts.missingness_llm_classified
 
     if ctx.dry_run:
+        counts.terrain_set = len(terrain_by_battle)
         logger.info("classify_dry_run", **counts.as_dict())
         return None
 
     write_role_decisions(conn, all_role_decisions)
     write_battle_type_decisions(conn, battle_type_decisions)
+    counts.terrain_set = write_terrain(conn, terrain_by_battle)
     write_missingness_decisions(conn, missingness_decisions)
+    # The siege-title rule first: it reads the besieged place off the title,
+    # which beats the model's reading, and the writer only fills NULLs.
     counts.defenders_set = write_defender_flags(conn, _siege_defender_flags(conn))
+    counts.defenders_set += write_defender_flags(
+        conn, _usable_llm_defender_flags(llm_defenders, pairs)
+    )
 
     if service.built is not None:
         service.built.log_summary()

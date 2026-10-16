@@ -33,6 +33,7 @@ from pipeline.llm.base import LLMRequest
 
 __all__ = [
     "build_role_request",
+    "format_year",
     "select_excerpt",
 ]
 
@@ -42,7 +43,7 @@ _DEFAULT_MAX_TOKENS: Final[int] = 4096
 _SURNAME_RE: Final = re.compile(r"[^\w'-]+", re.UNICODE)
 
 
-def _format_date(year_astronomical: int | None) -> str:
+def format_year(year_astronomical: int | None) -> str:
     """Render a battle year for the prompt.
 
     Args:
@@ -70,12 +71,35 @@ def _format_commanders(commanders: Sequence[CommanderRow]) -> str:
             listing order for a stable, deterministic prompt).
 
     Returns:
-        One line per commander, in listing order.
+        One line per commander, in listing order. A commander whose infobox
+        position is recorded is numbered by it ("#1" is the first name the
+        infobox gives); a row with no recorded position is left unnumbered
+        rather than presenting a database insert order as the infobox's.
     """
     ordered = sorted(commanders, key=lambda c: c.listing_order)
     if not ordered:
         return "(none)"
-    return "\n".join(f"- {c.name} (apparent role: {c.apparent_role})" for c in ordered)
+    lines = []
+    for c in ordered:
+        position = f"#{c.infobox_order + 1} " if c.infobox_order is not None else ""
+        lines.append(f"- {position}{c.name} (apparent role: {c.apparent_role})")
+    return "\n".join(lines)
+
+
+def _format_unresolved(count: int) -> str:
+    """Render the unresolved-mention line of the prompt.
+
+    Args:
+        count: ``SideGroup.unresolved_count``.
+
+    Returns:
+        A sentence saying how many further commanders the infobox named that
+        could not be identified, or that there were none.
+    """
+    if count <= 0:
+        return "none"
+    noun = "commander" if count == 1 else "commanders"
+    return f"{count} further {noun} named in the infobox could not be identified and are not listed"
 
 
 def _format_role_evidence(commanders: Sequence[CommanderRow]) -> str:
@@ -198,9 +222,10 @@ def build_role_request(side: SideGroup, article_excerpt: str, spec: dict[str, An
 
     user = str(template).format(
         battle_name=side.battle_name,
-        date=_format_date(side.year_astronomical),
+        date=format_year(side.year_astronomical),
         side_label=side.side_label,
         commanders_formatted=_format_commanders(side.commanders),
+        unresolved_formatted=_format_unresolved(side.unresolved_count),
         role_evidence_formatted=_format_role_evidence(side.commanders),
         article_excerpt=article_excerpt,
     )

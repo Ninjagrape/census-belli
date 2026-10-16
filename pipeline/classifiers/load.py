@@ -31,7 +31,7 @@ from sqlalchemy import text
 
 from pipeline.classifiers.defender import SideLabel
 from pipeline.classifiers.missingness import IMPUTE_FIELDS, MissingnessInput
-from pipeline.classifiers.records import CommanderRow, SideGroup
+from pipeline.classifiers.records import CommanderRow, MissingnessContext, SideGroup
 from pipeline.crawlers.wikipedia import article_filename
 
 __all__ = [
@@ -41,7 +41,9 @@ __all__ = [
     "load_battle_source_slugs",
     "find_unclassified_battle_type_log_ids",
     "load_battle_wikipedia_urls",
+    "load_battles_needing_terrain",
     "load_battles_needing_type",
+    "load_missingness_contexts",
     "load_missingness_inputs",
     "load_side_groups",
     "load_siege_sides",
@@ -73,12 +75,15 @@ _LOAD_SIDE_GROUPS = text(
         bc.bc_id, bc.battle_id, bc.side_id, bc.general_id,
         g.canonical_name, bc.command_role, COALESCE(bc.role_evidence, ''),
         bs.side_label, b.name, b.year_astronomical,
-        COALESCE(bc.attribution_method, 'equal')
+        COALESCE(bc.attribution_method, 'equal'),
+        bc.infobox_order,
+        (SELECT COUNT(*) FROM missing_data_log mdl
+         WHERE mdl.side_id = bc.side_id AND mdl.field_name = 'commander_general_id')
     FROM battle_commanders bc
     JOIN generals g ON g.general_id = bc.general_id
     JOIN battle_sides bs ON bs.side_id = bc.side_id
     JOIN battles b ON b.battle_id = bc.battle_id
-    ORDER BY bc.side_id, bc.bc_id
+    ORDER BY bc.side_id, bc.infobox_order NULLS LAST, bc.bc_id
     """
 )
 
@@ -91,15 +96,18 @@ def load_side_groups(conn: Any) -> list[SideGroup]:
 
     Returns:
         One :class:`SideGroup` per ``(battle_id, side_id)``, in ``side_id``
-        order, each carrying its commanders in ``bc_id`` order.
+        order, each carrying its commanders in infobox order.
 
-        **Listing order.** The extract stage's infobox listing order is not
-        persisted anywhere resolve or classify can read -- ``battle_commanders``
-        carries no such column, and resolve's mention-to-row write does not
-        preserve it either. ``bc_id`` order is the best surviving proxy: rows
-        are written in the order resolve processed each identity, which for
-        an infobox-derived mention tracks the order it was extracted in. This
-        is a documented approximation, not a fact recovered from the data.
+        **Listing order.** Commanders are sorted by ``battle_commanders.infobox_order``
+        (the infobox position extract and resolve record), rows with no position
+        after those that have one, ``bc_id`` breaking ties. ``bc_id`` order alone
+        is the old approximation (resolve's insert order) and still applies to
+        rows that carry no infobox position; ``CommanderRow.infobox_order`` stays
+        None for them so the prompt never presents a guess as the infobox order.
+
+        **Unresolved mentions.** ``SideGroup.unresolved_count`` is the number of
+        ``commander_general_id`` rows in ``missing_data_log`` for the side: people
+        the infobox listed whom resolve could not identify.
 
         **``apparent_role``.** Extract's own guess at a role
         (``CommanderRow.apparent_role``, a different vocabulary from
@@ -127,6 +135,8 @@ def load_side_groups(conn: Any) -> list[SideGroup]:
         battle_name,
         year_astronomical,
         attribution_method,
+        infobox_order,
+        unresolved_count,
     ) in rows:
         side_id = int(side_id)
         if side_id not in sides:
@@ -137,6 +147,7 @@ def load_side_groups(conn: Any) -> list[SideGroup]:
                 "year_astronomical": (
                     int(year_astronomical) if year_astronomical is not None else None
                 ),
+                "unresolved_count": int(unresolved_count or 0),
                 "commanders": [],
             }
             side_order.append(side_id)
@@ -155,6 +166,7 @@ def load_side_groups(conn: Any) -> list[SideGroup]:
                 apparent_role="unclear",
                 listing_order=listing_order,
                 attribution_method=str(attribution_method),
+                infobox_order=int(infobox_order) if infobox_order is not None else None,
             )
         )
 
@@ -166,6 +178,7 @@ def load_side_groups(conn: Any) -> list[SideGroup]:
             battle_name=sides[side_id]["battle_name"],
             year_astronomical=sides[side_id]["year_astronomical"],
             commanders=tuple(sides[side_id]["commanders"]),
+            unresolved_count=sides[side_id]["unresolved_count"],
         )
         for side_id in side_order
     ]
@@ -177,8 +190,36 @@ _LOAD_BATTLE_URLS = text("SELECT battle_id, wikipedia_url FROM battles")
 
 _LOAD_BATTLE_SLUGS = text("SELECT battle_id, source_slug FROM battles")
 
+# Unknown battles, plus battles an earlier classify run typed by rule (its
+# missing_data_log note says "classify: inferred"). The second group is read
+# only so the campaign rule can reclassify them; nothing a person or extract set
+# is ever selected. date_end - date_start is computed here because a BC date
+# cannot be held by datetime.date, and is trusted only at day precision.
 _LOAD_BATTLES_NEEDING_TYPE = text(
-    "SELECT battle_id, name, wikipedia_url, source_slug FROM battles WHERE battle_type = 'unknown'"
+    """
+    SELECT b.battle_id, b.name, b.wikipedia_url, b.source_slug,
+           CAST(b.battle_type AS TEXT),
+           CASE WHEN b.date_precision = 'day' AND b.date_end IS NOT NULL
+                THEN b.date_end - b.date_start END AS span_days
+    FROM battles b
+    WHERE b.battle_type = 'unknown'
+       OR (b.battle_type <> 'campaign'
+           AND EXISTS (
+               SELECT 1 FROM missing_data_log mdl
+               WHERE mdl.battle_id = b.battle_id
+                 AND mdl.field_name = 'battle_type'
+                 AND mdl.notes LIKE 'classify: inferred%'))
+    ORDER BY b.battle_id
+    """
+)
+
+_LOAD_BATTLES_NEEDING_TERRAIN = text(
+    """
+    SELECT battle_id, wikipedia_url, source_slug
+    FROM battles
+    WHERE terrain IS NULL OR cardinality(terrain) = 0
+    ORDER BY battle_id
+    """
 )
 
 _LOAD_TROOP_EVIDENCE = text(
@@ -218,19 +259,47 @@ def load_battle_source_slugs(conn: Any) -> dict[int, str | None]:
 
 
 def load_battles_needing_type(conn: Any) -> list[dict[str, Any]]:
-    """List battles whose ``battle_type`` is still 'unknown'.
+    """List battles classify may still type, with what the campaign rule needs.
 
     Args:
         conn: An open database connection.
 
     Returns:
         One mapping per battle with ``battle_id``, ``name``,
-        ``wikipedia_url`` and ``source_slug``, the inputs :func:`pipeline.classifiers.battle_type
-        .infer_battle_type` and this module's own file lookup need.
+        ``wikipedia_url``, ``source_slug``, ``current_type`` and ``span_days``.
+        ``current_type`` is 'unknown' for a battle nothing has typed, or the
+        type an earlier classify run chose by rule; only the campaign rule may
+        change the latter (a type extract or a person set is never listed).
+        ``span_days`` is None unless both dates are known to the day.
     """
     return [
-        {"battle_id": int(bid), "name": str(name), "wikipedia_url": url, "source_slug": slug}
-        for bid, name, url, slug in conn.execute(_LOAD_BATTLES_NEEDING_TYPE).fetchall()
+        {
+            "battle_id": int(bid),
+            "name": str(name),
+            "wikipedia_url": url,
+            "source_slug": slug,
+            "current_type": str(current_type),
+            "span_days": int(span) if span is not None else None,
+        }
+        for bid, name, url, slug, current_type, span in conn.execute(
+            _LOAD_BATTLES_NEEDING_TYPE
+        ).fetchall()
+    ]
+
+
+def load_battles_needing_terrain(conn: Any) -> list[dict[str, Any]]:
+    """List battles whose ``terrain`` is still NULL or empty.
+
+    Args:
+        conn: An open database connection.
+
+    Returns:
+        One mapping per battle with ``battle_id``, ``wikipedia_url`` and
+        ``source_slug``, for the article lookup.
+    """
+    return [
+        {"battle_id": int(bid), "wikipedia_url": url, "source_slug": slug}
+        for bid, url, slug in conn.execute(_LOAD_BATTLES_NEEDING_TERRAIN).fetchall()
     ]
 
 
@@ -331,13 +400,15 @@ _FIND_BATTLE_TYPE_LOG_IDS = text(
     """
     SELECT log_id FROM missing_data_log
     WHERE battle_id = ANY(CAST(:battle_ids AS INT[]))
-      AND field_name = 'battle_type'
+      AND field_name = :field_name
       AND missingness_class = 'unclassified'
     """
 )
 
 
-def find_unclassified_battle_type_log_ids(conn: Any, battle_ids: set[int]) -> set[int]:
+def find_unclassified_battle_type_log_ids(
+    conn: Any, battle_ids: set[int], field_name: str = "battle_type"
+) -> set[int]:
     """Find the still-'unclassified' ``battle_type`` row for each battle given.
 
     Used to keep the missingness pass from reconsidering a row the
@@ -351,8 +422,9 @@ def find_unclassified_battle_type_log_ids(conn: Any, battle_ids: set[int]) -> se
 
     Args:
         conn: An open database connection.
-        battle_ids: Battles whose ``battle_type`` was inferred as something
-            other than 'unknown' this run.
+        battle_ids: Battles whose ``battle_type`` (or ``field_name``) was
+            inferred this run.
+        field_name: The ``missing_data_log`` field, 'battle_type' or 'terrain'.
 
     Returns:
         The matching ``missing_data_log.log_id`` values. Empty when
@@ -360,16 +432,20 @@ def find_unclassified_battle_type_log_ids(conn: Any, battle_ids: set[int]) -> se
     """
     if not battle_ids:
         return set()
-    rows = conn.execute(_FIND_BATTLE_TYPE_LOG_IDS, {"battle_ids": sorted(battle_ids)}).fetchall()
+    rows = conn.execute(
+        _FIND_BATTLE_TYPE_LOG_IDS, {"battle_ids": sorted(battle_ids), "field_name": field_name}
+    ).fetchall()
     return {int(row[0]) for row in rows}
 
 
 _LOAD_UNCLASSIFIED_ROWS = text(
     """
     SELECT mdl.log_id, mdl.field_name, mdl.missingness_class,
-           mdl.battle_id, mdl.side_id, b.year_astronomical
+           mdl.battle_id, mdl.side_id, b.year_astronomical,
+           bs.polity, bs.side_label
     FROM missing_data_log mdl
     JOIN battles b ON b.battle_id = mdl.battle_id
+    LEFT JOIN battle_sides bs ON bs.side_id = mdl.side_id
     WHERE mdl.missingness_class = 'unclassified'
       AND mdl.field_name = ANY(CAST(:fields AS TEXT[]))
     """
@@ -446,7 +522,7 @@ def load_missingness_inputs(conn: Any) -> list[MissingnessInput]:
             outcome_by_side[int(side_id)] = outcome
 
     inputs: list[MissingnessInput] = []
-    for log_id, field_name, current_class, battle_id, side_id, year in rows:
+    for log_id, field_name, current_class, battle_id, side_id, year, polity, side_label in rows:
         battle_id = int(battle_id)
         side_id = int(side_id) if side_id is not None else None
         troop_sides = troop_sides_by_battle.get(battle_id, set())
@@ -472,10 +548,88 @@ def load_missingness_inputs(conn: Any) -> list[MissingnessInput]:
                 other_side_has_troops=other_side_has_troops,
                 any_side_has_troops=any_side_has_troops,
                 side_outcome=side_outcome,
+                side_polity=str(polity) if polity else None,
+                side_label=str(side_label) if side_label else None,
             )
         )
 
     return inputs
+
+
+_LOAD_MISSINGNESS_CONTEXTS = text(
+    """
+    SELECT mdl.log_id, mdl.battle_id, mdl.field_name, b.name, b.year_astronomical,
+           w.name, b.location_name, bs.side_label, bs.polity, CAST(bs.outcome AS TEXT),
+           COALESCE(bs.est_troops_total IS NOT NULL, FALSE),
+           COALESCE(bs.est_casualties IS NOT NULL, FALSE),
+           EXISTS (SELECT 1 FROM battle_sides o
+                   WHERE o.battle_id = mdl.battle_id
+                     AND o.side_id IS DISTINCT FROM mdl.side_id
+                     AND o.est_troops_total IS NOT NULL),
+           EXISTS (SELECT 1 FROM battle_sides o
+                   WHERE o.battle_id = mdl.battle_id
+                     AND o.side_id IS DISTINCT FROM mdl.side_id
+                     AND o.est_casualties IS NOT NULL)
+    FROM missing_data_log mdl
+    JOIN battles b ON b.battle_id = mdl.battle_id
+    LEFT JOIN wars w ON w.war_id = b.war_id
+    LEFT JOIN battle_sides bs ON bs.side_id = mdl.side_id
+    WHERE mdl.log_id = ANY(CAST(:log_ids AS INT[]))
+    ORDER BY mdl.log_id
+    """
+)
+
+
+def load_missingness_contexts(conn: Any, log_ids: list[int]) -> list[MissingnessContext]:
+    """Read what the missingness prompt needs for the given log rows.
+
+    Args:
+        conn: An open database connection.
+        log_ids: The ``missing_data_log`` rows the heuristics left open.
+
+    Returns:
+        One context per row, in ``log_id`` order. Only facts the classify
+        stage does not rewrite are read, so the same row yields the same
+        context before and after a run (see
+        :class:`pipeline.classifiers.records.MissingnessContext`).
+    """
+    if not log_ids:
+        return []
+    rows = conn.execute(_LOAD_MISSINGNESS_CONTEXTS, {"log_ids": sorted(log_ids)}).fetchall()
+    return [
+        MissingnessContext(
+            log_id=int(log_id),
+            battle_id=int(battle_id),
+            field_name=str(field_name),
+            battle_name=str(battle_name),
+            year_astronomical=int(year) if year is not None else None,
+            war_name=str(war) if war else None,
+            region=str(region) if region else None,
+            side_label=str(label) if label else None,
+            polity=str(polity) if polity else None,
+            outcome=str(outcome) if outcome else None,
+            this_side_has_troops=bool(this_troops),
+            other_side_has_troops=bool(other_troops),
+            this_side_has_casualties=bool(this_cas),
+            other_side_has_casualties=bool(other_cas),
+        )
+        for (
+            log_id,
+            battle_id,
+            field_name,
+            battle_name,
+            year,
+            war,
+            region,
+            label,
+            polity,
+            outcome,
+            this_troops,
+            this_cas,
+            other_troops,
+            other_cas,
+        ) in rows
+    ]
 
 
 # ─── Defender step ───────────────────────────────────────────────────────────

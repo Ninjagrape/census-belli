@@ -225,7 +225,7 @@ def _classify_requests(
     spec: dict[str, Any],
     processed_root: Path,
 ) -> list[LLMRequest]:
-    """Build classify-stage command-role requests for every pending side.
+    """Build classify-stage requests: command roles and open missingness rows.
 
     Delegates to ``pipeline.stages.classify.build_pending_role_requests``,
     the same function the live stage's offline and api LLM steps call, so a
@@ -249,7 +249,10 @@ def _classify_requests(
     del processed_root  # classify's inputs are all in the database
 
     from pipeline.db import get_connection
-    from pipeline.stages.classify import build_pending_role_requests
+    from pipeline.stages.classify import (
+        build_pending_missingness_requests,
+        build_pending_role_requests,
+    )
 
     params = spec.get("params", {}) or {}
     raw_root = Path(str(params.get("raw_root", "data/raw")))
@@ -257,12 +260,16 @@ def _classify_requests(
 
     try:
         with get_connection() as conn:
-            return [
+            role_requests = [
                 request
                 for _side, request in build_pending_role_requests(
                     conn, raw_root, spec, excerpt_max_chars=excerpt_max_chars
                 )
             ]
+            missingness_requests = [
+                request for _context, request in build_pending_missingness_requests(conn, spec)
+            ]
+            return role_requests + missingness_requests
     except Exception as e:
         logger.warning("classify_requests_needs_database", error=str(e))
         return []

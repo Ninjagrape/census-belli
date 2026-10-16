@@ -26,11 +26,17 @@ from collections.abc import Sequence
 from typing import Final
 from urllib.parse import unquote
 
+import structlog
+
 from pipeline.classifiers.records import BattleTypeDecision
 
+logger = structlog.get_logger()
+
 __all__ = [
+    "CAMPAIGN_MIN_SPAN_DAYS",
     "extract_categories",
     "infer_battle_type",
+    "infer_campaign",
 ]
 
 _CATEGORY_RE: Final = re.compile(r"\[\[\s*Category\s*:\s*([^\]|]+)", re.IGNORECASE)
@@ -39,6 +45,39 @@ _HTML_CATEGORY_RE: Final = re.compile(r'href="/wiki/Category:([^"#?]+)', re.IGNO
 
 _SIEGE_NAME_RE: Final = re.compile(r"^\s*siege of\b", re.IGNORECASE)
 _SIEGE_CATEGORY_RE: Final = re.compile(r"\bsieges?\b", re.IGNORECASE)
+# "Sieges involving Israel" is a Wikipedia country-grouping category that sits
+# on articles about operations (Operation Badr) as well as on sieges; it names a
+# participant, not the kind of event, so it is not a siege signal.
+_INVOLVING_CATEGORY_RE: Final = re.compile(r"\binvolving\b", re.IGNORECASE)
+
+# A war or a multi-month operation is not a battle, and the model excludes it.
+# "War" is case-sensitive so "Warsaw" and "wartime" never match. A title that
+# also says battle, siege, skirmish or raid names an engagement inside a war.
+_WAR_NAME_RE: Final = re.compile(r"\bWars?\b")
+_CAMPAIGN_WORD_RE: Final = re.compile(r"\bcampaigns?\b", re.IGNORECASE)
+_ENGAGEMENT_NAME_RE: Final = re.compile(r"\b(?:battles?|sieges?|skirmish|raid)\b", re.IGNORECASE)
+# A title that is itself an invasion or conquest names a multi-phase operation.
+_CAMPAIGN_OPERATION_NAME_RE: Final = re.compile(
+    r"\b(?:invasions?|conquests?)\s+of\b", re.IGNORECASE
+)
+# Titles that name one engagement are never demoted on dates alone: Verdun
+# (300 days), Stalingrad and the Siege of Leningrad really are single "battles"
+# in the literature, and a span rule cannot tell them from an operation.
+_ENGAGEMENT_TITLE_PREFIX_RE: Final = re.compile(r"^\s*(?:battles?|sieges?)\s+of\b", re.IGNORECASE)
+# Longer than this, for a title that does not name an engagement, and the
+# article covers an operation, not a single engagement.
+CAMPAIGN_MIN_SPAN_DAYS: Final[int] = 180
+
+# Guerrilla only from the word itself in a category, or repeated in the text.
+# Insurgency vocabulary is deliberately not used: urban set-piece battles of an
+# insurgency (the Battles of Fallujah) are full of it and are not guerrilla fights.
+_GUERRILLA_CATEGORY_RE: Final = re.compile(r"\bguerrilla\b", re.IGNORECASE)
+_GUERRILLA_TEXT_RE: Final = re.compile(r"\bguerrillas?\b", re.IGNORECASE)
+_GUERRILLA_MIN_MENTIONS: Final[int] = 4
+# Text rules (guerrilla, amphibious) also need density: a long article that
+# mentions a word four times in 100,000 characters is not about it. One mention
+# per 1000 characters is roughly a mention per screen of text.
+_MIN_MENTIONS_PER_1000_CHARS: Final[float] = 1.0
 
 _NAVAL_CATEGORY_RE: Final = re.compile(
     r"\bnaval (?:battles?|engagements?|operations?|actions?)\b", re.IGNORECASE
@@ -67,6 +106,8 @@ _AERIAL_CATEGORY_RE: Final = re.compile(
 _AMPHIBIOUS_RE: Final = re.compile(r"\bamphibious\b", re.IGNORECASE)
 _AMPHIBIOUS_NAME_RE: Final = re.compile(r"\bamphibious\b|\blandings?\b", re.IGNORECASE)
 _AMPHIBIOUS_MIN_MENTIONS: Final[int] = 3
+# How much of the article counts as its lead for "said it up front" signals.
+_LEAD_CHARS: Final[int] = 1500
 
 _LAND_BRANCHES: Final[frozenset[str]] = frozenset({"infantry", "cavalry", "artillery", "armour"})
 
@@ -111,6 +152,86 @@ def extract_categories(wikitext: str) -> list[str]:
     return list(dict.fromkeys(n for n in names if n))
 
 
+def infer_campaign(
+    battle_id: int, battle_name: str, span_days: int | None = None
+) -> BattleTypeDecision | None:
+    """Recognise an article that covers a war or a multi-month operation.
+
+    Needs no article text, so it also runs over battles an earlier pass typed
+    by rule (see ``write_battle_type_decisions``).
+
+    Args:
+        battle_id: The battle this decision is about.
+        battle_name: The article title.
+        span_days: ``date_end - date_start`` in days when both are known to the
+            day, else None. Computed in SQL because a BC date cannot be held
+            by ``datetime.date``.
+
+    Returns:
+        A 'campaign' decision when the title names a war or campaign without
+        also naming a battle, siege or raid, or when the dates span more than
+        ``CAMPAIGN_MIN_SPAN_DAYS``; None otherwise.
+    """
+    name = battle_name or ""
+    engagement = _ENGAGEMENT_NAME_RE.search(name) is not None
+    if not engagement and (_WAR_NAME_RE.search(name) or _CAMPAIGN_WORD_RE.search(name)):
+        return _campaign(
+            battle_id, name, "title names a war or campaign, not a battle or siege", 0.9
+        )
+    if not engagement and _CAMPAIGN_OPERATION_NAME_RE.search(name):
+        return _campaign(
+            battle_id, name, "title names an invasion or conquest, not a battle or siege", 0.85
+        )
+    if (
+        span_days is not None
+        and span_days > CAMPAIGN_MIN_SPAN_DAYS
+        and not _ENGAGEMENT_TITLE_PREFIX_RE.match(name)
+    ):
+        return _campaign(
+            battle_id,
+            name,
+            f"dates span {span_days} days (more than {CAMPAIGN_MIN_SPAN_DAYS})",
+            0.8,
+        )
+    return None
+
+
+def _campaign(battle_id: int, name: str, reason: str, confidence: float) -> BattleTypeDecision:
+    """Build a campaign decision and log why the battle was demoted.
+
+    Args:
+        battle_id: The battle this decision is about.
+        name: The article title.
+        reason: The evidence line stored with the decision.
+        confidence: Confidence in the demotion.
+
+    Returns:
+        A 'campaign' decision.
+    """
+    logger.info("classify_campaign_demoted", battle_id=battle_id, battle_name=name, reason=reason)
+    return BattleTypeDecision(
+        battle_id=battle_id,
+        battle_type="campaign",
+        fortified=None,
+        evidence=reason,
+        confidence=confidence,
+    )
+
+
+def _mention_density(pattern: re.Pattern[str], text: str) -> tuple[int, float]:
+    """Count a pattern's matches and their rate per 1000 characters.
+
+    Args:
+        pattern: The word to count.
+        text: The article text; may be empty.
+
+    Returns:
+        ``(mentions, mentions per 1000 characters)``; the rate is 0.0 for no text.
+    """
+    mentions = len(pattern.findall(text))
+    return mentions, (mentions * 1000.0 / len(text)) if text else 0.0
+
+
 def infer_battle_type(
     battle_id: int,
     battle_name: str,
@@ -118,11 +239,18 @@ def infer_battle_type(
     categories: Sequence[str],
     troop_branches: Sequence[str],
     strength_strings: Sequence[str],
+    span_days: int | None = None,
 ) -> BattleTypeDecision:
     """Infer a battle's type from whatever evidence extraction produced.
 
     Checked in order, each a stronger or cheaper signal than the next:
 
+    0. **Campaign**, from a title that names a war or campaign, or dates that
+       span more than 180 days (:func:`infer_campaign`; a title starting
+       "Battle of"/"Siege of" is exempt from the span rule, and an
+       "Invasion of"/"Conquest of" title is a campaign). It wins over every
+       other type: an article about a war is not a battle whatever its
+       categories say, and the model excludes it.
     1. **Siege**, from the battle's name or a "Sieges ..." category. Neither
        needs an article read, so this is checked first regardless of what
        else is available. The schema's ``battle_type`` enum has only one
@@ -132,12 +260,19 @@ def infer_battle_type(
        which is a per-side fact this article-level function does not carry.
        By convention, then, ``siege_offensive`` here means "this was a
        siege", and any per-side defender/attacker distinction is left
-       unrecorded rather than guessed.
+       unrecorded rather than guessed. ``siege_defensive`` is never produced:
+       which side was besieged is ``battle_sides.is_defender``, set per side
+       from the title and from the role classification, so a second article-level
+       value would only repeat it. A category of the form "Sieges involving X"
+       counts only when the article lead also says "siege" (Operation Badr
+       carries one and its lead does not).
     2. **Amphibious**, when there is evidence of both naval and land
        forces *and* the battle name says "amphibious"/"landing" or the
        article says "amphibious" at least three times. A bare "landing" in
        article text is not enough (Harrison's Landing, Malvern Hill), and a
-       category such as "Amphibious operations" is not either (Marathon).
+       category such as "Amphibious operations" is not either (Marathon). With
+       no troop-branch evidence the article alone suffices only when it says
+       "amphibious" at least three times, the first within its lead.
     3. **Naval**, from a naval category; or from ship vocabulary that
        dominates the strength strings (at least as many distinct strings mention
        ships as do not); or from a fleet-only report set (only 'naval'/'total'
@@ -146,14 +281,18 @@ def infer_battle_type(
     4. **Aerial**, from an air-battle category, unless ground-force branches
        are reported too. Checked before the ship-vocabulary match (but after
        a naval category), since air battles use "squadrons" and "carriers" too.
-    5. **Field**, but *only* when ``article_text`` is non-empty, i.e. an
+    5. **Guerrilla**, from a category naming guerrilla warfare, or the word
+       "guerrilla" at least four times in the article, once in its lead and
+       at least one mention per 1000 characters. After the naval and
+       aerial checks, so a fleet action is never guerrilla.
+    6. **Field**, but *only* when ``article_text`` is non-empty, i.e. an
        article was actually read and carried none of the above signals.
        Defaulting to 'field' when no article was read would recreate
        §4.2's bug with the sign flipped: instead of every naval battle
        mislabelled 'field', every *unread* battle would be, silently, and
        an unread battle is exactly the one this function has the least
        business guessing about.
-    6. **Unknown**, otherwise -- no article, no category, no troop or
+    7. **Unknown**, otherwise -- no article, no category, no troop or
        strength signal. Left for a human or a later pass, not guessed.
 
     Args:
@@ -169,12 +308,18 @@ def infer_battle_type(
             battle's troop reports (from any source, any side).
         strength_strings: Raw strength-field or troop-report text, searched
             for ship vocabulary the branch alone might not have captured.
+        span_days: ``date_end - date_start`` in days when known, for the
+            campaign rule.
 
     Returns:
         A decision carrying the matched evidence and a confidence that is
         highest for an explicit category, lower for an inferred branch or
         vocabulary match, and 0.0 for 'unknown'.
     """
+    campaign = infer_campaign(battle_id, battle_name, span_days)
+    if campaign is not None:
+        return campaign
+
     if _SIEGE_NAME_RE.match(battle_name or ""):
         return BattleTypeDecision(
             battle_id=battle_id,
@@ -184,7 +329,18 @@ def infer_battle_type(
             confidence=0.95,
         )
 
-    siege_category = next((c for c in categories if _SIEGE_CATEGORY_RE.search(c)), None)
+    # "Sieges involving X" is a participant grouping, so it counts only when the
+    # article's own lead says "siege" (Operation Badr's lead does not).
+    lead_says_siege = _SIEGE_CATEGORY_RE.search((article_text or "")[:_LEAD_CHARS]) is not None
+    siege_category = next(
+        (
+            c
+            for c in categories
+            if _SIEGE_CATEGORY_RE.search(c)
+            and (lead_says_siege or not _INVOLVING_CATEGORY_RE.search(c))
+        ),
+        None,
+    )
     if siege_category is not None:
         return BattleTypeDecision(
             battle_id=battle_id,
@@ -214,10 +370,12 @@ def infer_battle_type(
     # fleet-only engagement (Okpo, Artemisium); a land branch alongside means
     # the naval report may be one detachment of a land battle (Malvern Hill).
     naval_only_forces = has_naval_branch and not (branches_lower - {"naval", "total"})
-    amphibious_mentioned = (
-        bool(_AMPHIBIOUS_NAME_RE.search(battle_name or ""))
-        or len(_AMPHIBIOUS_RE.findall(article_text or "")) >= _AMPHIBIOUS_MIN_MENTIONS
+    amphibious_count, amphibious_density = _mention_density(_AMPHIBIOUS_RE, article_text or "")
+    amphibious_dense = (
+        amphibious_count >= _AMPHIBIOUS_MIN_MENTIONS
+        and amphibious_density >= _MIN_MENTIONS_PER_1000_CHARS
     )
+    amphibious_mentioned = bool(_AMPHIBIOUS_NAME_RE.search(battle_name or "")) or amphibious_dense
 
     # A naval branch alone is weak evidence of a naval battle (a land battle
     # can carry one marine or naval-brigade report), but together with land
@@ -232,7 +390,25 @@ def infer_battle_type(
             confidence=0.75,
         )
 
-    if naval_category is not None:
+    lead = (article_text or "")[:_LEAD_CHARS]
+    if amphibious_dense and _AMPHIBIOUS_RE.search(lead) is not None:
+        # No troop-branch evidence needed: the article says so repeatedly and
+        # up front (Inchon, Gallipoli). Weaker than the branch-backed rule.
+        return BattleTypeDecision(
+            battle_id=battle_id,
+            battle_type="amphibious",
+            fortified=None,
+            evidence="article says 'amphibious' repeatedly, first in its lead",
+            confidence=0.6,
+        )
+
+    # A naval category is dropped when land reports outnumber naval ones and no
+    # ship vocabulary dominates: Fort Donelson sits in a naval category for its
+    # gunboats but is a land battle by its strength reports. Actium keeps its
+    # category because its naval reports match its land ones (ship_match is set
+    # above).
+    land_outweighs_naval = n_land > n_naval and ship_match is None
+    if naval_category is not None and not land_outweighs_naval:
         return BattleTypeDecision(
             battle_id=battle_id,
             battle_type="naval",
@@ -270,6 +446,26 @@ def infer_battle_type(
             fortified=None,
             evidence=f"ship vocabulary in strength text: {ship_match.group(0)!r}",
             confidence=0.75 if has_naval_branch else 0.6,
+        )
+
+    guerrilla_category = next((c for c in categories if _GUERRILLA_CATEGORY_RE.search(c)), None)
+    guerrilla_mentions, guerrilla_density = _mention_density(_GUERRILLA_TEXT_RE, article_text or "")
+    guerrilla_in_text = (
+        guerrilla_mentions >= _GUERRILLA_MIN_MENTIONS
+        and guerrilla_density >= _MIN_MENTIONS_PER_1000_CHARS
+        and _GUERRILLA_TEXT_RE.search((article_text or "")[:_LEAD_CHARS]) is not None
+    )
+    if guerrilla_category is not None or guerrilla_in_text:
+        return BattleTypeDecision(
+            battle_id=battle_id,
+            battle_type="guerrilla",
+            fortified=None,
+            evidence=(
+                f"category {guerrilla_category!r} names guerrilla warfare"
+                if guerrilla_category is not None
+                else f"article says 'guerrilla' {guerrilla_mentions} times"
+            ),
+            confidence=0.8 if guerrilla_category is not None else 0.6,
         )
 
     if article_text and article_text.strip():

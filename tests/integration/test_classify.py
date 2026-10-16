@@ -306,7 +306,12 @@ def _seed_corpus(conn: Connection, tmp_path: Path) -> dict[str, Any]:
     }
 
 
-def _seed_actium_llm_call(conn: Connection, spec: dict[str, Any], raw_root: Path) -> None:
+def _seed_actium_llm_call(
+    conn: Connection,
+    spec: dict[str, Any],
+    raw_root: Path,
+    extra: dict[str, Any] | None = None,
+) -> None:
     """Pre-seed the cached answer for Actium's two-commander side.
 
     Builds the exact request the stage will build for the Octavian side --
@@ -319,6 +324,7 @@ def _seed_actium_llm_call(conn: Connection, spec: dict[str, Any], raw_root: Path
             corpus.
         spec: The loaded, path-overridden spec.
         raw_root: The fixture's raw root.
+        extra: Further top-level keys for the cached answer, such as ``is_defender``.
     """
     pairs = classify_stage.build_pending_role_requests(conn, raw_root, spec)
     octavian_side_requests = [
@@ -353,8 +359,15 @@ def _seed_actium_llm_call(conn: Connection, spec: dict[str, Any], raw_root: Path
         ],
         "needs_review": False,
         "review_reason": None,
+        **(extra or {}),
     }
+    _insert_llm_call(conn, config, digest, response)
 
+
+def _insert_llm_call(
+    conn: Connection, config: dict[str, Any], digest: str, response: dict[str, Any]
+) -> None:
+    """Insert one completed ``llm_calls`` row keyed by ``digest``."""
     conn.execute(
         text(
             """
@@ -476,9 +489,20 @@ def test_an_offline_run_writes_the_cache_misses_to_a_batch_file(
         for raw in outcome.batch_file.read_text(encoding="utf-8").splitlines()
         if raw.strip()
     ]
-    assert {line["request_hash"] for line in lines} == expected
+    hashes = {line["request_hash"] for line in lines}
+    # The stage logs a troop_total gap while it runs, so its missingness request
+    # does not exist before the first run; afterwards the export path must build
+    # the identical one, or the answer imported between runs would never be found.
+    assert expected < hashes
+    extra = hashes - expected
+    assert len(extra) == 1
+    after = {
+        request_hash(request, config["provider"], config["model"])
+        for _context, request in classify_stage.build_pending_missingness_requests(conn, spec)
+    }
+    assert extra == after
     assert {line["agent_model"] for line in lines} == {"sonnet"}
-    assert outcome.deferred_requests == len(expected)
+    assert outcome.deferred_requests == len(hashes)
 
 
 def test_the_offline_script_builds_the_same_request_hash_as_the_stage(
@@ -704,6 +728,7 @@ def test_all_three_classify_gates_execute_with_no_sql_error(
     assert set(results) == {
         "all_commanders_classified",
         "attribution_weights_sum",
+        "battle_type_unknown_share",
         "missing_data_all_logged",
     }
     for name, result in results.items():
@@ -807,3 +832,351 @@ def test_the_besieged_side_of_a_named_siege_is_marked_defender(
     assert flag(besiegers) is False
     assert flag(acre_a) is None
     assert flag(acre_b) is None
+
+
+# ─── Infobox order, defender answers, LLM missingness, terrain, campaigns ───
+
+
+def _write_article(raw_root: Path, url: str, body: str) -> None:
+    """Write a wikitext article where ``find_article_path`` will look for it."""
+    directory = raw_root / "battles_html"
+    directory.mkdir(parents=True, exist_ok=True)
+    stem = Path(article_filename(url)).stem
+    (directory / f"{stem}.wikitext").write_text(body, encoding="utf-8")
+
+
+def _flag(conn: Connection, side_id: int) -> Any:
+    return _scalar(conn, "SELECT is_defender FROM battle_sides WHERE side_id = :s", s=side_id)
+
+
+def test_the_role_request_numbers_commanders_by_infobox_order_and_counts_unresolved(
+    conn: Connection, tmp_path: Path
+) -> None:
+    seed = _seed_corpus(conn, tmp_path)
+    spec = _load_spec(seed["raw_root"])
+    # Insert order is Octavian then Agrippa; the infobox lists Agrippa first.
+    conn.execute(
+        text("UPDATE battle_commanders SET infobox_order = :o WHERE bc_id = :b"),
+        [
+            {"o": 1, "b": seed["octavian_bc"]},
+            {"o": 0, "b": seed["agrippa_bc"]},
+        ],
+    )
+
+    pairs = classify_stage.build_pending_role_requests(conn, seed["raw_root"], spec)
+    side, request = next((s, r) for s, r in pairs if s.side_label == ACTIUM_SIDE)
+
+    assert [c.name for c in side.commanders] == ["Agrippa", "Octavian"]
+    assert side.unresolved_count == 1
+    assert request.user.index("#1 Agrippa") < request.user.index("#2 Octavian")
+    assert "1 further commander named in the infobox" in request.user
+
+
+def test_null_infobox_order_falls_back_to_bc_id_order_without_numbers(
+    conn: Connection, tmp_path: Path
+) -> None:
+    seed = _seed_corpus(conn, tmp_path)
+    spec = _load_spec(seed["raw_root"])
+
+    pairs = classify_stage.build_pending_role_requests(conn, seed["raw_root"], spec)
+    side, request = next((s, r) for s, r in pairs if s.side_label == ACTIUM_SIDE)
+
+    assert [c.name for c in side.commanders] == ["Octavian", "Agrippa"]
+    assert "#1" not in request.user
+
+
+def test_an_llm_defender_answer_fills_a_null_flag_only(conn: Connection, tmp_path: Path) -> None:
+    seed = _seed_corpus(conn, tmp_path)
+    spec = _load_spec(seed["raw_root"])
+    _seed_actium_llm_call(conn, spec, seed["raw_root"], extra={"is_defender": True})
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    assert _flag(conn, seed["octavian_side"]) is True
+    assert _flag(conn, seed["antony_side"]) is None
+
+
+def test_a_null_llm_defender_answer_writes_nothing(conn: Connection, tmp_path: Path) -> None:
+    seed = _seed_corpus(conn, tmp_path)
+    spec = _load_spec(seed["raw_root"])
+    _seed_actium_llm_call(conn, spec, seed["raw_root"], extra={"is_defender": None})
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    assert _flag(conn, seed["octavian_side"]) is None
+
+
+def test_an_existing_defender_flag_is_not_overwritten_by_the_llm(
+    conn: Connection, tmp_path: Path
+) -> None:
+    seed = _seed_corpus(conn, tmp_path)
+    spec = _load_spec(seed["raw_root"])
+    conn.execute(
+        text("UPDATE battle_sides SET is_defender = FALSE WHERE side_id = :s"),
+        {"s": seed["octavian_side"]},
+    )
+    _seed_actium_llm_call(conn, spec, seed["raw_root"], extra={"is_defender": True})
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    assert _flag(conn, seed["octavian_side"]) is False
+
+
+def test_an_answer_that_misses_a_commander_is_rejected_whole_including_its_flag(
+    conn: Connection, tmp_path: Path
+) -> None:
+    seed = _seed_corpus(conn, tmp_path)
+    spec = _load_spec(seed["raw_root"])
+    _seed_actium_llm_call(
+        conn,
+        spec,
+        seed["raw_root"],
+        extra={
+            "is_defender": True,
+            "classifications": [
+                {
+                    "name": "Agrippa",
+                    "command_role": "field_commander",
+                    "hierarchy_rank": 0,
+                    "reports_to": None,
+                    "attribution_weight": 1.0,
+                    "confidence": 0.9,
+                    "reasoning": "only one of the two commanders was answered",
+                }
+            ],
+        },
+    )
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    assert _flag(conn, seed["octavian_side"]) is None
+    llm_rows = _scalar(
+        conn,
+        "SELECT COUNT(*) FROM battle_commanders WHERE side_id = :s AND attribution_method = 'llm'",
+        s=seed["octavian_side"],
+    )
+    assert llm_rows == 0
+
+
+def test_the_siege_title_rule_keeps_priority_over_the_llm_flag(
+    conn: Connection, tmp_path: Path
+) -> None:
+    battle_id = _seed_battle(conn, "Siege of Massilia", "0049-06-01 BC")
+    besiegers = _seed_side(conn, battle_id, "Supporters of Julius Caesar")
+    city = _seed_side(conn, battle_id, "City of Massilia")
+    names = ("Gaius Trebonius", "Decimus Brutus")
+    for name in names:
+        _seed_commander(conn, battle_id, besiegers, _seed_general(conn, name))
+    spec = _load_spec(tmp_path / "raw")
+    config = llm_params(spec)
+    pairs = classify_stage.build_pending_role_requests(conn, tmp_path / "raw", spec)
+    _side, request = next((s, r) for s, r in pairs if s.side_id == besiegers)
+    # The model contradicts the title; the title rule is written first and wins.
+    answer = {
+        "classifications": [
+            {
+                "name": name,
+                "command_role": "field_commander",
+                "hierarchy_rank": 0,
+                "reports_to": None,
+                "attribution_weight": 0.5,
+                "confidence": 0.8,
+                "reasoning": "co-commanders of the siege",
+            }
+            for name in names
+        ],
+        "is_defender": True,
+        "needs_review": False,
+        "review_reason": None,
+    }
+    _insert_llm_call(
+        conn, config, request_hash(request, config["provider"], config["model"]), answer
+    )
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    assert _flag(conn, city) is True
+    assert _flag(conn, besiegers) is False
+
+
+def test_two_defenders_in_one_battle_write_neither(conn: Connection, tmp_path: Path) -> None:
+    from pipeline.classifiers import SideGroup
+
+    sides = [
+        (
+            SideGroup(
+                battle_id=1, side_id=10, side_label="A", battle_name="B", year_astronomical=1
+            ),
+            None,
+        ),
+        (
+            SideGroup(
+                battle_id=1, side_id=11, side_label="B", battle_name="B", year_astronomical=1
+            ),
+            None,
+        ),
+        (
+            SideGroup(
+                battle_id=2, side_id=20, side_label="C", battle_name="C", year_astronomical=1
+            ),
+            None,
+        ),
+    ]
+
+    usable = classify_stage._usable_llm_defender_flags(
+        {10: True, 11: True, 20: True},
+        sides,  # type: ignore[arg-type]
+    )
+
+    assert usable == {20: True}
+
+
+def test_a_cached_missingness_answer_is_applied_on_the_rerun(
+    conn: Connection, tmp_path: Path
+) -> None:
+    seed = _seed_corpus(conn, tmp_path)
+    spec = _load_spec(seed["raw_root"])
+    _seed_actium_llm_call(conn, spec, seed["raw_root"])
+
+    first = classify_stage.run(spec, context=StageContext(db_conn=conn))
+    assert first is not None and first.batch_file is not None
+    pending = classify_stage.build_pending_missingness_requests(conn, spec)
+    assert len(pending) == 1
+    context, request = pending[0]
+    config = llm_params(spec)
+    _insert_llm_call(
+        conn,
+        config,
+        request_hash(request, config["provider"], config["model"]),
+        {"missingness_type": "mar", "reason": "documentation thins out for small fleets"},
+    )
+
+    second = classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    row = _row(
+        conn,
+        "SELECT missingness_class, notes FROM missing_data_log WHERE log_id = :id",
+        id=context.log_id,
+    )
+    assert row.missingness_class == "mar"
+    assert "LLM classification" in row.notes
+    # Only the uncached no-article side is still waiting.
+    assert second is not None and second.deferred_requests == 1
+
+
+def test_terrain_is_written_only_where_empty_and_marks_its_log_row(
+    conn: Connection, tmp_path: Path
+) -> None:
+    raw_root = tmp_path / "raw"
+    url_a = "https://en.wikipedia.org/wiki/Battle_of_Terrain_A"
+    url_b = "https://en.wikipedia.org/wiki/Battle_of_Terrain_B"
+    _write_article(raw_root, url_a, "== Battle ==\nThe armies met on a plain beside a river.")
+    _write_article(raw_root, url_b, "== Battle ==\nThe armies met on a plain beside a river.")
+    empty = _seed_battle(conn, "Battle of Terrain A", "1700-01-01", wikipedia_url=url_a)
+    filled = _seed_battle(conn, "Battle of Terrain B", "1700-01-02", wikipedia_url=url_b)
+    conn.execute(
+        text("UPDATE battles SET terrain = ARRAY['desert'] WHERE battle_id = :b"), {"b": filled}
+    )
+    log_id = _seed_missing(conn, empty, "terrain")
+    spec = _load_spec(raw_root)
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    def terrain(battle_id: int) -> list[str]:
+        return list(
+            _scalar(conn, "SELECT terrain FROM battles WHERE battle_id = :b", b=battle_id) or []
+        )
+
+    assert terrain(empty) == ["river", "plain"]
+    assert terrain(filled) == ["desert"]
+    log = _row(conn, "SELECT missingness_class FROM missing_data_log WHERE log_id = :i", i=log_id)
+    assert log.missingness_class == "observed"
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+    assert terrain(empty) == ["river", "plain"]
+
+
+def _set_rule_type(conn: Connection, battle_id: int, battle_type: str) -> None:
+    """Make a battle look like an earlier classify run typed it by rule."""
+    conn.execute(
+        text("UPDATE battles SET battle_type = CAST(:t AS battle_type) WHERE battle_id = :b"),
+        {"t": battle_type, "b": battle_id},
+    )
+    log_id = _seed_missing(conn, battle_id, "battle_type", missingness_class="observed")
+    conn.execute(
+        text(
+            "UPDATE missing_data_log SET notes = 'classify: inferred field (t)' WHERE log_id = :i"
+        ),
+        {"i": log_id},
+    )
+
+
+def test_campaign_replaces_a_rule_derived_type_but_never_an_extract_type(
+    conn: Connection, tmp_path: Path
+) -> None:
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    war = _seed_battle(conn, "Six-Day War", "1967-06-05")
+    long_op = _seed_battle(conn, "Operation Longrun", "1944-01-01")
+    extract_typed = _seed_battle(conn, "Operation Extracted", "1944-01-01")
+    for battle_id in (long_op, extract_typed):
+        conn.execute(
+            text("UPDATE battles SET date_end = date_start + 200 WHERE battle_id = :b"),
+            {"b": battle_id},
+        )
+    _set_rule_type(conn, war, "field")
+    _set_rule_type(conn, long_op, "field")
+    conn.execute(
+        text("UPDATE battles SET battle_type = 'field' WHERE battle_id = :b"), {"b": extract_typed}
+    )
+    spec = _load_spec(raw_root)
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    def kind(battle_id: int) -> str:
+        return _scalar(conn, "SELECT battle_type FROM battles WHERE battle_id = :b", b=battle_id)
+
+    assert kind(war) == "campaign"
+    assert kind(long_op) == "campaign"
+    assert kind(extract_typed) == "field"
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+    assert kind(war) == "campaign"
+
+
+def test_an_unknown_war_titled_battle_becomes_a_campaign_without_an_article(
+    conn: Connection, tmp_path: Path
+) -> None:
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    war = _seed_battle(conn, "Yom Kippur War", "1973-10-06")
+    spec = _load_spec(raw_root)
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    kind = _scalar(conn, "SELECT battle_type FROM battles WHERE battle_id = :b", b=war)
+    assert kind == "campaign"
+
+
+def test_the_unknown_share_gate_is_a_proportion_of_battles_with_articles(
+    conn: Connection, tmp_path: Path
+) -> None:
+    spec = _load_spec(tmp_path / "raw")
+    gate = next(c for c in spec["quality_checks"] if c["name"] == "battle_type_unknown_share")
+    for i in range(10):
+        battle_id = _seed_battle(conn, f"Battle of Gate {i}", "1700-01-01")
+        conn.execute(
+            text("UPDATE battles SET source_slug = :s WHERE battle_id = :b"),
+            {"s": f"gate_{i}", "b": battle_id},
+        )
+    # Battles without an article never count, however many there are.
+    for i in range(30):
+        _seed_battle(conn, f"Battle of Noslug {i}", "1700-01-01")
+
+    def result() -> Any:
+        return next(r for r in QualityRunner(conn).run_all([gate]))
+
+    assert result().passed is False
+    assert result().actual_value == pytest.approx(1.0)
+    conn.execute(text("UPDATE battles SET battle_type = 'field' WHERE source_slug IS NOT NULL"))
+    assert result().passed is True

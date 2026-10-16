@@ -37,6 +37,7 @@ from pipeline.classifiers.records import BattleTypeDecision, MissingnessDecision
 
 __all__ = [
     "log_unlogged_troop_totals",
+    "write_terrain",
     "write_defender_flags",
     "write_battle_type_decisions",
     "write_missingness_decisions",
@@ -85,6 +86,60 @@ _MARK_BATTLE_TYPE_OBSERVED = text(
         END
     WHERE battle_id = :battle_id
       AND field_name = 'battle_type'
+      AND missingness_class = 'unclassified'
+    """
+)
+
+# The one place a non-'unknown' battle_type is rewritten. The EXISTS guard
+# limits it to a type an earlier classify run chose by rule (its log note says
+# so), so a type extract or a person set is untouched; fortified is cleared
+# because only a rule-derived siege or similar set it. Once campaign, a battle
+# no longer matches, so a re-run is a no-op.
+_REPLACE_RULE_TYPE_WITH_CAMPAIGN = text(
+    """
+    UPDATE battles SET
+        battle_type = 'campaign',
+        fortified   = NULL
+    WHERE battle_id = :battle_id
+      AND battle_type NOT IN ('unknown', 'campaign')
+      AND EXISTS (
+          SELECT 1 FROM missing_data_log mdl
+          WHERE mdl.battle_id = battles.battle_id
+            AND mdl.field_name = 'battle_type'
+            AND mdl.notes LIKE 'classify: inferred%'
+      )
+    """
+)
+
+_NOTE_CAMPAIGN_REPLACEMENT = text(
+    """
+    UPDATE missing_data_log SET
+        notes = notes || E'\\n' || :note
+    WHERE battle_id = :battle_id
+      AND field_name = 'battle_type'
+      AND missingness_class = 'observed'
+      AND notes LIKE 'classify: inferred%'
+    """
+)
+
+_UPDATE_TERRAIN = text(
+    """
+    UPDATE battles SET terrain = CAST(:terrain AS TEXT[])
+    WHERE battle_id = :battle_id
+      AND (terrain IS NULL OR cardinality(terrain) = 0)
+    """
+)
+
+_MARK_TERRAIN_OBSERVED = text(
+    """
+    UPDATE missing_data_log SET
+        missingness_class = 'observed',
+        notes = CASE
+            WHEN notes IS NULL OR notes = '' THEN :note
+            ELSE notes || E'\\n' || :note
+        END
+    WHERE battle_id = :battle_id
+      AND field_name = 'terrain'
       AND missingness_class = 'unclassified'
     """
 )
@@ -148,6 +203,23 @@ def write_battle_type_decisions(conn: Any, decisions: list[BattleTypeDecision]) 
     """
     typed = 0
     for decision in decisions:
+        if decision.replaces_rule_type:
+            replaced = conn.execute(
+                _REPLACE_RULE_TYPE_WITH_CAMPAIGN, {"battle_id": decision.battle_id}
+            )
+            if int(replaced.rowcount or 0):
+                typed += 1
+                conn.execute(
+                    _NOTE_CAMPAIGN_REPLACEMENT,
+                    {
+                        "battle_id": decision.battle_id,
+                        "note": (
+                            f"{_NOTE_PREFIX}reclassified {decision.battle_type!r} "
+                            f"({decision.evidence})"
+                        ),
+                    },
+                )
+            continue
         conn.execute(
             _UPDATE_BATTLE_TYPE,
             {
@@ -258,4 +330,32 @@ def write_defender_flags(conn: Any, flags: dict[int, bool]) -> int:
     for side_id, is_defender in flags.items():
         result = conn.execute(_UPDATE_DEFENDER, {"side_id": side_id, "is_defender": is_defender})
         written += int(result.rowcount or 0)
+    return written
+
+
+def write_terrain(conn: Any, terrain_by_battle: dict[int, tuple[list[str], str]]) -> int:
+    """Write inferred terrain tags where the column is still empty.
+
+    Args:
+        conn: An open database connection.
+        terrain_by_battle: ``battle_id`` to ``(tags, evidence)``. A battle with
+            no tags is skipped, so it keeps its ``missing_data_log`` row.
+
+    Returns:
+        How many battles were given terrain. A tag list already on the row is
+        never overwritten, and the battle's 'terrain' log row moves from
+        'unclassified' to 'observed' once.
+    """
+    written = 0
+    for battle_id, (tags, evidence) in terrain_by_battle.items():
+        if not tags:
+            continue
+        result = conn.execute(_UPDATE_TERRAIN, {"battle_id": battle_id, "terrain": tags})
+        if not int(result.rowcount or 0):
+            continue
+        written += 1
+        conn.execute(
+            _MARK_TERRAIN_OBSERVED,
+            {"battle_id": battle_id, "note": f"{_NOTE_PREFIX}inferred terrain {tags} ({evidence})"},
+        )
     return written
