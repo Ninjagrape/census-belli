@@ -11,7 +11,12 @@ description: >
   reports that agree on win, draw or loss but differ in grade is
   interval-censored over the two grades.
 
-  Linear predictor: S_A - S_B + beta_force * (x_A - x_B) + beta_def * (d_A - d_B).
+  Linear predictor: S_A - S_B + beta_force_g * (x_A - x_B) + beta_def * (d_A - d_B),
+  every term a difference of side A minus side B so swapping the sides negates it.
+  d is 1 for a defender and 0 for an attacker. The classify prompt defines each
+  flag relative to the other side, so when exactly one side's flag is stated the
+  other is filled with its complement; neither stated, or both stated alike,
+  contributes 0 (missing is no information, not "attacker").
   S_side is the attribution-weighted sum of the side's commanders' skills.
   Skill is sigma_skill * z with z standard normal (non-centred).
 
@@ -19,15 +24,39 @@ description: >
   are dropped as additive terms: they are battle-level, so with an arbitrary
   orientation they could only learn "side A tends to win", i.e. listing order.
   There is no era mean of skill: generals of different eras never meet, so it
-  would be identified by the prior alone. The defender term is omitted while
-  no battle has a flag. The fixed skill sd 1.5 is a learned sd with a
+  would be identified by the prior alone. The defender term is built only when at
+  least design.min_defender_battles battles have an opposite flag pair, stated
+  or filled (default 10; diagnostics count defender_pairs_both_stated and
+  defender_pairs_filled separately), with a Normal(0, 0.5) prior; below that it
+  is absent, not zero-valued, and the diagnostics say so. Its pooled mean, sd
+  and correlation with mu_unknown are in diagnostics.defender_term. The fixed skill sd 1.5 is a learned sd with a
   HalfNormal(1.0) prior.
 
   Unattributed and unknown sides are not dropped. A side with no resolved
   commander, or whose co-commanders were all split evenly by default, is an
   anonymous latent (mu_unknown or mu_unattributed plus sigma_skill * z) that
   nobody is credited for; the battle still informs the opposing named general.
-  A battle with no named side is excluded and counted.
+  A battle with no named side is excluded and counted. Battles typed campaign
+  are excluded and counted, and their commanders are not tallied as uncredited. A battle with 3+ sides whose outcomes split cleanly
+  into one victory-like and one defeat-like group becomes a two-camp battle: camp
+  troops are the log-sum-exp of the members' troops (its delta-method sd
+  assumes independent member errors), camp commanders the union with each
+  weight scaled by the member's share of camp troops (a member without a
+  reconcile estimate uses its mean log troops over the imputed rounds; equal
+  shares only if no member has any value). Named weights sum to the named
+  share, not to one: the share held by unknown or unattributed members is a
+  latent component, share * (mu_kind + sigma_skill * z_side), credited to
+  nobody, so a camp that is 10% named and 90% unknown credits its named general
+  with 0.1. The distribution of credited camp shares is in counts. Disclosure:
+  the filled-in troops are the mean over the imputed rounds, which condition on
+  the battle outcome, so attribution weights leak the outcome slightly (the
+  larger imputed member takes more of the camp's credit); observed-only variants
+  are unaffected. A camp is a
+  defender if any member defends. Other 3+ side battles are excluded and
+  counted. The WAR counterfactual replaces the named commanders' part of the
+  side's skill and keeps the force and defender terms unchanged, so WAR keeps
+  the side's defender posture and neither credits nor discounts attacking or
+  defending.
 
   WAR. Per posterior draw the replacement level is the 40th percentile of
   credited generals' skill. A side's expected score is P(win) + 0.5 *
@@ -48,12 +77,17 @@ description: >
   failing round is re-run once with a new seed and target_accept 0.95.
 
   Attribution weights are fixed data from classify, renormalised per side to
-  sum to one; the model does not learn them.
+  sum to one (a merged camp's sum to its named share); the model does not learn
+  them.
 
   Disclosures. Technology is not modelled and one linear log-force-ratio slope
   serves every era. Naval and aerial battles are included and share the single
-  skill population and the single beta_force with land battles (their counts
-  are in the pooled diagnostics). Generals of different eras are tied together by the shared
+  skill population with land battles; their force slope is the land slope plus a
+  fixed offset (beta_force_water_air = beta_force + delta_water_air,
+  delta_water_air ~ Normal(0, 0.25); beta_force is the identified land slope;
+  amphibious battles count as land) once at least design.min_battles_per_force_group
+  of them are included, else one slope serves all (their counts are in the pooled
+  diagnostics). Generals of different eras are tied together by the shared
   prior alone, and mu_unknown / mu_unattributed are a soft link between
   components. total_war is volume-weighted. The circularity comparator is a
   joint fit with a latent log-troop difference per battle (measured sides give
@@ -62,7 +96,7 @@ description: >
   part; it does not test the shared-error limitation.
 
 inputs:
-  - db: battles (year_astronomical), battle_sides (outcome, is_defender,
+  - db: battles (year_astronomical, battle_type), battle_sides (outcome, is_defender,
         est_troops_neutral_log_mean/_sd), battle_commanders (attribution_weight,
         attribution_method), generals
   - data/imputed/neutral/round_{n}/sides.csv and manifest.json   # manifest run_id must be the latest written impute run of the scale; published/ is read instead under params.scale=published

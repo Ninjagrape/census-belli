@@ -336,7 +336,9 @@ def test_pooled_row_records_rounds_counts_and_worst_case(
     assert diagnostics["converged"] == "true"
     assert {"max_rhat", "min_ess_bulk", "divergences"} <= set(diagnostics["worst"])
     assert diagnostics["imputation_run_id"] == FAKE_IMPUTE_RUN_ID
-    assert diagnostics["defender_term"] == "omitted_no_data"
+    assert diagnostics["defender_term"]["status"] == "omitted_below_threshold"
+    assert diagnostics["force_groups"]["status"] == "single_slope"
+    assert diagnostics["counts"]["battles_campaign"] == 0
     assert diagnostics["counts"]["battles_included"] > 0
     assert diagnostics["components"]["n_components"] >= 2  # two eras never meet
     assert diagnostics["prior_predictive"]["category_freq"]
@@ -364,6 +366,17 @@ def test_estimates_have_intervals_and_unique_ranks(
         assert sd > 0 and n_battles >= 1
     totals = [r[6] for r in rows]
     assert totals == sorted(totals, reverse=True)  # rank_by total_war
+    war_cols = conn.execute(
+        text(
+            "SELECT total_war, war_ci_lo, war_ci_hi, p_above_next_rank "
+            "FROM general_skill_estimates WHERE run_id = :r ORDER BY rank"
+        ),
+        {"r": fitted["pooled_id"]},
+    ).fetchall()
+    for war, war_lo, war_hi, p_next in war_cols[:-1]:
+        assert war_lo < war < war_hi
+        assert 0.0 <= p_next <= 1.0
+    assert war_cols[-1][3] is None  # nothing ranked below the last general
 
 
 def test_joint_run_has_estimates_and_only_the_pooled_run_has_war_details(
@@ -435,6 +448,7 @@ def test_run_directory_has_every_artefact(fitted: dict[str, Any]) -> None:
     with np.load(directory / "pooled_draws.npz") as data:
         assert data["skill_draws"].shape[0] == N_ROUNDS * 100
         assert {"general_ids", "entry_xwar_mean", "entry_realised_war_mean"} <= set(data.files)
+        assert data["war_draws"].shape == (N_ROUNDS * 100, data["general_ids"].shape[0])
     report = json.loads((directory / "gate_report.json").read_text(encoding="utf-8"))
     assert report["estimates_written"] is True
     assert {g["name"] for g in report["gates"]} == {

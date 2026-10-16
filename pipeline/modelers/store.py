@@ -35,11 +35,13 @@ _INSERT_ESTIMATE = text(
     INSERT INTO general_skill_estimates (
         run_id, general_id, skill_mean, skill_median, skill_sd,
         skill_ci_lo, skill_ci_hi, skill_ci90_lo, skill_ci90_hi,
-        total_war, war_per_battle, war_sd, n_battles, rank
+        total_war, war_per_battle, war_sd, war_ci_lo, war_ci_hi,
+        p_above_next_rank, n_battles, rank
     ) VALUES (
         :run_id, :general_id, :skill_mean, :skill_median, :skill_sd,
         :skill_ci_lo, :skill_ci_hi, :skill_ci90_lo, :skill_ci90_hi,
-        :total_war, :war_per_battle, :war_sd, :n_battles, :rank
+        :total_war, :war_per_battle, :war_sd, :war_ci_lo, :war_ci_hi,
+        :p_above_next_rank, :n_battles, :rank
     )
     """
 )
@@ -72,6 +74,9 @@ class SkillEstimateRow:
     total_war: float
     war_per_battle: float
     war_sd: float
+    war_ci_lo: float | None
+    war_ci_hi: float | None
+    p_above_next_rank: float | None
     n_battles: int
     rank: int
 

@@ -23,9 +23,14 @@
 #     generals outside the largest connected component.
 #   - mu_unknown and mu_unattributed are shared across all battles, so they are
 #     a soft link between components that the comparison graph does not count.
-#   - Naval and aerial battles share the field battles' single skill population
-#     and single beta_force. They are included, not excluded; the pooled
-#     diagnostics count them (counts.battles_included_naval / _aerial).
+#   - Naval and aerial battles share the land battles' single skill population.
+#     Their force slope is the land slope plus a Normal(0, delta_water_air_sd)
+#     offset when at least design.min_battles_per_force_group of them are
+#     included (else one slope). Amphibious battles count as land.
+#     The pooled diagnostics count them (counts.battles_water_air).
+#   - Battles typed 'campaign' are excluded (counts.battles_campaign). 3+ side
+#     battles whose outcomes split cleanly into a winning and a losing camp are
+#     merged into two sides (counts.battles_merged_camps); others are excluded.
 #   - Attribution weights are fixed data (classify's), renormalised per side;
 #     the model does not learn them.
 
@@ -45,15 +50,37 @@ priors:
   # Positive: more troops help. A doubling of the force ratio is about +0.35 logit.
   beta_force_mu: 0.5
   beta_force_sd: 0.5
-  # Slight defender edge. Only used when some battle has a defender flag.
-  beta_def_mu: 0.3
-  beta_def_sd: 0.3
+  # No presumed defender edge: the sign is for the data to find (a defender
+  # holds terrain, an attacker chooses the moment). Used only when the design
+  # has at least design.min_defender_battles battles with a known, opposite
+  # flag pair.
+  beta_def_mu: 0.0
+  beta_def_sd: 0.5
+  # Sd of the Normal(0, sd) offset of the water/air force slope from the land
+  # slope: beta_force_water_air = beta_force + delta_water_air. beta_force stays
+  # the identified land slope (the circularity gate reads it); a fixed offset
+  # rather than a two-group hierarchy because a variance parameter on two
+  # groups is not identified. 0.25 lets the two slopes differ by about half of
+  # beta_force's own sd before the data asks for more; only used with the
+  # water/air group below.
+  delta_water_air_sd: 0.25
   # log of the inner cutpoint, median 0.5.
   log_c1_mu: -0.6931471805599453
   log_c1_sd: 1.0
   # log of c2 - c1, median 1.5: a decisive result needs a clearly larger margin.
   log_gap_mu: 0.4054651081081644
   log_gap_sd: 1.0
+
+# Which optional terms the design carries. A term with too few battles behind
+# it is left out of the model altogether (no coefficient), not fitted to noise.
+design:
+  # Defender term: battles whose two sides both have a defender flag and the
+  # flags differ. A battle with either flag unknown contributes nothing (missing
+  # is no information, not "attacker").
+  min_defender_battles: 10
+  # Separate water/air force slope: included naval + aerial battles needed.
+  # Below this one slope serves every battle.
+  min_battles_per_force_group: 10
 
 sampler:
   # 1500 + 1500 per chain: the skill vector is non-centred, so ESS for the

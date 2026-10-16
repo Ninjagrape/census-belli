@@ -7,11 +7,18 @@ Per draw ``t``:
 2. For every side, ``E_model`` is its expected score (``P(win) + 0.5 P(indecisive)``)
    at the fitted ``S_side[t]``; ``E_rep`` is the same with the side's whole
    score replaced by ``s_rep[t]`` (weights sum to one, so a replacement side
-   has ``S = s_rep``), opponent, forces and defender term unchanged.
+   has ``S = s_rep``), opponent, forces (each battle's own group slope) and
+   defender term unchanged. The defender term is part of the side's context,
+   not its skill: WAR keeps the side's attacking or defending posture and
+   neither credits nor discounts it. A merged camp with an unnamed share
+   replaces only its named part: ``S_rep = S - sum_i w_i skill_i + W s_rep``
+   with ``W = sum_i w_i``, so the unnamed troops stay as fitted.
 3. Expected WAR of a side is ``xWAR = E_model - E_rep``; realised WAR is
    ``y - E_rep`` with ``y`` the 0 / 0.5 / 1 score.
-4. Commander ``i``'s contribution is ``w_i`` times the side's value, so a
-   side's contributions sum exactly to its value.
+4. Commander ``i``'s contribution is ``w_i / W`` times the side's value, so a
+   side's contributions sum exactly to its value; ``W`` is 1 on an ordinary
+   side and the named share on a merged camp, so the unnamed part is credited
+   to nobody.
 
 All of this works in the sampler's own frame (raw, uncentred skills and the
 raw ``S`` of latent sides): centring skills but not the latent sides' scores
@@ -113,7 +120,8 @@ def compute_war(
         skills: Raw skills ``(T, n_generals)``.
         side_scores: ``S`` per side ``(T, n_sides)`` including latent sides.
         x_diff: ``x_A - x_B``, ``(n_battles,)`` or ``(T, n_battles)``.
-        beta_force: ``(T,)``.
+        beta_force: ``(T,)`` or per-battle ``(T, n_battles)`` (see
+            :meth:`pipeline.modelers.model.PosteriorDraws.force_slopes`).
         beta_def: ``(T,)``; ignored by a design without defender data (its
             ``defender_diff`` is zero).
         c1: ``(T,)``.
@@ -125,16 +133,34 @@ def compute_war(
     """
     n_draws = skills.shape[0]
     s_rep = replacement_level(skills, replacement_percentile)
-    force = beta_force[:, None] * np.atleast_2d(x_diff)
+    # (T,) for one slope, (T, n_battles) when battles carry their group's slope.
+    slope = beta_force[:, None] if beta_force.ndim == 1 else beta_force
+    force = slope * np.atleast_2d(x_diff)
     defender = beta_def[:, None] * design.defender_diff[None, :]
     score_a = side_scores[:, design.side_a]
     score_b = side_scores[:, design.side_b]
     c1_col, c2_col = c1[:, None], c2[:, None]
+    named_weight = np.bincount(design.cmd_side, weights=design.cmd_weight, minlength=design.n_sides)
+    named_part = np.zeros((n_draws, design.n_sides))
+    for side, general, weight in zip(
+        design.cmd_side, design.cmd_general, design.cmd_weight, strict=True
+    ):
+        named_part[:, side] += weight * skills[:, general]
+    # A side with named commanders swaps out their part only; a wholly latent
+    # side has none, so its whole score is replaced as before.
+    has_named = named_weight > 0
+    rep_score = np.where(
+        has_named[None, :],
+        side_scores - named_part + named_weight[None, :] * s_rep[:, None],
+        s_rep[:, None],
+    )
+    rep_a = rep_score[:, design.side_a]
+    rep_b = rep_score[:, design.side_b]
 
     # Eta from each side's own perspective; B's is the negation of A's.
     eta_a = score_a - score_b + force + defender
-    eta_a_rep = s_rep[:, None] - score_b + force + defender
-    eta_b_rep = s_rep[:, None] - score_a - force - defender
+    eta_a_rep = rep_a - score_b + force + defender
+    eta_b_rep = rep_b - score_a - force - defender
 
     e_model = np.empty((n_draws, design.n_sides))
     e_rep = np.empty((n_draws, design.n_sides))
@@ -149,9 +175,18 @@ def compute_war(
     xwar_side = e_model - e_rep
     realised_side = y[None, :] - e_rep
 
-    weights = design.cmd_weight[None, :]
+    # Split the side's value among its named commanders by their share of the
+    # named part; on an ordinary side that is the weight itself.
+    weights = (design.cmd_weight / named_weight[design.cmd_side])[None, :]
     xwar_entry = weights * xwar_side[:, design.cmd_side]
-    realised_entry = weights * realised_side[:, design.cmd_side]
+    # Realised = luck (y - E_model) + the expected part. The luck is the whole
+    # camp's, so a general credited with a fraction w of it takes w, not the
+    # whole of it: a 10%-named general must not absorb the camp's good fortune.
+    # The expected part is split by share of the named part, as xwar is. On a
+    # fully named side (W = 1) both reduce to the old share-times-realised.
+    raw_weights = design.cmd_weight[None, :]
+    luck = (y[None, :] - e_model)[:, design.cmd_side]
+    realised_entry = raw_weights * luck + weights * xwar_side[:, design.cmd_side]
     total_xwar = np.zeros((n_draws, design.n_generals))
     total_realised = np.zeros((n_draws, design.n_generals))
     for entry, general in enumerate(design.cmd_general):

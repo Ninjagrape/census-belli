@@ -14,7 +14,7 @@ in code before anything is written.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -27,6 +27,7 @@ __all__ = [
     "DECOMPOSITION_TOLERANCE",
     "PooledFit",
     "RoundReduction",
+    "adjacent_order_probability",
     "assert_decomposition",
     "pool_reductions",
     "reduce_draws",
@@ -55,6 +56,9 @@ class RoundReduction:
         x_diff: ``x_A - x_B`` per battle ``(B,)`` (posterior mean for the
             joint fit, the round's value otherwise).
         total_realised: Posterior-mean realised WAR per general ``(G,)``.
+        term_draws: Thinned draws of the optional terms, by name
+            (``beta_def``, ``mu_unknown``, ``beta_water_air``,
+            ``delta_water_air``); a term the fit lacks is absent.
     """
 
     skills_c: np.ndarray
@@ -67,6 +71,7 @@ class RoundReduction:
     e_rep: np.ndarray
     x_diff: np.ndarray
     total_realised: np.ndarray
+    term_draws: dict[str, np.ndarray] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -74,7 +79,11 @@ class PooledFit:
     """Per-general posterior summaries of a pooled (or single) fit.
 
     ``*_fmi`` are zero for a single fit. ``sd`` is ``sqrt(T)`` for a pooled
-    fit and the ordinary posterior sd for a single one.
+    fit and the ordinary posterior sd for a single one. ``war_draws`` is the
+    ``(N, G)`` total-WAR draw matrix behind ``war_ci_*`` and
+    ``p_above_next_rank``; row ``n`` is one posterior draw for every general,
+    which the pairwise probability depends on. ``p_above_next_rank`` is NaN
+    for the last-ranked general.
     """
 
     skill_mean: np.ndarray
@@ -90,6 +99,10 @@ class PooledFit:
     war_mean: np.ndarray
     war_sd: np.ndarray
     war_fmi: np.ndarray
+    war_ci_lo: np.ndarray
+    war_ci_hi: np.ndarray
+    p_above_next_rank: np.ndarray
+    war_draws: np.ndarray
     realised_mean: np.ndarray
     entry_xwar: np.ndarray
     entry_realised: np.ndarray
@@ -102,6 +115,9 @@ class PooledFit:
     beta_force_fmi: float
     score: np.ndarray
     rank: np.ndarray
+    # Rubin-pooled summaries of the optional terms: name -> mean, sd_sqrt_T,
+    # fmi, plus corr_beta_def_mu_unknown over the pooled draws.
+    term_summaries: dict[str, dict[str, float]] = field(default_factory=dict)
 
 
 def thin_draws(draws: PosteriorDraws, keep: int) -> PosteriorDraws:
@@ -125,6 +141,11 @@ def thin_draws(draws: PosteriorDraws, keep: int) -> PosteriorDraws:
         c2=draws.c2[picks],
         sigma_skill=draws.sigma_skill[picks],
         x_diff=None if draws.x_diff is None else draws.x_diff[picks],
+        beta_force_group=(
+            None if draws.beta_force_group is None else draws.beta_force_group[picks]
+        ),
+        delta_water_air=None if draws.delta_water_air is None else draws.delta_water_air[picks],
+        mu_unknown=None if draws.mu_unknown is None else draws.mu_unknown[picks],
     )
 
 
@@ -157,13 +178,21 @@ def reduce_draws(
         draws.skills,
         draws.side_scores,
         effective,
-        draws.beta_force,
+        draws.force_slopes(design),
         draws.beta_def,
         draws.c1,
         draws.c2,
         replacement_percentile,
     )
     mean_x = effective if effective.ndim == 1 else effective.mean(axis=0)
+    term_draws: dict[str, np.ndarray] = {}
+    if design.defender_term_used:
+        term_draws["beta_def"] = draws.beta_def
+    if draws.mu_unknown is not None:
+        term_draws["mu_unknown"] = draws.mu_unknown
+    if draws.delta_water_air is not None and draws.beta_force_group is not None:
+        term_draws["delta_water_air"] = draws.delta_water_air
+        term_draws["beta_water_air"] = draws.beta_force_group[:, 1]
     return RoundReduction(
         skills_c=centre_skills(draws.skills),
         total_xwar=war.total_xwar,
@@ -175,7 +204,29 @@ def reduce_draws(
         e_rep=war.e_rep.mean(axis=0),
         x_diff=np.asarray(mean_x, dtype=float),
         total_realised=war.total_realised.mean(axis=0),
+        term_draws=term_draws,
     )
+
+
+def _term_summaries(reductions: Sequence[RoundReduction]) -> dict[str, dict[str, float]]:
+    """Rubin-pool each optional term, and the defender/unknown-side correlation."""
+    names = set.intersection(*(set(r.term_draws) for r in reductions)) if reductions else set()
+    out: dict[str, dict[str, float]] = {}
+    for name in sorted(names):
+        result = rubin([r.term_draws[name][:, None] for r in reductions])
+        out[name] = {
+            "mean": float(result.mean[0]),
+            "sd_sqrt_T": float(result.sd[0]),
+            "fmi": float(result.fmi[0]),
+        }
+    if {"beta_def", "mu_unknown"} <= names:
+        # A defender edge and an unknown-side level can absorb the same shift,
+        # so their correlation says how separately the data identifies them.
+        pooled_def = mixture([r.term_draws["beta_def"][:, None] for r in reductions])[:, 0]
+        pooled_mu = mixture([r.term_draws["mu_unknown"][:, None] for r in reductions])[:, 0]
+        corr = np.corrcoef(pooled_def, pooled_mu)[0, 1] if pooled_def.size > 1 else np.nan
+        out["beta_def"]["corr_with_mu_unknown"] = float(corr)
+    return out
 
 
 def _mean_of(arrays: Sequence[np.ndarray]) -> np.ndarray:
@@ -185,6 +236,28 @@ def _mean_of(arrays: Sequence[np.ndarray]) -> np.ndarray:
 
 def _score(rank_by: str, skill_mean: np.ndarray, war_mean: np.ndarray) -> np.ndarray:
     return skill_mean if rank_by == "skill_mean" else war_mean
+
+
+def adjacent_order_probability(war_draws: np.ndarray, rank: np.ndarray) -> np.ndarray:
+    """P(WAR_i > WAR_j) per general, j the general ranked immediately below.
+
+    The comparison is made draw by draw, so correlation between generals
+    (shared replacement level, shared battles) is respected; the draws must
+    therefore be aligned, row ``n`` being one posterior draw for everyone.
+
+    Args:
+        war_draws: Total WAR draws ``(N, G)``.
+        rank: Stored rank per general ``(G,)``, 1 is best.
+
+    Returns:
+        ``(G,)`` probabilities, NaN for the last-ranked general.
+    """
+    n_generals = war_draws.shape[1]
+    out = np.full(n_generals, np.nan)
+    order = np.argsort(rank, kind="stable")
+    for upper, lower in zip(order[:-1], order[1:], strict=True):
+        out[upper] = float(np.mean(war_draws[:, upper] > war_draws[:, lower]))
+    return out
 
 
 def pool_reductions(
@@ -212,6 +285,10 @@ def pool_reductions(
     skill_mean = pooled.mean(axis=0)
     war_mean = war_rubin.mean
     score = _score(rank_by, skill_mean, war_mean)
+    rank = rank_descending(design.general_ids, score)
+    # Same evenly spaced picks as the skill mixture, so row n is one draw for all.
+    war_pooled = mixture(war_by_round)
+    war_lo, war_hi = widen_interval(war_pooled, war_rubin.total, _CI95)
     return PooledFit(
         skill_mean=skill_mean,
         skill_median=np.median(pooled, axis=0),
@@ -226,6 +303,10 @@ def pool_reductions(
         war_mean=war_mean,
         war_sd=war_rubin.sd,
         war_fmi=war_rubin.fmi,
+        war_ci_lo=war_lo,
+        war_ci_hi=war_hi,
+        p_above_next_rank=adjacent_order_probability(war_pooled, rank),
+        war_draws=war_pooled,
         realised_mean=_mean_of([r.total_realised for r in reductions]),
         entry_xwar=_mean_of([r.entry_xwar for r in reductions]),
         entry_realised=_mean_of([r.entry_realised for r in reductions]),
@@ -237,7 +318,8 @@ def pool_reductions(
         beta_force_sd=float(beta_rubin.sd[0]),
         beta_force_fmi=float(beta_rubin.fmi[0]),
         score=score,
-        rank=rank_descending(design.general_ids, score),
+        rank=rank,
+        term_summaries=_term_summaries(reductions),
     )
 
 
@@ -260,6 +342,8 @@ def summarise_single(design: ModelDesign, reduction: RoundReduction, rank_by: st
     war_mean = war.mean(axis=0)
     score = _score(rank_by, skill_mean, war_mean)
     zeros = np.zeros_like(skill_mean)
+    rank = rank_descending(design.general_ids, score)
+    war_q = np.percentile(war, [2.5, 97.5], axis=0)
     return PooledFit(
         skill_mean=skill_mean,
         skill_median=np.median(skills, axis=0),
@@ -274,6 +358,10 @@ def summarise_single(design: ModelDesign, reduction: RoundReduction, rank_by: st
         war_mean=war_mean,
         war_sd=war.std(axis=0, ddof=1),
         war_fmi=zeros,
+        war_ci_lo=war_q[0],
+        war_ci_hi=war_q[1],
+        p_above_next_rank=adjacent_order_probability(war, rank),
+        war_draws=war,
         realised_mean=reduction.total_realised,
         entry_xwar=reduction.entry_xwar,
         entry_realised=reduction.entry_realised,
@@ -285,7 +373,8 @@ def summarise_single(design: ModelDesign, reduction: RoundReduction, rank_by: st
         beta_force_sd=float(reduction.beta_force.std(ddof=1)),
         beta_force_fmi=0.0,
         score=score,
-        rank=rank_descending(design.general_ids, score),
+        rank=rank,
+        term_summaries=_term_summaries([reduction]),
     )
 
 

@@ -248,3 +248,127 @@ def test_joint_loglik_weight_is_validated() -> None:
     ):
         with pytest.raises(ValueError, match="loglik_weight"):
             build_joint_latent_model(design, mean, sd, 1.0, ModelPriors(), loglik_weight=bad)
+
+
+def test_group_slopes_and_defender_term_match_the_numpy_reference() -> None:
+    sides, log_troops = _awkward_sides()
+    rng = np.random.default_rng(3)
+    marked: list[SideInput] = []
+    flag_of: dict[int, bool] = {}
+    type_of: dict[int, str] = {}
+    for s in sorted(sides, key=lambda s: s.side_id):
+        type_of.setdefault(s.battle_id, "naval" if rng.random() < 0.3 else "field")
+        # The first side seen in a battle defends, the second attacks.
+        flag = flag_of.setdefault(s.battle_id, True)
+        flag_of[s.battle_id] = not flag
+        marked.append(replace(s, is_defender=flag, battle_type=type_of[s.battle_id]))
+    design = build_design(marked)
+    assert design.defender_term_used
+    assert design.n_force_groups == 2
+    x = x_difference(design, log_troops)
+    model = build_model(design, x, ModelPriors())
+    assert {"delta_water_air", "beta_force_group", "beta_def"} <= set(model.named_vars)
+
+    potential = model.compile_fn(
+        model.replace_rvs_by_values([model.potentials[0]])[0],
+        inputs=model.value_vars,
+        on_unused_input="ignore",
+    )
+    point = _random_point(model)
+    sigma = np.exp(point["sigma_skill_log__"])
+    scores = assemble_side_scores(
+        design,
+        (sigma * point["z_skill"])[None],
+        np.array([sigma]),
+        point["z_side"][None],
+        np.array([point["mu_unknown"]]),
+        np.array([point["mu_unattributed"]]),
+    )[0]
+    group = np.array([point["beta_force"], point["beta_force"] + point["delta_water_air"]])
+    c1 = float(np.exp(point["log_c1"]))
+    c2 = c1 + float(np.exp(point["log_gap"]))
+    eta = linear_predictor(
+        design.side_a,
+        design.side_b,
+        scores,
+        x,
+        design.defender_diff,
+        group[design.force_group],
+        point["beta_def"],
+    )
+    np.testing.assert_allclose(
+        float(potential(point)), log_likelihood(eta, design.k_lo, design.k_hi, c1, c2), rtol=1e-8
+    )
+
+
+def test_single_slope_design_has_no_group_variables_and_no_defender_when_unflagged() -> None:
+    sides, log_troops = _awkward_sides()
+    design = build_design(sides)
+    model = build_model(design, x_difference(design, log_troops), ModelPriors())
+    assert design.n_force_groups == 1
+    assert not {"delta_water_air", "beta_force_group", "beta_def"} & set(model.named_vars)
+
+
+def test_partial_camp_potential_matches_numpy_reference() -> None:
+    sides, log_troops = _awkward_sides()
+    named = [
+        CommanderInput(9001, 1.0, "rule_single"),
+    ]
+    camp = [
+        SideInput(
+            side_id=900_001,
+            battle_id=900_000,
+            year=1800,
+            outcome="victory",
+            is_defender=None,
+            commanders=tuple(named),
+            log_troops=1.0,
+        ),
+        SideInput(
+            side_id=900_002,
+            battle_id=900_000,
+            year=1800,
+            outcome="victory",
+            is_defender=None,
+            commanders=(),
+            log_troops=2.0,
+        ),
+        SideInput(
+            side_id=900_003,
+            battle_id=900_000,
+            year=1800,
+            outcome="defeat",
+            is_defender=None,
+            commanders=(CommanderInput(9002, 1.0, "rule_single"),),
+            log_troops=1.5,
+        ),
+    ]
+    design = build_design([*sides, *camp])
+    assert design.counts.battles_merged_camps == 1
+    partial = np.flatnonzero((design.side_unknown_share > 0) & (design.side_kind == 0))
+    assert partial.size == 1
+    x = x_difference(design, {**log_troops, 900_001: 1.0, 900_002: 2.0, 900_003: 1.5})
+    model = build_model(design, x, ModelPriors())
+    potential = model.compile_fn(
+        model.replace_rvs_by_values([model.potentials[0]])[0],
+        inputs=model.value_vars,
+        on_unused_input="ignore",
+    )
+    point = _random_point(model)
+    sigma = np.exp(point["sigma_skill_log__"])
+    scores = assemble_side_scores(
+        design,
+        (sigma * point["z_skill"])[None],
+        np.array([sigma]),
+        point["z_side"][None],
+        np.array([point["mu_unknown"]]),
+        np.array([point["mu_unattributed"]]),
+    )[0]
+    c1 = float(np.exp(point["log_c1"]))
+    c2 = c1 + float(np.exp(point["log_gap"]))
+    eta = linear_predictor(
+        design.side_a, design.side_b, scores, x, design.defender_diff, point["beta_force"], 0.0
+    )
+    np.testing.assert_allclose(
+        float(potential(point)), log_likelihood(eta, design.k_lo, design.k_hi, c1, c2), rtol=1e-8
+    )

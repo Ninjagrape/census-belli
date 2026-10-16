@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import math
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -10,7 +13,7 @@ from pipeline.modelers.model import assemble_side_scores
 from pipeline.modelers.ordinal import expected_score
 from pipeline.modelers.records import KIND_NAMED
 from pipeline.modelers.war import centre_skills, compute_war, replacement_level
-from tests.unit.modelers_helpers import battle
+from tests.unit.modelers_helpers import battle, side
 
 N_DRAWS = 40
 
@@ -114,6 +117,105 @@ def test_realised_uses_the_observed_score() -> None:
     assert np.allclose(war.realised_side[:, 1], 1.0 - design.y_a[0] - war.e_rep[:, 1])
 
 
+def test_a_partly_named_camp_does_not_hand_its_whole_luck_to_one_general() -> None:
+    # Two winning sides merge into one camp; general 11 holds 10% of its troops
+    # and the other 90% is the anonymous latent, so he is a 10%-named general.
+    sides = [
+        side(1, 1, (11,), outcome="victory", log_troops=math.log(100.0)),
+        side(2, 1, (), outcome="victory", log_troops=math.log(900.0)),
+        side(3, 1, (31,), outcome="defeat", log_troops=math.log(500.0)),
+    ]
+    design = build_design(sides)
+    rng = np.random.default_rng(5)
+    skills = rng.normal(size=(N_DRAWS, design.n_generals))
+    scores = assemble_side_scores(
+        design,
+        skills,
+        np.ones(N_DRAWS),
+        rng.normal(size=(N_DRAWS, design.latent_sides.size)),
+        rng.normal(size=N_DRAWS),
+        None,
+    )
+    war = compute_war(
+        design,
+        skills,
+        scores,
+        np.array([0.2]),
+        np.full(N_DRAWS, 0.5),
+        np.zeros(N_DRAWS),
+        np.full(N_DRAWS, 0.6),
+        np.full(N_DRAWS, 2.0),
+    )
+    entry = int(np.flatnonzero(design.cmd_general == list(design.general_ids).index(11))[0])
+    side_index = int(design.cmd_side[entry])
+    named = float(design.cmd_weight[entry])
+    luck = design.y_a[0] - war.e_model[:, side_index]
+    assert named == pytest.approx(0.1)
+    expected = named * luck + war.xwar_entry[:, entry]
+    assert np.allclose(war.realised_entry[:, entry], expected)
+    # The old arithmetic gave this general the side's whole realised value.
+    assert not np.allclose(war.realised_entry[:, entry], war.realised_side[:, side_index])
+
+
 def test_centre_skills_zero_mean_per_draw() -> None:
     skills = np.random.default_rng(1).normal(size=(5, 7)) + 3.0
     assert np.allclose(centre_skills(skills).mean(axis=1), 0.0)
+
+
+def test_group_force_slopes_and_defender_stay_fixed_in_the_counterfactual() -> None:
+    design, p = _setup()
+    rng = np.random.default_rng(5)
+    slopes = rng.normal(0.5, 0.3, size=(N_DRAWS, design.n_battles))
+    defender = np.array([1.0, 0.0, -1.0])
+    design = replace(design, defender_diff=defender)
+    beta_def = np.full(N_DRAWS, 0.4)
+    q = {**p, "beta_force": slopes, "beta_def": beta_def}
+    war = compute_war(design, **q)  # type: ignore[arg-type]
+    t, b = 2, 0
+    a, bb = design.side_a[b], design.side_b[b]
+    shift = slopes[t, b] * p["x_diff"][b] + 0.4 * defender[b]
+    eta_rep = war.s_rep[t] - p["side_scores"][t, bb] + shift
+    assert war.e_rep[t, a] == pytest.approx(float(expected_score(eta_rep, 0.6, 2.0)))
+    eta_rep_b = war.s_rep[t] - p["side_scores"][t, a] - shift
+    assert war.e_rep[t, bb] == pytest.approx(float(expected_score(eta_rep_b, 0.6, 2.0)))
+
+
+def test_camp_war_replaces_only_the_named_part_and_credits_the_named_share() -> None:
+    sides = [
+        side(1, 1, (11,), outcome="victory", log_troops=math.log(100.0)),
+        side(2, 1, (), outcome="victory", log_troops=math.log(900.0)),
+        side(3, 1, (31,), outcome="defeat"),
+        *battle(2, (5,), (6,)),
+        *battle(3, (7,), (8,)),
+    ]
+    design = build_design(sides)
+    rng = np.random.default_rng(2)
+    skills = rng.normal(size=(N_DRAWS, design.n_generals))
+    scores = assemble_side_scores(
+        design,
+        skills,
+        np.ones(N_DRAWS),
+        rng.normal(size=(N_DRAWS, design.latent_sides.size)),
+        rng.normal(size=N_DRAWS),
+        None,
+    )
+    p = {
+        "skills": skills,
+        "side_scores": scores,
+        "x_diff": np.zeros(design.n_battles),
+        "beta_force": np.zeros(N_DRAWS),
+        "beta_def": np.zeros(N_DRAWS),
+        "c1": np.full(N_DRAWS, 0.6),
+        "c2": np.full(N_DRAWS, 2.0),
+    }
+    war = compute_war(design, **p)  # type: ignore[arg-type]
+    camp = int(design.side_a[0])
+    opponent = int(design.side_b[0])
+    named = int(np.flatnonzero(design.general_ids == 11)[0])
+    # Only the 10% named part moves to replacement; the unnamed 90% stays.
+    eta_rep = scores[:, camp] - 0.1 * skills[:, named] + 0.1 * war.s_rep - scores[:, opponent]
+    assert np.allclose(war.e_rep[:, camp], expected_score(eta_rep, 0.6, 2.0))
+    # The named general takes the whole value of that part, nothing from the rest.
+    entry = int(np.flatnonzero(design.cmd_side == camp)[0])
+    assert np.allclose(war.xwar_entry[:, entry], war.xwar_side[:, camp])
+    assert np.allclose(war.total_xwar[:, named], war.xwar_side[:, camp])

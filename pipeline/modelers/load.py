@@ -18,7 +18,7 @@ import json
 import re
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,8 @@ from pipeline.modelers.records import CommanderInput, SideInput
 __all__ = [
     "ImputedRound",
     "check_round_provenance",
+    "fill_camp_log_troops",
+    "has_multi_side_battle",
     "latest_written_imputation_run_id",
     "load_battle_quality",
     "load_battle_types",
@@ -46,7 +48,8 @@ _UNKNOWN_METHOD = "unknown"
 _LOAD_SIDES = text(
     """
     SELECT bs.side_id, bs.battle_id, b.year_astronomical,
-           CAST(bs.outcome AS TEXT), bs.is_defender
+           CAST(bs.outcome AS TEXT), bs.is_defender,
+           CAST(b.battle_type AS TEXT), bs.est_troops_neutral_log_mean
     FROM battle_sides bs
     JOIN battles b ON b.battle_id = bs.battle_id
     ORDER BY bs.side_id
@@ -137,9 +140,61 @@ def load_side_inputs(conn: Any) -> list[SideInput]:
             outcome=outcome,
             is_defender=None if is_defender is None else bool(is_defender),
             commanders=tuple(by_side.get(int(side_id), ())),
+            battle_type=battle_type,
+            log_troops=None if log_troops is None else float(log_troops),
         )
-        for side_id, battle_id, year, outcome, is_defender in conn.execute(_LOAD_SIDES).fetchall()
+        for (
+            side_id,
+            battle_id,
+            year,
+            outcome,
+            is_defender,
+            battle_type,
+            log_troops,
+        ) in conn.execute(_LOAD_SIDES).fetchall()
     ]
+
+
+def has_multi_side_battle(sides: Sequence[SideInput]) -> bool:
+    """Whether any battle has three or more sides (so a camp may be merged)."""
+    counts: dict[int, int] = defaultdict(int)
+    for side in sides:
+        counts[side.battle_id] += 1
+    return any(n >= 3 for n in counts.values())
+
+
+def fill_camp_log_troops(
+    sides: Sequence[SideInput], rounds: Sequence[ImputedRound]
+) -> list[SideInput]:
+    """Give each unmeasured side of a 3+ side battle its mean imputed log troops.
+
+    A merged camp splits its credit among member sides by troops. A member
+    with no reconcile estimate would otherwise force equal shares, so it uses
+    its mean over the imputed rounds instead. One value is used for every
+    round, which keeps a single design (and so one set of commander weights)
+    across the fits.
+
+    Args:
+        sides: All sides.
+        rounds: The imputed rounds.
+
+    Returns:
+        The sides, with ``log_troops`` filled where it was None, a round had a
+        value, and the side belongs to a battle with three or more sides.
+    """
+    if not rounds or not has_multi_side_battle(sides):
+        return list(sides)
+    sizes: dict[int, int] = defaultdict(int)
+    for side in sides:
+        sizes[side.battle_id] += 1
+    out: list[SideInput] = []
+    for side in sides:
+        if side.log_troops is None and sizes[side.battle_id] >= 3:
+            values = [r.log_troops[side.side_id] for r in rounds if side.side_id in r.log_troops]
+            if values:
+                side = replace(side, log_troops=float(np.mean(values)))
+        out.append(side)
+    return out
 
 
 def subset_sides(sides: Sequence[SideInput], limit: int | None) -> list[SideInput]:

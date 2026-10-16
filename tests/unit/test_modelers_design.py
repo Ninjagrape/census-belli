@@ -15,6 +15,7 @@ from pipeline.modelers.records import (
     KIND_NAMED,
     KIND_UNATTRIBUTED,
     KIND_UNKNOWN,
+    DesignParams,
     SideInput,
 )
 from tests.unit.modelers_helpers import battle, side
@@ -150,14 +151,23 @@ def test_general_on_both_sides_excluded() -> None:
     assert design.n_battles == 0
 
 
-def test_defender_complement_fill_and_coding() -> None:
-    first = battle(1, (1,), (2,))
-    first[0] = replace(first[0], is_defender=True)
-    second = battle(2, (1,), (3,))
-    design = build_design(first + second)
-    assert design.defender_diff.tolist() == [2.0, 0.0]
-    assert design.defender_known.tolist() == [True, False]
+def test_defender_diff_fills_the_complement_of_a_lone_stated_flag() -> None:
+    known = battle(1, (1,), (2,))
+    known = [replace(known[0], is_defender=True), replace(known[1], is_defender=False)]
+    half = battle(2, (1,), (3,))
+    half[0] = replace(half[0], is_defender=True)
+    design = build_design(known + half, DesignParams(min_defender_battles=1))
+    assert design.defender_diff.tolist() == [1.0, 1.0]
+    assert design.defender_known.tolist() == [True, True]
+    assert design.counts.defender_pairs_both_stated == 1
+    assert design.counts.defender_pairs_filled == 1
     assert design.defender_term_used
+
+
+def test_defender_diff_is_zero_when_neither_flag_is_stated() -> None:
+    design = build_design(battle(1, (1,), (2,)), DesignParams(min_defender_battles=1))
+    assert design.defender_diff.tolist() == [0.0]
+    assert not design.defender_term_used
 
 
 def test_defender_term_unused_when_all_null() -> None:

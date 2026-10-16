@@ -16,6 +16,7 @@ from typing import Any, Final
 import yaml
 
 from pipeline.modelers.priors import ModelPriors
+from pipeline.modelers.records import DesignParams
 from pipeline.reconcilers.model import SamplerSettings
 
 __all__ = ["DEFAULT_CONFIG_PATH", "GateParams", "ModelParams", "load_model_params"]
@@ -71,6 +72,7 @@ class ModelParams:
 
     Attributes:
         priors: Prior hyperparameters.
+        design: Thresholds for the optional defender and water/air terms.
         sampler: Sampler settings for the first attempt of each fit.
         retry_target_accept: ``target_accept`` for the one retry.
         max_rhat: Write threshold per round.
@@ -94,6 +96,7 @@ class ModelParams:
     """
 
     priors: ModelPriors
+    design: DesignParams
     sampler: SamplerSettings
     retry_target_accept: float
     max_rhat: float
@@ -138,6 +141,8 @@ class ModelParams:
         write = dict(merged.get("write") or {})
         pooling = dict(merged.get("pooling") or {})
         prior_pred = dict(merged.get("prior_predictive") or {})
+        design = dict(merged.get("design") or {})
+        defaults_design = DesignParams()
         defaults = SamplerSettings()
         kept = int(pooling.get("draws_kept_per_round", 500))
         if kept < 2:
@@ -145,6 +150,16 @@ class ModelParams:
         max_rounds = pooling.get("max_rounds")
         return cls(
             priors=ModelPriors.from_params(dict(merged.get("priors") or {})),
+            design=DesignParams(
+                min_defender_battles=int(
+                    design.get("min_defender_battles", defaults_design.min_defender_battles)
+                ),
+                min_battles_per_force_group=int(
+                    design.get(
+                        "min_battles_per_force_group", defaults_design.min_battles_per_force_group
+                    )
+                ),
+            ),
             sampler=SamplerSettings(
                 draws=int(sampler.get("draws", defaults.draws)),
                 tune=int(sampler.get("tune", defaults.tune)),

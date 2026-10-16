@@ -22,6 +22,7 @@ from pipeline.modelers.ordinal import category_probs
 from pipeline.modelers.records import CommanderInput, SideInput
 
 __all__ = [
+    "TRUE_BETA_DEFENDER",
     "TRUE_BETA_FORCE",
     "TRUE_C1",
     "TRUE_C2",
@@ -33,6 +34,7 @@ __all__ = [
 
 TRUE_SIGMA_SKILL = 1.3
 TRUE_BETA_FORCE = 0.5
+TRUE_BETA_DEFENDER = 0.4
 TRUE_C1 = 0.3
 TRUE_C2 = 1.2
 TRUE_MU_UNKNOWN = -0.4
@@ -63,6 +65,7 @@ def simulate_tournament(
     battles_per_era: int = 200,
     p_unknown: float = 0.04,
     p_pair: float = 0.12,
+    beta_defender: float = 0.0,
 ) -> SimTournament:
     """Simulate two disconnected eras of battles.
 
@@ -72,11 +75,16 @@ def simulate_tournament(
         battles_per_era: Battles in each era.
         p_unknown: Probability a side has no recorded commander.
         p_pair: Probability a side has two co-commanders.
+        beta_defender: True defender coefficient. Non-zero also flags every
+            battle (one side defends, chosen by a coin flip drawn from a
+            generator of its own so the default tournament is unchanged);
+            zero leaves every flag unknown.
 
     Returns:
         The tournament.
     """
     rng = np.random.default_rng(seed)
+    flag_rng = np.random.default_rng(seed + 7919)
     n = 2 * generals_per_era
     skill = rng.normal(0.0, TRUE_SIGMA_SKILL, n)
     true_skill = {g + 1: float(skill[g]) for g in range(n)}
@@ -122,8 +130,14 @@ def simulate_tournament(
             # Orientation must carry no information: randomise which side gets
             # the lower id by swapping the pair's labels.
             order = (0, 1) if rng.random() < 0.5 else (1, 0)
+            defends = (0, 0)
+            if beta_defender:
+                defends = (1, 0) if flag_rng.random() < 0.5 else (0, 1)
             eta = (
-                scores[order[0]] - scores[order[1]] + TRUE_BETA_FORCE * (x[order[0]] - x[order[1]])
+                scores[order[0]]
+                - scores[order[1]]
+                + TRUE_BETA_FORCE * (x[order[0]] - x[order[1]])
+                + beta_defender * (defends[order[0]] - defends[order[1]])
             )
             k = int(rng.choice(5, p=category_probs(eta, TRUE_C1, TRUE_C2)))
             report_on_a = rng.random() < 0.7
@@ -138,7 +152,7 @@ def simulate_tournament(
                         battle_id=battle_id,
                         year=-300 + battle_id if era == 0 else 1800 + battle_id,
                         outcome=text,
-                        is_defender=None,
+                        is_defender=bool(defends[which]) if beta_defender else None,
                         commanders=tuple(
                             CommanderInput(g, w, "rule_roles")
                             for g, w in zip(gens, weights_of[which], strict=True)

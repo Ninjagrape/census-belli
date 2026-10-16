@@ -6,8 +6,16 @@ Per side a score ``S_side``::
     unknown      S = mu_unknown      + sigma_skill * z_side
     unattributed S = mu_unattributed + sigma_skill * z_side
 
-and per battle ``eta = S_A - S_B + beta_force * x_diff + beta_def * d_diff``
-with a cumulative logit over five levels and symmetric cutpoints
+A merged camp (3+ side battle) is the general case: ``S = sum_i w_i skill_i +
+u_k (mu_unknown + sigma_skill z_side) + u_a (mu_unattributed + sigma_skill
+z_side)`` with ``sum_i w_i + u_k + u_a = 1``: the troop share of unknown or
+unattributed members stays a latent component and is never handed to the
+named commanders. Ordinary sides are the ``u = 0`` and ``w`` summing to 1, or
+``u = 1`` and no commanders, cases.
+
+and per battle ``eta = S_A - S_B + beta_force_g * x_diff + beta_def * d_diff``
+(every term a difference of side A minus side B, so swapping the sides negates
+``eta``) with a cumulative logit over five levels and symmetric cutpoints
 (:mod:`pipeline.modelers.ordinal`). Outcomes are interval-censored: an exact
 outcome has ``k_lo == k_hi``, a same-class grade disagreement spans two levels.
 
@@ -27,7 +35,11 @@ compile time explode, handover-log 20.2 item 7).
 
 Variable names: ``sigma_skill``, ``z_skill``, ``skill`` (dim ``general``),
 ``mu_unknown``, ``mu_unattributed``, ``z_side`` (dim ``latent_side``),
-``beta_force``, ``beta_def`` (only when the design has defender data),
+``beta_force`` (the land slope), ``beta_def`` (only when the design has the
+defender term), ``delta_water_air`` and ``beta_force_group`` (dim
+``force_group``, land then water/air; only when the design has a water/air
+group: ``beta_force_g = beta_force + delta_water_air * is_water_air``, with the
+skill population shared across groups; amphibious battles are land),
 ``log_c1``, ``log_gap``, ``c1``, ``c2``; the joint model adds ``z_x`` and
 ``x_diff_latent`` (one per battle).
 """
@@ -42,7 +54,7 @@ import structlog
 
 from pipeline.modelers.ordinal import PROB_FLOOR
 from pipeline.modelers.priors import ModelPriors
-from pipeline.modelers.records import KIND_UNATTRIBUTED, KIND_UNKNOWN, ModelDesign
+from pipeline.modelers.records import FORCE_GROUP_LABELS, ModelDesign
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     import arviz as az
@@ -213,10 +225,13 @@ def _build(
     latent = design.latent_sides
     latent_slot = np.full(design.n_sides, -1, dtype=np.int64)
     latent_slot[latent] = np.arange(latent.size)
-    is_unknown = (design.side_kind == KIND_UNKNOWN).astype(float)
-    is_unattributed = (design.side_kind == KIND_UNATTRIBUTED).astype(float)
+    unknown_share = design.side_unknown_share
+    unattributed_share = design.side_unattributed_share
+    latent_scale = unknown_share + unattributed_share
     n = design.n_battles
     coords: dict[str, Any] = {"general": [int(g) for g in design.general_ids]}
+    if design.n_force_groups > 1:
+        coords["force_group"] = list(FORCE_GROUP_LABELS)
     if latent.size:
         coords["latent_side"] = [int(design.side_ids[i]) for i in latent]
 
@@ -233,18 +248,34 @@ def _build(
         if latent.size:
             z_side = pm.Normal("z_side", 0.0, 1.0, dims="latent_side")
             padded = pt.concatenate([pt.zeros(1), z_side])
-            offset = sigma_skill * padded[_data(pm, "data_latent_slot", latent_slot + 1)]
-            if is_unknown.any():
+            offset = (
+                sigma_skill
+                * padded[_data(pm, "data_latent_slot", latent_slot + 1)]
+                * _data(pm, "data_latent_scale", latent_scale)
+            )
+            if unknown_share.any():
                 mu_unknown = pm.Normal("mu_unknown", 0.0, priors.mu_unknown_sd)
-                offset = offset + mu_unknown * _data(pm, "data_is_unknown", is_unknown)
-            if is_unattributed.any():
+                offset = offset + mu_unknown * _data(pm, "data_unknown_share", unknown_share)
+            if unattributed_share.any():
                 mu_unattributed = pm.Normal("mu_unattributed", 0.0, priors.mu_unattributed_sd)
                 offset = offset + mu_unattributed * _data(
-                    pm, "data_is_unattributed", is_unattributed
+                    pm, "data_unattributed_share", unattributed_share
                 )
             scores = scores + offset
 
         beta_force = pm.Normal("beta_force", priors.beta_force_mu, priors.beta_force_sd)
+        force_slope: Any = beta_force
+        if design.n_force_groups > 1:
+            # A fixed offset from the land slope: beta_force stays the
+            # identified land slope that the circularity gate reads, and a
+            # variance parameter on two groups would not be identified.
+            delta = pm.Normal("delta_water_air", 0.0, priors.delta_water_air_sd)
+            group_slope = pm.Deterministic(
+                "beta_force_group",
+                pt.stack([beta_force, beta_force + delta]),
+                dims="force_group",
+            )
+            force_slope = group_slope[_data(pm, "data_force_group", design.force_group)]
         side_a = _data(pm, "data_side_a", design.side_a)
         side_b = _data(pm, "data_side_b", design.side_b)
         if x_diff is not None:
@@ -257,7 +288,7 @@ def _build(
                 _data(pm, "data_x_mu", measurement[0])
                 + _data(pm, "data_x_sd", measurement[1]) * z_x,
             )
-        eta = scores[side_a] - scores[side_b] + beta_force * x_term
+        eta = scores[side_a] - scores[side_b] + force_slope * x_term
         if design.defender_term_used:
             beta_def = pm.Normal("beta_def", priors.beta_def_mu, priors.beta_def_sd)
             eta = eta + beta_def * _data(pm, "data_defender_diff", design.defender_diff)
@@ -286,6 +317,7 @@ def _build(
         n_generals=design.n_generals,
         n_latent_sides=int(latent.size),
         defender_term=design.defender_term_used,
+        force_groups=design.n_force_groups,
         joint_latent=measurement is not None,
     )
     return model
@@ -298,13 +330,17 @@ class PosteriorDraws:
     Attributes:
         skills: Raw (uncentred) skill, shape ``(T, n_generals)``.
         side_scores: ``S`` per side, shape ``(T, n_sides)``.
-        beta_force: Shape ``(T,)``.
+        beta_force: Land force slope, shape ``(T,)``.
         beta_def: Shape ``(T,)``; zeros when the model has no defender term.
         c1: Shape ``(T,)``.
         c2: Shape ``(T,)``.
         sigma_skill: Shape ``(T,)``.
         x_diff: Per-draw ``x_A - x_B`` ``(T, n_battles)`` for the joint
             model, else None (the caller holds the fixed ``x_diff``).
+        beta_force_group: Per-group slopes ``(T, n_force_groups)``, land
+            then water/air, or None when the design has a single slope.
+        delta_water_air: Water/air offset ``(T,)``, or None without that group.
+        mu_unknown: ``(T,)``, or None when no side carries an unknown share.
     """
 
     skills: np.ndarray
@@ -315,11 +351,27 @@ class PosteriorDraws:
     c2: np.ndarray
     sigma_skill: np.ndarray
     x_diff: np.ndarray | None = None
+    beta_force_group: np.ndarray | None = None
+    delta_water_air: np.ndarray | None = None
+    mu_unknown: np.ndarray | None = None
 
     @property
     def n_draws(self) -> int:
         """Total number of draws."""
         return int(self.skills.shape[0])
+
+    def force_slopes(self, design: ModelDesign) -> np.ndarray:
+        """The force slope each battle uses.
+
+        Args:
+            design: The design the draws were fitted on.
+
+        Returns:
+            ``(T,)`` when one slope serves every battle, else ``(T, n_battles)``.
+        """
+        if self.beta_force_group is None or design.n_force_groups == 1:
+            return self.beta_force
+        return np.asarray(self.beta_force_group[:, design.force_group])
 
 
 def assemble_side_scores(
@@ -351,11 +403,14 @@ def assemble_side_scores(
         scores[:, side] += weight * skills[:, general]
     latent = design.latent_sides
     if latent.size and z_side is not None:
-        scores[:, latent] += sigma_skill[:, None] * z_side
-    for kind, mu in ((KIND_UNKNOWN, mu_unknown), (KIND_UNATTRIBUTED, mu_unattributed)):
-        mask = design.side_kind == kind
-        if mu is not None and mask.any():
-            scores[:, mask] += mu[:, None]
+        scale = (design.side_unknown_share + design.side_unattributed_share)[latent]
+        scores[:, latent] += sigma_skill[:, None] * z_side * scale[None, :]
+    for share, mu in (
+        (design.side_unknown_share, mu_unknown),
+        (design.side_unattributed_share, mu_unattributed),
+    ):
+        if mu is not None and share.any():
+            scores += mu[:, None] * share[None, :]
     return scores
 
 
@@ -399,4 +454,7 @@ def extract_draws(idata: az.InferenceData, design: ModelDesign) -> PosteriorDraw
         c2=flat("c2"),
         sigma_skill=sigma,
         x_diff=x_diff,
+        beta_force_group=optional("beta_force_group"),
+        delta_water_air=optional("delta_water_air"),
+        mu_unknown=optional("mu_unknown"),
     )

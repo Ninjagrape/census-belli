@@ -411,7 +411,10 @@ def prior_predictive(
         rng.normal(0.0, priors.mu_unknown_sd, n_draws),
         rng.normal(0.0, priors.mu_unattributed_sd, n_draws),
     )
-    beta_force = rng.normal(priors.beta_force_mu, priors.beta_force_sd, n_draws)
+    beta_force: np.ndarray = rng.normal(priors.beta_force_mu, priors.beta_force_sd, n_draws)
+    if design.n_force_groups > 1:
+        delta = rng.normal(0.0, priors.delta_water_air_sd, n_draws)
+        beta_force = beta_force[:, None] + delta[:, None] * design.force_group[None, :]
     beta_def = (
         rng.normal(priors.beta_def_mu, priors.beta_def_sd, n_draws)
         if design.defender_term_used
@@ -522,7 +525,7 @@ def posterior_predictive_category_check(
         draws.side_scores[picks],
         x,
         design.defender_diff,
-        draws.beta_force[picks],
+        draws.force_slopes(design)[picks],
         draws.beta_def[picks],
     )[:, exact]
     probs = category_probs(eta, draws.c1[picks, None], draws.c2[picks, None])

@@ -22,6 +22,8 @@ def side(
     is_defender: bool | None = None,
     method: str = "rule_single",
     weights: tuple[float, ...] | None = None,
+    battle_type: str | None = None,
+    log_troops: float | None = None,
 ) -> SideInput:
     """A side with the given generals, equal weights unless given."""
     ws = weights or tuple(1.0 / len(generals) for _ in generals)
@@ -32,6 +34,8 @@ def side(
         outcome=outcome,
         is_defender=is_defender,
         commanders=tuple(cmd(g, w, method) for g, w in zip(generals, ws, strict=True)),
+        battle_type=battle_type,
+        log_troops=log_troops,
     )
 
 

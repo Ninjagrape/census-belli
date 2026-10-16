@@ -52,12 +52,14 @@ from pipeline.modelers.components import (
     find_bridges,
 )
 from pipeline.modelers.config import ModelParams, load_model_params
-from pipeline.modelers.design import build_design, x_difference
+from pipeline.modelers.design import build_design, camp_measurements, x_difference
 from pipeline.modelers.fitting import FitOutcome, fit_with_retry
 from pipeline.modelers.gates import gate_dict, run_gates
 from pipeline.modelers.load import (
     ImputedRound,
     check_round_provenance,
+    fill_camp_log_troops,
+    has_multi_side_battle,
     latest_written_imputation_run_id,
     load_battle_types,
     load_general_names,
@@ -73,7 +75,7 @@ from pipeline.modelers.model import (
     extract_draws,
 )
 from pipeline.modelers.pool import combine_rounds
-from pipeline.modelers.records import ModelDesign
+from pipeline.modelers.records import DesignParams, ModelDesign
 from pipeline.modelers.summarise import (
     PooledFit,
     RoundReduction,
@@ -213,13 +215,7 @@ def _fit_rounds(
 
 def _joint_inputs(conn: Any, design: ModelDesign) -> tuple[np.ndarray, np.ndarray]:
     """Measured log-troop mean and sd per side index (NaN where unmeasured)."""
-    measured = load_log_troop_measurements(conn)
-    obs_mean = np.full(design.n_sides, np.nan)
-    obs_sd = np.full(design.n_sides, np.nan)
-    for i, side_id in enumerate(design.side_ids):
-        if int(side_id) in measured:
-            obs_mean[i], obs_sd[i] = measured[int(side_id)]
-    return obs_mean, obs_sd
+    return camp_measurements(design, load_log_troop_measurements(conn))
 
 
 def _fit_joint(
@@ -320,6 +316,11 @@ def _estimate_rows(design: ModelDesign, fit: PooledFit) -> list[store.SkillEstim
             total_war=float(fit.war_mean[g]),
             war_per_battle=float(per_battle[g]),
             war_sd=float(fit.war_sd[g]),
+            war_ci_lo=float(fit.war_ci_lo[g]),
+            war_ci_hi=float(fit.war_ci_hi[g]),
+            p_above_next_rank=(
+                None if np.isnan(fit.p_above_next_rank[g]) else float(fit.p_above_next_rank[g])
+            ),
             n_battles=int(design.n_included_battles[g]),
             rank=int(fit.rank[g]),
         )
@@ -398,6 +399,9 @@ def _per_general_columns(
         "total_xwar": fit.war_mean,
         "xwar_sd_sqrt_T": fit.war_sd,
         "xwar_fmi": fit.war_fmi,
+        "xwar_ci95_lo": fit.war_ci_lo,
+        "xwar_ci95_hi": fit.war_ci_hi,
+        "p_above_next_rank": fit.p_above_next_rank,
         "realised_war_mean": fit.realised_mean,
         "rank": fit.rank,
     }
@@ -407,6 +411,7 @@ def _draws_arrays(design: ModelDesign, fit: PooledFit) -> dict[str, np.ndarray]:
     """What evaluate needs from the pooled fit."""
     return {
         "skill_draws": fit.skill_draws.astype(np.float32),
+        "war_draws": fit.war_draws.astype(np.float32),
         "general_ids": design.general_ids,
         "entry_xwar_mean": fit.entry_xwar,
         "entry_realised_war_mean": fit.entry_realised,
@@ -444,6 +449,46 @@ def _prior_summary(pp: PriorPredictive) -> dict[str, Any]:
     }
 
 
+def _defender_term_summary(
+    design: ModelDesign, params: DesignParams, pooled: PooledFit | None
+) -> dict[str, Any]:
+    """Whether the defender term is in the model, the counts behind it, and beta_def.
+
+    ``beta_def`` is Rubin-pooled over rounds; ``corr_with_mu_unknown`` is the
+    correlation of its pooled draws with ``mu_unknown``.
+    """
+    summary: dict[str, Any] = {
+        "status": "used" if design.defender_term_used else "omitted_below_threshold",
+        "battles_with_known_opposite_flags": design.counts.defender_battles_known,
+        "pairs_both_stated": design.counts.defender_pairs_both_stated,
+        "pairs_filled": design.counts.defender_pairs_filled,
+        "min_defender_battles": params.min_defender_battles,
+    }
+    if pooled is not None and "beta_def" in pooled.term_summaries:
+        summary["beta_def"] = pooled.term_summaries["beta_def"]
+    return summary
+
+
+def _force_group_summary(
+    design: ModelDesign, params: DesignParams, pooled: PooledFit | None
+) -> dict[str, Any]:
+    """Whether the water/air force slope is separate, the count behind it, and its fit.
+
+    ``beta_force`` (reported under ``rubin``) is the land slope;
+    ``beta_water_air`` is land plus ``delta_water_air``. Both are Rubin-pooled.
+    """
+    summary: dict[str, Any] = {
+        "status": "water_air_separate" if design.n_force_groups > 1 else "single_slope",
+        "battles_water_air": design.counts.battles_water_air,
+        "min_battles_per_force_group": params.min_battles_per_force_group,
+    }
+    if pooled is not None:
+        for name in ("beta_water_air", "delta_water_air"):
+            if name in pooled.term_summaries:
+                summary[name] = pooled.term_summaries[name]
+    return summary
+
+
 def _pooled_diagnostics(
     *,
     design: ModelDesign,
@@ -459,11 +504,13 @@ def _pooled_diagnostics(
     decomposition: float | None,
     directory: Path,
     type_counts: dict[str, int],
+    design_params: DesignParams,
 ) -> dict[str, Any]:
     """The pooled ``model_runs.diagnostics`` payload."""
     circ = next((g for g in gates if g.name == "circularity_check"), None)
     return {
         "worst": combined["worst"],
+        "worst_reference": combined.get("reference"),
         "converged": combined["converged"],
         "rounds_failed": combined["rounds_failed"],
         "rounds": [r.summary for r in rounds],
@@ -479,7 +526,8 @@ def _pooled_diagnostics(
             "largest_share": comp.largest_share,
             "sizes_top10": comp.sizes[:10],
         },
-        "defender_term": "used" if design.defender_term_used else "omitted_no_data",
+        "defender_term": _defender_term_summary(design, design_params, pooled),
+        "force_groups": _force_group_summary(design, design_params, pooled),
         "prior_predictive": _prior_summary(pp),
         "rubin": None if pooled is None else _rubin_summary(pooled),
         "circularity": None if circ is None else circ.details,
@@ -538,7 +586,13 @@ def _run_body(
     if not sides:
         logger.warning("model_no_sides", hint="no battle_sides rows; writing nothing")
         return
-    design = build_design(sides)
+    # Camp credit shares need the imputed rounds, so they are read first when
+    # a 3+ side battle exists; otherwise the empty-design exit below stays cheap.
+    rounds: list[ImputedRound] | None = None
+    if has_multi_side_battle(sides):
+        rounds = read_rounds(Path(mp.imputed_root), mp.scale, mp.max_rounds)
+        sides = fill_camp_log_troops(sides, rounds)
+    design = build_design(sides, mp.design)
     logger.info("model_design_built", n_generals=design.n_generals, **design.counts.as_dict())
     if design.n_battles == 0:
         logger.warning(
@@ -546,7 +600,8 @@ def _run_body(
         )
         return
 
-    rounds = read_rounds(Path(mp.imputed_root), mp.scale, mp.max_rounds)
+    if rounds is None:
+        rounds = read_rounds(Path(mp.imputed_root), mp.scale, mp.max_rounds)
     imputation_run_id = check_round_provenance(
         rounds, latest_written_imputation_run_id(conn, mp.scale)
     )
@@ -708,6 +763,7 @@ def _finish(
             decomposition=decomposition,
             directory=directory,
             type_counts=type_counts,
+            design_params=mp.design,
         ),
     )
     if owns_connection:

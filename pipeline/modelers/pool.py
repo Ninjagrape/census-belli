@@ -19,6 +19,7 @@ The roll-up key names (``max_rhat``, ``min_ess_bulk``, ``divergences``,
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -149,16 +150,67 @@ def rank_descending(general_ids: np.ndarray, values: np.ndarray) -> np.ndarray:
     return ranks
 
 
+# Raw skill = skill_centred + sigma_skill * z-bar, a function of quantities that
+# are already gated, so gating it again adds nothing. The common-shift direction
+# is carried by z_skill (through z-bar) and by mu_unknown / mu_unattributed,
+# which stay gated; this is redundancy, not non-identification. Raw ``skill`` is
+# reported for reference only.
+_REFERENCE_VARIABLES = ("skill", "z_skill", "skill_centred")
+
+
+def _finite(value: float) -> float | None:
+    return value if math.isfinite(value) else None
+
+
+def _variable_convergence(posterior: Any, name: str) -> dict[str, float | None]:
+    """``{max_rhat, min_ess_bulk}`` of one variable (None where undefined)."""
+    import arviz as az  # noqa: PLC0415 - deferred like the imputers' import
+
+    subset = posterior[[name]]
+    rhat = np.asarray(az.rhat(subset)[name].values, dtype=float)
+    ess = np.asarray(az.ess(subset, method="bulk")[name].values, dtype=float)
+    return {
+        "max_rhat": _finite(float(np.nanmax(rhat))) if np.isfinite(rhat).any() else None,
+        "min_ess_bulk": _finite(float(np.nanmin(ess))) if np.isfinite(ess).any() else None,
+    }
+
+
 def round_convergence(idata: az.InferenceData) -> dict[str, Any]:
     """One round's ``{max_rhat, min_ess_bulk, divergences}`` (None where undefined).
+
+    The roll-up covers every posterior variable except raw ``skill``, plus
+    ``skill_centred`` (skill minus its per-draw mean across generals). Raw
+    ``skill`` is left out because it is a function of gated quantities (see
+    ``_REFERENCE_VARIABLES``). ``reference`` repeats rhat and ESS for raw
+    ``skill``, ``z_skill`` and ``skill_centred`` separately, so a gate miss can
+    be traced.
 
     Args:
         idata: The round's fit.
 
     Returns:
-        The roll-up dict.
+        The roll-up dict, with a ``reference`` entry per skill-like variable.
     """
-    return convergence(idata)
+    import arviz as az  # noqa: PLC0415 - deferred like the imputers' import
+
+    posterior = idata.posterior
+    if "skill" not in posterior or "general" not in posterior["skill"].dims:
+        return convergence(idata)
+    centred = posterior["skill"] - posterior["skill"].mean("general")
+    with_centred = posterior.assign(skill_centred=centred)
+    groups: dict[str, Any] = {"posterior": with_centred.drop_vars("skill")}
+    if "sample_stats" in idata.groups():
+        groups["sample_stats"] = idata.sample_stats
+    gated = convergence(az.InferenceData(**groups))
+    gated["reference"] = {
+        name: _variable_convergence(with_centred, name) for name in _REFERENCE_VARIABLES
+    }
+    return gated
+
+
+def _worst_of(values: Sequence[float | None], pick: Any) -> float | None:
+    """The worst value over rounds, None when any round has none."""
+    return None if any(v is None for v in values) else float(pick(values))
 
 
 def combine_rounds(
@@ -199,8 +251,19 @@ def combine_rounds(
         "min_ess_bulk": min(esses) if len(esses) == len(per_round) and esses else None,
         "divergences": int(sum(divs)) if len(divs) == len(per_round) and divs else None,
     }
-    return {
+    out: dict[str, Any] = {
         "worst": worst,
         "converged": "true" if per_round and not failed else "false",
         "rounds_failed": failed,
     }
+    if per_round and all("reference" in r for r in per_round):
+        out["reference"] = {
+            name: {
+                "max_rhat": _worst_of([r["reference"][name]["max_rhat"] for r in per_round], max),
+                "min_ess_bulk": _worst_of(
+                    [r["reference"][name]["min_ess_bulk"] for r in per_round], min
+                ),
+            }
+            for name in per_round[0]["reference"]
+        }
+    return out

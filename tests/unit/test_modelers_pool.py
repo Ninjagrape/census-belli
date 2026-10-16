@@ -76,3 +76,45 @@ def test_combine_rounds_sums_divergences_and_treats_none_as_failure() -> None:
     assert out["converged"] == "false"
     assert out["worst"]["max_rhat"] is None
     assert out["worst"]["divergences"] == 3
+
+
+def _shifted_idata() -> object:
+    import arviz as az
+
+    rng = np.random.default_rng(0)
+    chains, draws, generals = 4, 400, 5
+    noise = rng.normal(size=(chains, draws, generals))
+    # Every chain parks the common shift somewhere else: the likelihood cannot
+    # see it, so raw skill fails rhat while all differences mix fine.
+    shift = np.array([-3.0, -1.0, 1.0, 3.0])[:, None, None]
+    return az.from_dict(
+        posterior={
+            "skill": noise + shift,
+            "z_skill": noise,
+            "sigma_skill": 1.0 + 0.01 * rng.normal(size=(chains, draws)),
+        },
+        dims={"skill": ["general"], "z_skill": ["general"]},
+    )
+
+
+def test_round_convergence_gates_on_identified_quantities_and_keeps_raw_skill_for_reference() -> (
+    None
+):
+    from pipeline.modelers.pool import round_convergence
+
+    out = round_convergence(_shifted_idata())  # type: ignore[arg-type]
+
+    assert out["max_rhat"] is not None and out["max_rhat"] < 1.02
+    ref = out["reference"]
+    assert ref["skill"]["max_rhat"] > 1.5
+    assert ref["skill_centred"]["max_rhat"] < 1.02
+    assert ref["z_skill"]["max_rhat"] < 1.02
+
+
+def test_combine_rounds_carries_the_worst_reference_values() -> None:
+    from pipeline.modelers.pool import round_convergence
+
+    one = round_convergence(_shifted_idata())  # type: ignore[arg-type]
+    out = combine_rounds([one, one])
+
+    assert out["reference"]["skill"]["max_rhat"] == one["reference"]["skill"]["max_rhat"]

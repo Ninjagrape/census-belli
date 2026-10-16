@@ -19,8 +19,10 @@ class ModelPriors:
         mu_unattributed_sd: Sd of ``mu_unattributed ~ Normal(0, sd)``.
         beta_force_mu: Mean of the force-ratio coefficient prior.
         beta_force_sd: Its sd.
-        beta_def_mu: Mean of the defender coefficient prior.
+        beta_def_mu: Mean of the defender coefficient prior (0: no presumed edge).
         beta_def_sd: Its sd.
+        delta_water_air_sd: Sd of ``delta_water_air ~ Normal(0, sd)``, the offset
+            of the water/air force slope from the land slope.
         log_c1_mu: Mean of ``log c1``.
         log_c1_sd: Sd of ``log c1``.
         log_gap_mu: Mean of ``log (c2 - c1)``.
@@ -32,8 +34,9 @@ class ModelPriors:
     mu_unattributed_sd: float = 1.0
     beta_force_mu: float = 0.5
     beta_force_sd: float = 0.5
-    beta_def_mu: float = 0.3
-    beta_def_sd: float = 0.3
+    beta_def_mu: float = 0.0
+    beta_def_sd: float = 0.5
+    delta_water_air_sd: float = 0.25
     log_c1_mu: float = math.log(0.5)
     log_c1_sd: float = 1.0
     log_gap_mu: float = math.log(1.5)
