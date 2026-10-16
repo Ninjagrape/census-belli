@@ -58,10 +58,29 @@ description: >
   keyed by Wikidata Q-id. A check whose general is not ranked is
   not_evaluable, which fails its gate rather than passing silently.
 
-  Not done here: the +/-1 sd g_unlabelled sensitivity (handover-log 21.7). It
-  needs reconcile's regime draws exported and propagated through impute.
+  g_unlabelled sensitivity. Reconcile's shared unlabelled-regime offset is its
+  largest shared error. g_unlabelled_plus_1sd and g_unlabelled_minus_1sd read
+  reconcile's neutral_draws_run{id}.npz (newest written neutral run, from
+  reconcile_root), regress each side's neutral draws on g_unlabelled across
+  draws (a_era as a second regressor when present) for a slope B_s, and move
+  every side's log troops in every imputed round by B_s * (+/-1) *
+  sd(g_unlabelled), then refit on the rebuilt force ratios. A side with no
+  usable slope of its own (missing from the npz, or is_imputed in the round's
+  sides.csv) takes the precision-weighted mean slope of the observed sides in
+  its era (impute's era bins; precision is 1 / variance of the side's neutral
+  draws), so it is neither left unshifted nor shifted by a prior-filled slope.
+  Rounds already carry theta draws, so +/-1 sd moves the centre of an already
+  dispersed set: the variant tests misspecification of g's posterior mean (the
+  faithful-component prior choice), not its spread. Approximation: imputed
+  sides depend on observed sides through the imputation model, which is not
+  re-run. A file without g_unlabelled, a missing file or sd 0 reports
+  not_evaluable with a reason; that neither fails ranking_stability nor goes
+  unreported. Each is compared with the baseline by rank correlation, top-N
+  overlap and the largest rank change inside the baseline's top N
+  (max_abs_rank_change_top).
 
 inputs:
+  - data/processed/reconcile/neutral_draws_run{N}.npz   # g_unlabelled variants only
   - db: model_runs, general_skill_estimates, generals
   - db: battles, battle_sides, battle_commanders
   - data/imputed/{scale}/round_*           # the rounds the target run was fitted on
@@ -79,6 +98,7 @@ params:
   # come from this spec's params via load_model_params, as in the model stage.
   model_spec: agents/model.yaml
   expert_rankings: config/expert_rankings.yaml
+  reconcile_root: data/processed/reconcile
   output_root: data/processed/evaluation
   report_path: data/processed/evaluation_report.json
   seed: 20261014
@@ -138,6 +158,18 @@ params:
     - name: three_level_outcome
       kind: design_transform
       description: "Collapse decisive and ordinary grades by interval censoring (win / indecisive / loss)"
+    - name: g_unlabelled_plus_1sd
+      kind: regime_shift
+      description: >
+        Shift the centre of the imputed rounds by +1 sd of reconcile's shared unlabelled-regime
+        offset, scaled by each side's slope on it (era-mean slope for sides without their own)
+      n_sd: 1.0
+    - name: g_unlabelled_minus_1sd
+      kind: regime_shift
+      description: >
+        Shift the centre of the imputed rounds by -1 sd of reconcile's shared unlabelled-regime
+        offset, scaled by each side's slope on it (era-mean slope for sides without their own)
+      n_sd: -1.0
     - name: replacement_50th
       kind: post_hoc
       description: "Replacement level at the median instead of the 40th percentile"

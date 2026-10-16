@@ -9,31 +9,48 @@ without refitting.
 
 from __future__ import annotations
 
+import csv
 import dataclasses
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final, Literal, get_args
 
 import numpy as np
 
+from pipeline.imputers.likelihood import NeutralDraws
+from pipeline.imputers.priors import era_of_year
+from pipeline.modelers.load import ImputedRound
 from pipeline.modelers.priors import ModelPriors
 from pipeline.modelers.records import CommanderInput, ModelDesign, SideInput
 
 __all__ = [
+    "NotEvaluableError",
     "VariantKind",
     "VariantSpec",
     "apply_battle_filter",
     "apply_side_transform",
     "collapse_three_level",
     "designs_equivalent",
+    "fill_weak_slopes",
     "observed_only_x_diff",
     "parse_variants",
+    "read_imputed_side_ids",
+    "g_unlabelled_sd",
+    "g_unlabelled_slopes",
     "prior_overrides",
+    "shift_rounds",
 ]
 
 VariantKind = Literal[
-    "side_transform", "battle_filter", "design_transform", "x_source", "priors", "post_hoc"
+    "side_transform",
+    "battle_filter",
+    "design_transform",
+    "x_source",
+    "priors",
+    "post_hoc",
+    "regime_shift",
 ]
 
 EQUAL_METHOD: Final[str] = "variant_equal"
@@ -62,9 +79,15 @@ _KNOWN: Final[Mapping[str, tuple[str, frozenset[str], Mapping[str, Any]]]] = {
         {"replacement_percentile": 50},
     ),
     "realised_war": ("post_hoc", frozenset({"rank_by"}), {"rank_by": "realised"}),
+    "g_unlabelled_plus_1sd": ("regime_shift", frozenset({"n_sd"}), {"n_sd": 1.0}),
+    "g_unlabelled_minus_1sd": ("regime_shift", frozenset({"n_sd"}), {"n_sd": -1.0}),
 }
 _KINDS: Final[frozenset[str]] = frozenset(get_args(VariantKind))
 _PRIOR_FIELDS: Final[frozenset[str]] = frozenset(f.name for f in dataclasses.fields(ModelPriors))
+
+
+class NotEvaluableError(Exception):
+    """A variant cannot be run on the inputs available (reported, not failed)."""
 
 
 @dataclass(frozen=True)
@@ -105,6 +128,8 @@ def _check_values(name: str, options: Mapping[str, Any]) -> None:
         and not 0.0 < _number(name, options, "replacement_percentile") < 100.0
     ):
         raise ValueError(f"variant {name!r}: replacement_percentile must be in (0, 100)")
+    if "n_sd" in options and _number(name, options, "n_sd") == 0.0:
+        raise ValueError(f"variant {name!r}: n_sd must be non-zero")
     if "rank_by" in options and options["rank_by"] != "realised":
         raise ValueError(f"variant {name!r}: rank_by must be 'realised'")
 
@@ -368,10 +393,18 @@ _EXACT_FIELDS: Final[tuple[str, ...]] = (
     "k_lo",
     "k_hi",
     "side_ids",
+    "force_group",
+    "defender_diff",
     "side_kind",
     "cmd_side",
     "cmd_general",
     "general_ids",
+)
+
+_CLOSE_FIELDS: Final[tuple[str, ...]] = (
+    "cmd_weight",
+    "side_unknown_share",
+    "side_unattributed_share",
 )
 
 
@@ -384,10 +417,187 @@ def designs_equivalent(a: ModelDesign, b: ModelDesign) -> bool:
 
     Returns:
         True when battles, sides, outcome bounds, commander entries and
-        general ids match and weights agree to ``np.allclose``.
+        general ids match and the weights and latent shares agree to
+        ``np.allclose``.
     """
     if any(not np.array_equal(getattr(a, f), getattr(b, f)) for f in _EXACT_FIELDS):
         return False
-    return a.cmd_weight.shape == b.cmd_weight.shape and bool(
-        np.allclose(a.cmd_weight, b.cmd_weight)
+    # The latent shares change a fit just as the commander weights do: two designs
+    # with the same named weights but a different anonymous remainder differ.
+    return all(
+        getattr(a, f).shape == getattr(b, f).shape
+        and bool(np.allclose(getattr(a, f), getattr(b, f)))
+        for f in _CLOSE_FIELDS
     )
+
+
+def g_unlabelled_sd(neutral: NeutralDraws) -> float:
+    """Posterior sd of reconcile's shared unlabelled-regime offset.
+
+    Args:
+        neutral: Reconcile's neutral draws.
+
+    Returns:
+        ``std(g_unlabelled, ddof=1)``.
+
+    Raises:
+        NotEvaluableError: If the file predates the regime export, has fewer
+            than two draws, or the offset has zero spread.
+    """
+    g = neutral.g_unlabelled
+    if g is None:
+        raise NotEvaluableError(
+            "the neutral draws file has no g_unlabelled (written before reconcile exported "
+            "the regime draws); re-run reconcile"
+        )
+    if g.shape[0] < 2:
+        raise NotEvaluableError("g_unlabelled has fewer than two draws")
+    sd = float(np.std(g, ddof=1))
+    if not math.isfinite(sd) or sd <= 0.0:
+        raise NotEvaluableError(f"g_unlabelled has zero spread (sd={sd})")
+    return sd
+
+
+def g_unlabelled_slopes(neutral: NeutralDraws) -> dict[int, float]:
+    """Slope of each side's neutral draws on ``g_unlabelled`` across draws.
+
+    One least-squares fit per side, vectorised, with an intercept and, when the
+    file carries it, ``a_era`` as a second regressor so the era offset is not
+    attributed to ``g_unlabelled``. Only the ``g_unlabelled`` coefficient is kept.
+
+    Args:
+        neutral: Reconcile's neutral draws; ``g_unlabelled`` must be present.
+
+    Returns:
+        ``side_id`` to slope B_s (log troops per unit of ``g_unlabelled``).
+
+    Raises:
+        NotEvaluableError: If ``g_unlabelled`` is absent.
+    """
+    g = neutral.g_unlabelled
+    if g is None:
+        raise NotEvaluableError("the neutral draws file has no g_unlabelled")
+    columns = [np.ones_like(g), g]
+    if neutral.a_era is not None:
+        columns.append(neutral.a_era)
+    design = np.column_stack(columns)
+    coef, *_ = np.linalg.lstsq(design, neutral.draws, rcond=None)
+    return {int(s): float(b) for s, b in zip(neutral.side_id, coef[1], strict=True)}
+
+
+def read_imputed_side_ids(root: Path, scale: str, indices: Sequence[int]) -> frozenset[int]:
+    """Side ids flagged ``is_imputed`` in any of the given rounds' ``sides.csv``.
+
+    Args:
+        root: The imputed-data root.
+        scale: The scale directory.
+        indices: Round numbers to read.
+
+    Returns:
+        The flagged side ids.
+
+    Raises:
+        NotEvaluableError: If a round's file is unreadable or lacks the column.
+    """
+    flagged: set[int] = set()
+    for n in indices:
+        path = root / scale / f"round_{n}" / "sides.csv"
+        try:
+            with path.open(encoding="utf-8", newline="") as handle:
+                for row in csv.DictReader(handle):
+                    if row["is_imputed"].strip().lower() == "true":
+                        flagged.add(int(row["side_id"]))
+        except (OSError, KeyError, ValueError) as exc:
+            raise NotEvaluableError(f"cannot read is_imputed from {path}: {exc!r}") from exc
+    return frozenset(flagged)
+
+
+def fill_weak_slopes(
+    slopes: Mapping[int, float],
+    neutral: NeutralDraws,
+    sides: Sequence[SideInput],
+    imputed: frozenset[int],
+    era_bins: tuple[tuple[str, int | None], ...],
+) -> tuple[dict[int, float], dict[str, int]]:
+    """Give every side without its own usable slope its era's observed slope.
+
+    A side has no usable slope when it is missing from the neutral draws, or
+    impute filled it from the prior (``imputed``): its slope on
+    ``g_unlabelled`` then measures nothing about the side itself. Such a side
+    takes the precision-weighted mean slope of the observed sides in the same
+    era, precision being 1 / variance of the side's neutral draws. An era with
+    no observed side falls back to the weighted mean over all observed sides,
+    and to 0 only when there is none at all.
+
+    Args:
+        slopes: Per-side slopes from :func:`g_unlabelled_slopes`.
+        neutral: The draws the slopes came from (for the precisions).
+        sides: Every side the rounds cover, with its battle year.
+        imputed: Side ids flagged ``is_imputed`` in the imputed rounds.
+        era_bins: Impute's era bins, so eras match the imputation model's.
+
+    Returns:
+        ``(slopes, counts)``: the slopes for observed sides as given plus the
+        filled ones, and how many sides were filled from an era, from the
+        overall mean, or left at 0.
+    """
+    precision: dict[int, float] = {}
+    if neutral.draws.shape[0] > 1:
+        variance = np.var(neutral.draws, axis=0, ddof=1)
+        for sid, var in zip(neutral.side_id.tolist(), variance.tolist(), strict=True):
+            if math.isfinite(var) and var > 0.0:
+                precision[int(sid)] = 1.0 / var
+    era_of = {s.side_id: era_of_year(s.year, era_bins) for s in sides}
+    observed = [
+        sid
+        for sid, slope in slopes.items()
+        if sid not in imputed and sid in precision and math.isfinite(slope)
+    ]
+    num: dict[str, float] = {}
+    den: dict[str, float] = {}
+    for sid in observed:
+        era = era_of.get(sid)
+        if era is None:
+            continue
+        num[era] = num.get(era, 0.0) + precision[sid] * slopes[sid]
+        den[era] = den.get(era, 0.0) + precision[sid]
+    total_den = sum(den.values())
+    overall = sum(num.values()) / total_den if total_den > 0.0 else None
+    out = {sid: slopes[sid] for sid in observed}
+    counts = {"filled_from_era": 0, "filled_from_overall": 0, "left_at_zero": 0}
+    for side in sides:
+        if side.side_id in out:
+            continue
+        era = era_of[side.side_id]
+        if den.get(era, 0.0) > 0.0:
+            out[side.side_id] = num[era] / den[era]
+            counts["filled_from_era"] += 1
+        elif overall is not None:
+            out[side.side_id] = overall
+            counts["filled_from_overall"] += 1
+        else:
+            out[side.side_id] = 0.0
+            counts["left_at_zero"] += 1
+    return out, counts
+
+
+def shift_rounds(
+    rounds: Sequence[ImputedRound], slopes: Mapping[int, float], shift: float
+) -> list[ImputedRound]:
+    """Shift each side's log troops in every round by ``slopes[side] * shift``.
+
+    Args:
+        rounds: Imputed rounds, left untouched.
+        slopes: ``side_id`` to B_s; a side absent from it shifts by 0.
+        shift: The offset move, ``n_sd * sd(g_unlabelled)``.
+
+    Returns:
+        New rounds with the same indices and provenance.
+    """
+    return [
+        dataclasses.replace(
+            rnd,
+            log_troops={s: v + slopes.get(s, 0.0) * shift for s, v in rnd.log_troops.items()},
+        )
+        for rnd in rounds
+    ]

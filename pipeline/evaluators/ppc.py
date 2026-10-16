@@ -82,7 +82,7 @@ def simulate_levels(
         draws.side_scores[picks],
         x,
         design.defender_diff,
-        draws.beta_force[picks],
+        draws.force_slopes(design)[picks],
         draws.beta_def[picks],
     )
     probs = category_probs(eta, draws.c1[picks, None], draws.c2[picks, None])

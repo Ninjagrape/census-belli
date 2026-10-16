@@ -25,6 +25,8 @@ class EvaluateParams:
         model_spec: Path of the model stage's spec, whose params give the
             priors, sampler and write thresholds.
         expert_rankings: Path of the expert rankings YAML.
+        reconcile_root: Directory holding reconcile's ``neutral_draws_run*.npz``,
+            read by the ``g_unlabelled`` sensitivity variants.
         output_root: Root of the per-run output directories.
         report_path: Where the latest report is copied.
         seed: Base seed of every evaluation fit.
@@ -43,6 +45,7 @@ class EvaluateParams:
 
     model_spec: str
     expert_rankings: str
+    reconcile_root: str
     output_root: str
     report_path: str
     seed: int
@@ -74,6 +77,7 @@ class EvaluateParams:
         out = cls(
             model_spec=str(params.get("model_spec", "agents/model.yaml")),
             expert_rankings=str(params.get("expert_rankings", "config/expert_rankings.yaml")),
+            reconcile_root=str(params.get("reconcile_root", "data/processed/reconcile")),
             output_root=str(params.get("output_root", "data/processed/evaluation")),
             report_path=str(params.get("report_path", "data/processed/evaluation_report.json")),
             seed=int(params.get("seed", 20261014)),

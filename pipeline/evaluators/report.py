@@ -14,7 +14,12 @@ import numpy as np
 from pipeline.evaluators.compare import min_required_overlap
 from pipeline.evaluators.config import EvaluateParams
 from pipeline.evaluators.cv import CVResult, FoldRecord
-from pipeline.evaluators.sensitivity import STATUS_NO_OP, STATUS_OK, SensitivityResult
+from pipeline.evaluators.sensitivity import (
+    STATUS_NO_OP,
+    STATUS_NOT_EVALUABLE,
+    STATUS_OK,
+    SensitivityResult,
+)
 from pipeline.evaluators.target import PublishedRun
 from pipeline.modelers.ordinal import N_LEVELS
 from pipeline.modelers.outputs import write_columns_csv, write_json
@@ -25,6 +30,7 @@ __all__ = [
     "REPORT_NAME",
     "build_gates",
     "build_report",
+    "gate_severities",
     "write_outputs",
 ]
 
@@ -43,7 +49,18 @@ DISCLOSURES: Final[tuple[str, ...]] = (
     "information.",
     "Sensitivity variants and the baseline refit use the same rounds and seeds; "
     "post-hoc variants re-reduce the baseline draws without refitting.",
-    "The +/-1 sd g_unlabelled sensitivity is not run here (handover-log 21.7).",
+    "The g_unlabelled_plus_1sd and g_unlabelled_minus_1sd variants bound the shared "
+    "unlabelled-regime offset, reconcile's largest shared error. Each side's log troops in "
+    "every imputed round move by B_s * sd(g_unlabelled), B_s being that side's regression "
+    "slope on g_unlabelled across reconcile's neutral draws; a side without a usable slope "
+    "of its own (absent from the draws file, or filled from the prior by impute) takes the "
+    "precision-weighted mean slope of the observed sides in its era. The imputed rounds "
+    "already carry reconcile's theta draws, so a 1 sd move shifts the centre of an already "
+    "dispersed set: the variant tests misspecification of g's posterior mean (the "
+    "faithful-component prior choice), not its spread. It is an approximation: imputed "
+    "sides' values depend on observed sides through the imputation model, which is not "
+    "re-run. A variant on a neutral draws file without g_unlabelled is reported "
+    "not_evaluable and does not fail ranking_stability.",
     "Cross-validation has two arms. The imputed arm trains on imputed x_diff (outcome-"
     "conditioned, every side redrawn) and predicts from the measurement-only prior, so it "
     "mixes model quality with a circularity penalty; it is the arm the published ranking "
@@ -122,8 +139,15 @@ def _stability_gate(sens: SensitivityResult, params: EvaluateParams) -> dict[str
         return _gate("ranking_stability", False, None, threshold, reason)
     actual: dict[str, Any] = {}
     failing: list[str] = []
+    not_evaluable: list[str] = []
     for v in sens.variants:
         if v.status == STATUS_NO_OP:
+            continue
+        if v.status == STATUS_NOT_EVALUABLE:
+            # Reported with its reason in the sensitivity section; the data to
+            # run it is missing, which says nothing about ranking stability.
+            actual[v.spec.name] = v.status
+            not_evaluable.append(v.spec.name)
             continue
         if v.status != STATUS_OK or v.vs_baseline is None:
             actual[v.spec.name] = v.status
@@ -137,6 +161,8 @@ def _stability_gate(sens: SensitivityResult, params: EvaluateParams) -> dict[str
         if cmp["top_overlap"] < required:
             failing.append(f"{v.spec.name} (overlap {cmp['top_overlap']} < {required})")
     message = "every refitted variant keeps the top set" if not failing else "; ".join(failing)
+    if not_evaluable:
+        message += f"; not evaluable: {', '.join(not_evaluable)}"
     floor = _noise_floor_overlap(sens.noise_floor)
     if floor is not None:
         actual["noise_floor"] = {"top_overlap": floor}
@@ -154,11 +180,36 @@ def _noise_floor_overlap(noise_floor: Mapping[str, Any] | None) -> int | None:
     return int(noise_floor["score"]["top_overlap"])
 
 
+def gate_severities(quality_checks: Sequence[Any]) -> dict[str, str]:
+    """Severity of each ``evaluation_gate`` check in the stage spec.
+
+    A check's gate is its ``params.gate``, else its ``name``.
+
+    Args:
+        quality_checks: The spec's ``quality_checks`` list.
+
+    Returns:
+        ``gate name -> severity``; checks without a string severity are omitted.
+    """
+    out: dict[str, str] = {}
+    for check in quality_checks:
+        if not isinstance(check, Mapping) or check.get("method") != "evaluation_gate":
+            continue
+        check_params = check.get("params")
+        gate = check_params.get("gate") if isinstance(check_params, Mapping) else None
+        name = str(gate or check.get("name") or "")
+        severity = check.get("severity")
+        if name and isinstance(severity, str):
+            out[name] = severity
+    return out
+
+
 def build_gates(
     cv: CVResult,
     sens: SensitivityResult,
     named_gate: Mapping[str, Any],
     params: EvaluateParams,
+    severities: Mapping[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """The five evaluation gates, in spec order.
 
@@ -167,13 +218,16 @@ def build_gates(
         sens: Sensitivity result.
         named_gate: The ``named_checks`` gate from the expert comparison.
         params: Evaluate parameters.
+        severities: Severity per gate name from the spec (see :func:`gate_severities`).
+            A gate with no entry carries no ``severity`` key.
 
     Returns:
-        Gate dicts with ``name``, ``passed``, ``actual``, ``threshold``, ``message``.
+        Gate dicts with ``name``, ``passed``, ``actual``, ``threshold``, ``message``
+        and, when known, ``severity``.
     """
     binary = cv.metrics["binary"]
     n = int(binary["n"])
-    return [
+    gates = [
         _metric_gate(
             "held_out_accuracy",
             _finite(binary["accuracy"]),
@@ -194,6 +248,8 @@ def build_gates(
         _stability_gate(sens, params),
         dict(named_gate),
     ]
+    known = severities or {}
+    return [{**g, "severity": known[g["name"]]} if g["name"] in known else g for g in gates]
 
 
 def _arm_section(

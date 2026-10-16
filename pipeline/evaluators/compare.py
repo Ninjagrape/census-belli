@@ -62,7 +62,9 @@ def rank_comparison(
         ``n_common``, ``top_n_effective``, ``top_overlap``, ``jaccard`` and the
         sorted id lists ``only_in_a`` / ``only_in_b``. Top sets are taken over
         each full list, so those two are top-set members absent from the other
-        top set.
+        top set. ``max_abs_rank_change_top`` is the largest ``|rank_b - rank_a|``
+        (ranks over each full list) among list A's top set that list B also
+        scores, None when none is common.
     """
     ids_a, ids_b = np.asarray(ids_a), np.asarray(ids_b)
     score_a, score_b = np.asarray(score_a, dtype=float), np.asarray(score_b, dtype=float)
@@ -73,6 +75,9 @@ def rank_comparison(
     top_a = _top_ids(ids_a, score_a, effective)
     top_b = _top_ids(ids_b, score_b, effective)
     union = top_a | top_b
+    rank_a = dict(zip(ids_a.tolist(), ranks_from_scores(score_a).tolist(), strict=True))
+    rank_b = dict(zip(ids_b.tolist(), ranks_from_scores(score_b).tolist(), strict=True))
+    shifts = [abs(rank_b[i] - rank_a[i]) for i in top_a if i in rank_b]
     return {
         "spearman_rho": rho,
         "n_common": int(ia.shape[0]),
@@ -81,6 +86,7 @@ def rank_comparison(
         "jaccard": len(top_a & top_b) / len(union) if union else 0.0,
         "only_in_a": sorted(top_a - top_b),
         "only_in_b": sorted(top_b - top_a),
+        "max_abs_rank_change_top": max(shifts) if shifts else None,
     }
 
 

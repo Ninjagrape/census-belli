@@ -15,7 +15,7 @@ from pipeline.evaluators import cv as cv_module
 from pipeline.evaluators.config import EvaluateParams, load_eval_model_params
 from pipeline.evaluators.cv import run_cross_validation
 from pipeline.evaluators.folds import train_weight
-from pipeline.evaluators.report import build_gates
+from pipeline.evaluators.report import build_gates, gate_severities
 from pipeline.evaluators.sensitivity import (
     RankTable,
     SensitivityResult,
@@ -60,7 +60,7 @@ def test_params_read_the_spec_defaults() -> None:
     )
     assert (mp.max_rhat, mp.max_divergences) == (model_mp.max_rhat, model_mp.max_divergences)
     assert model_mp.min_ess_bulk > mp.min_ess_bulk
-    assert len(parse_variants(params.sensitivity_variants)) == 9
+    assert len(parse_variants(params.sensitivity_variants)) == 11
 
 
 def test_eval_floor_never_raises_a_model_threshold_below_400(tmp_path: Path) -> None:
@@ -252,6 +252,31 @@ def test_gates_pass_on_good_numbers(tmp_path: Path) -> None:
     )
 
 
+def test_gates_carry_the_spec_severity(tmp_path: Path) -> None:
+    spec = yaml.safe_load((ROOT / "agents" / "evaluate.yaml").read_text(encoding="utf-8"))
+    severities = gate_severities(spec["quality_checks"])
+    cv = _cv(0.62, 0.21, (True,))
+    params = _params(tmp_path, top_n=20, min_top_overlap=12)
+
+    gates = build_gates(cv, _sens(), NAMED_PASS, params, severities)
+
+    assert severities["calibration"] == "warning"
+    assert {g["name"]: g["severity"] for g in gates} == severities
+    assert all("severity" not in g for g in build_gates(cv, _sens(), NAMED_PASS, params))
+
+
+def test_gate_severities_ignore_other_methods_and_use_params_gate() -> None:
+    checks = [
+        {"name": "a", "method": "evaluation_gate", "params": {"gate": "g"}, "severity": "error"},
+        {"name": "b", "method": "evaluation_gate", "severity": "warning"},
+        {"name": "c", "method": "model_gate", "severity": "error"},
+        {"name": "d", "method": "evaluation_gate"},
+        "junk",
+    ]
+
+    assert gate_severities(checks) == {"g": "error", "b": "warning"}
+
+
 def test_accuracy_and_brier_gates_use_strict_thresholds(tmp_path: Path) -> None:
     gates = _gates(_cv(0.55, 0.25, (True,)), _sens(), tmp_path)
 
@@ -281,6 +306,16 @@ def test_stability_gate_names_failing_and_unconverged_variants(tmp_path: Path) -
     for expected in ("low_overlap (overlap 11 < 12)", "broken (error)", "stuck (not_converged)"):
         assert expected in gate["message"]
     assert "fine" not in gate["message"]
+
+
+def test_stability_gate_reports_not_evaluable_without_failing(tmp_path: Path) -> None:
+    sens = _sens(_variant("a", "ok", 15), _variant("g_unlabelled_plus_1sd", "not_evaluable"))
+
+    gate = _gates(_cv(0.6, 0.2, (True,)), sens, tmp_path)["ranking_stability"]
+
+    assert gate["passed"]
+    assert gate["actual"]["g_unlabelled_plus_1sd"] == "not_evaluable"
+    assert "not evaluable: g_unlabelled_plus_1sd" in gate["message"]
 
 
 def test_stability_gate_reports_the_noise_floor_without_changing_the_pass_rule(

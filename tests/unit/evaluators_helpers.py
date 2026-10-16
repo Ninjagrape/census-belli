@@ -190,7 +190,13 @@ def _measured(design: ModelDesign) -> tuple[np.ndarray, np.ndarray]:
     return np.full(design.n_sides, 9.0), np.full(design.n_sides, 0.1)
 
 
-def _inputs(tmp_path: Path, design: ModelDesign, *, quality: dict[int, float] | None = None) -> Any:
+def _inputs(
+    tmp_path: Path,
+    design: ModelDesign,
+    *,
+    quality: dict[int, float] | None = None,
+    load_neutral: Any = None,
+) -> Any:
     rounds = _rounds(design)
     return SensitivityInputs(
         design=design,
@@ -202,6 +208,7 @@ def _inputs(tmp_path: Path, design: ModelDesign, *, quality: dict[int, float] | 
         measured=_measured(design),
         load_quality=lambda: quality if quality is not None else {int(design.battle_ids[0]): 0.1},
         published=_published(design),
+        load_neutral=load_neutral,
     )
 
 

@@ -70,3 +70,15 @@ def test_rho_nan_for_constant_scores() -> None:
 @pytest.mark.parametrize(("n", "expected"), [(20, 12), (10, 6), (3, 2), (0, 0), (7, 5)])
 def test_min_required_overlap(n: int, expected: int) -> None:
     assert min_required_overlap(n) == expected
+
+
+def test_max_rank_change_is_taken_over_the_reference_top_set() -> None:
+    ids = np.arange(6)
+    score_a = np.array([6.0, 5.0, 4.0, 3.0, 2.0, 1.0])
+    score_b = np.array([4.0, 5.0, 6.0, 3.0, 2.0, 1.0])  # id 0 falls from rank 1 to 3
+
+    out = rank_comparison(ids, score_a, ids, score_b, top_n=3)
+
+    assert out["max_abs_rank_change_top"] == 2
+    assert rank_comparison(ids, score_a, ids, score_a, top_n=3)["max_abs_rank_change_top"] == 0
+    assert rank_comparison(ids, score_a, ids + 100, score_a)["max_abs_rank_change_top"] is None

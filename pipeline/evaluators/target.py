@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 from sqlalchemy import text
 
-from pipeline.modelers.design import x_difference
+from pipeline.modelers.design import camp_measurements, x_difference
 from pipeline.modelers.load import ImputedRound, load_log_troop_measurements
 from pipeline.modelers.records import ModelDesign
 from pipeline.quality import EVALUABLE_RUN_PREDICATE
@@ -165,10 +165,4 @@ def measured_log_troops(conn: Any, design: ModelDesign) -> tuple[np.ndarray, np.
     Returns:
         ``(obs_mean, obs_sd)``, each of shape ``(n_sides,)``.
     """
-    measured = load_log_troop_measurements(conn)
-    obs_mean = np.full(design.n_sides, np.nan)
-    obs_sd = np.full(design.n_sides, np.nan)
-    for i, side_id in enumerate(design.side_ids):
-        if int(side_id) in measured:
-            obs_mean[i], obs_sd[i] = measured[int(side_id)]
-    return obs_mean, obs_sd
+    return camp_measurements(design, load_log_troop_measurements(conn))

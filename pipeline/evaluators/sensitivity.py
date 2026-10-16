@@ -16,19 +16,26 @@ from pipeline.evaluators.config import EvaluateParams
 from pipeline.evaluators.fit import PooledResult, fit_pooled, repool
 from pipeline.evaluators.target import PublishedRun, round_x_diffs
 from pipeline.evaluators.variants import (
+    NotEvaluableError,
     VariantSpec,
     apply_battle_filter,
     apply_side_transform,
     collapse_three_level,
     designs_equivalent,
+    fill_weak_slopes,
+    g_unlabelled_sd,
+    g_unlabelled_slopes,
     observed_only_x_diff,
     prior_overrides,
+    shift_rounds,
 )
+from pipeline.imputers.likelihood import NeutralDraws
+from pipeline.imputers.priors import load_priors
 from pipeline.modelers.config import ModelParams
 from pipeline.modelers.design import build_design
 from pipeline.modelers.load import ImputedRound
 from pipeline.modelers.pool import rank_descending
-from pipeline.modelers.records import ModelDesign, SideInput
+from pipeline.modelers.records import DesignParams, ModelDesign, SideInput
 from pipeline.modelers.summarise import PooledFit
 
 __all__ = [
@@ -51,6 +58,7 @@ IMPUTED_SUBSET_NAME = "observed_only_imputed_subset"
 OBSERVED_ONLY_NAME = "observed_only"
 STATUS_OK = "ok"
 STATUS_NO_OP = "no_op"
+STATUS_NOT_EVALUABLE = "not_evaluable"
 STATUS_NOT_CONVERGED = "not_converged"
 STATUS_ERROR = "error"
 
@@ -92,6 +100,13 @@ class SensitivityInputs:
         load_quality: Loads ``battle_id -> data_quality_score``; called only
             by a variant that needs it, inside that variant's error handling.
         published: The published run.
+        load_neutral: Loads reconcile's neutral draws for the ``g_unlabelled``
+            variants; raises :class:`NotEvaluableError` (with the reason) when
+            the file is missing or unreadable. None means no loader was given.
+        load_imputed_sides: Loads the ids of sides impute filled from the prior
+            (``is_imputed`` in the rounds' ``sides.csv``). None treats every
+            side as observed.
+        era_bins: Impute's era bins; None reads ``config/imputation_priors.yaml``.
     """
 
     design: ModelDesign
@@ -103,6 +118,9 @@ class SensitivityInputs:
     measured: tuple[np.ndarray, np.ndarray]
     load_quality: Callable[[], dict[int, float]]
     published: PublishedRun
+    load_neutral: Callable[[], NeutralDraws] | None = None
+    load_imputed_sides: Callable[[], frozenset[int]] | None = None
+    era_bins: tuple[tuple[str, int | None], ...] | None = None
 
     @property
     def n_rounds(self) -> int:
@@ -121,7 +139,8 @@ class VariantResult:
 
     Attributes:
         spec: The declared variant.
-        status: ``ok``, ``no_op``, ``not_converged`` or ``error``.
+        status: ``ok``, ``no_op``, ``not_converged``, ``not_evaluable`` (the
+            data the variant needs is absent; not a failure) or ``error``.
         message: Why, for every status but ``ok`` and ``no_op``.
         counts: Design sizes and what the transform changed.
         seconds: Wall time.
@@ -232,6 +251,20 @@ def _comparisons(
     }
 
 
+def _subset_design_params(inputs: SensitivityInputs) -> DesignParams:
+    """The main design's term decisions, applied to a subset of its battles.
+
+    The defender and water/air thresholds were met on the full corpus; a subset
+    that re-applied them could drop a term and then differ from the main fit by
+    more than the subset itself.
+    """
+    return dataclasses.replace(
+        inputs.mp.design,
+        defender_term=inputs.design.defender_term_used,
+        water_air_group=inputs.design.n_force_groups > 1,
+    )
+
+
 def _counts(design: ModelDesign, extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
     return {"n_battles": design.n_battles, "n_generals": design.n_generals, **(extra or {})}
 
@@ -259,7 +292,7 @@ def _refit_sides(
     counts: Mapping[str, Any],
     inputs: SensitivityInputs,
 ) -> _Outcome | None:
-    design = build_design(sides)
+    design = build_design(sides, _subset_design_params(inputs))
     if designs_equivalent(inputs.design, design):
         return None
     if design.n_battles == 0:
@@ -302,7 +335,7 @@ def _both_measured_subset(
     sides = [s for s in inputs.sides if s.battle_id in by_battle]
     if not sides:
         raise ValueError("no battle has both sides measured")
-    design = build_design(sides)
+    design = build_design(sides, _subset_design_params(inputs))
     if design.n_battles == 0:
         raise ValueError("no measured battle survives the design exclusion rules")
     return design, by_battle, {"battles_with_both_sides_measured": len(by_battle)}
@@ -347,6 +380,64 @@ def _post_hoc(
     return _Outcome(inputs.design, fit, score, _counts(inputs.design), None)
 
 
+def _regime_shift(spec: VariantSpec, inputs: SensitivityInputs) -> _Outcome | None:
+    """Refit with every side's log troops moved along reconcile's ``g_unlabelled``.
+
+    Reconcile's shared unlabelled-regime offset ``g_unlabelled`` is its largest
+    shared error. Side s moves by ``B_s * n_sd * sd(g_unlabelled)`` in every
+    imputed round, ``B_s`` being the least-squares slope of the side's neutral
+    draws on ``g_unlabelled`` (``a_era`` as a second regressor when present).
+    A side with no usable slope of its own (absent from the draws file, or
+    filled from the prior by impute) takes the precision-weighted mean slope of
+    the observed sides in its era. The per-battle force ratio is then rebuilt
+    from the shifted rounds.
+
+    Each round already carries a draw of reconcile's shared parameters, so the
+    rounds are a dispersed set; the shift moves the centre of that set by
+    +/- n_sd of ``g_unlabelled``. The variant tests misspecification of g's
+    posterior mean (the faithful-component prior choice), not the spread. It is
+    also an approximation: an imputed side's value depends on the observed
+    sides through the imputation model, which is not re-run.
+
+    Raises:
+        NotEvaluableError: If there is no loader, or the draws lack
+            ``g_unlabelled`` or it has no spread.
+    """
+    if inputs.load_neutral is None:
+        raise NotEvaluableError("no neutral draws loader was supplied")
+    neutral = inputs.load_neutral()
+    sd = g_unlabelled_sd(neutral)
+    own_slopes = g_unlabelled_slopes(neutral)
+    imputed = inputs.load_imputed_sides() if inputs.load_imputed_sides else frozenset()
+    era_bins = inputs.era_bins if inputs.era_bins is not None else _impute_era_bins()
+    slopes, filled = fill_weak_slopes(own_slopes, neutral, inputs.sides, imputed, era_bins)
+    shift = float(spec.options["n_sd"]) * sd
+    used = inputs.rounds[: inputs.n_rounds]
+    x_diffs = round_x_diffs(inputs.design, shift_rounds(used, slopes, shift))
+    counts = {
+        "g_unlabelled_sd": sd,
+        "shift": shift,
+        "sides_imputed_flagged": len(imputed),
+        **{f"sides_{k}": v for k, v in filled.items()},
+    }
+    if all(
+        np.allclose(new, old)
+        for new, old in zip(x_diffs, round_x_diffs(inputs.design, used), strict=True)
+    ):
+        return None
+    return _fitted(spec.name, inputs.design, x_diffs, inputs, counts)
+
+
+def _impute_era_bins() -> tuple[tuple[str, int | None], ...]:
+    """Impute's era bins from its priors file, or why they cannot be read."""
+    try:
+        return load_priors().era_bins
+    except (OSError, ValueError, KeyError) as exc:
+        raise NotEvaluableError(
+            f"cannot read impute's era bins: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
 def _dispatch(
     spec: VariantSpec, inputs: SensitivityInputs, baseline: PooledResult
 ) -> _Outcome | None:
@@ -362,6 +453,8 @@ def _dispatch(
         return _x_source(spec, inputs)
     if spec.kind == "priors":
         return _priors(spec, inputs)
+    if spec.kind == "regime_shift":
+        return _regime_shift(spec, inputs)
     return _post_hoc(spec, inputs, baseline)
 
 
@@ -404,6 +497,9 @@ def _run_variant(
         if outcome is None:
             return VariantResult(spec, STATUS_NO_OP, None, {}, time.perf_counter() - start)
         return _finish(spec, outcome, inputs, base, time.perf_counter() - start)
+    except NotEvaluableError as exc:
+        logger.warning("evaluate_variant_not_evaluable", variant=spec.name, reason=str(exc))
+        return VariantResult(spec, STATUS_NOT_EVALUABLE, str(exc), {}, time.perf_counter() - start)
     except Exception as exc:
         # One variant raising must not take the other variants with it.
         message = f"{type(exc).__name__}: {exc}"

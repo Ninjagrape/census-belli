@@ -78,7 +78,7 @@ def predict_category_probs(
         draws.side_scores,
         x_diff,
         design.defender_diff,
-        draws.beta_force,
+        draws.force_slopes(design),
         draws.beta_def,
     )
     eta = eta[:, battle_idx]

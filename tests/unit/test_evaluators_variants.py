@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 
 import numpy as np
@@ -257,3 +258,17 @@ def test_designs_equivalent_identical_and_changed() -> None:
         *sides[1:],
     ]
     assert not designs_equivalent(a, build_design(reweighted))
+
+
+def test_designs_equivalent_sees_a_different_latent_share() -> None:
+    # Same named weights (renormalised to 1 on the named general), but the
+    # anonymous remainder of the camp differs with the troop shares.
+    def camp(unknown_troops: float) -> list:
+        return [
+            side(1, 1, (11,), outcome="victory", log_troops=math.log(100.0)),
+            side(2, 1, (), outcome="victory", log_troops=math.log(unknown_troops)),
+            side(3, 1, (31,), outcome="defeat", log_troops=math.log(500.0)),
+        ]
+
+    assert designs_equivalent(build_design(camp(900.0)), build_design(camp(900.0)))
+    assert not designs_equivalent(build_design(camp(900.0)), build_design(camp(300.0)))

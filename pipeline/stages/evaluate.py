@@ -23,7 +23,7 @@ No connection is committed or rolled back: every statement here is a SELECT.
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -45,7 +45,7 @@ from pipeline.evaluators.experts import (
 )
 from pipeline.evaluators.plots import write_figures
 from pipeline.evaluators.ppc import posterior_predictive_report
-from pipeline.evaluators.report import build_gates, build_report, write_outputs
+from pipeline.evaluators.report import build_gates, build_report, gate_severities, write_outputs
 from pipeline.evaluators.sensitivity import (
     STATUS_OK,
     RankTable,
@@ -59,12 +59,16 @@ from pipeline.evaluators.target import (
     measured_log_troops,
     round_x_diffs,
 )
-from pipeline.evaluators.variants import parse_variants
+from pipeline.evaluators.variants import NotEvaluableError, parse_variants, read_imputed_side_ids
+from pipeline.imputers.likelihood import NeutralDraws, load_neutral_draws
+from pipeline.imputers.load import latest_written_neutral_run_id
 from pipeline.modelers.config import ModelParams
 from pipeline.modelers.design import build_design
 from pipeline.modelers.load import (
     ImputedRound,
     check_round_provenance,
+    fill_camp_log_troops,
+    has_multi_side_battle,
     load_battle_quality,
     load_battle_types,
     load_side_inputs,
@@ -73,6 +77,7 @@ from pipeline.modelers.load import (
 )
 from pipeline.modelers.outputs import run_directory
 from pipeline.modelers.records import ModelDesign, SideInput
+from pipeline.reconcilers.neutral import neutral_draws_path
 from pipeline.stages.base import StageContext
 
 __all__ = ["run"]
@@ -117,7 +122,13 @@ def _prepare(conn: Any, mp: ModelParams, ctx: StageContext) -> _Prepared | None:
         )
         return None
     sides = subset_sides(load_side_inputs(conn), ctx.limit)
-    design = build_design(sides)
+    # The model stage fills a camp member's missing troops from the imputed
+    # rounds before building its design; do the same so the designs match.
+    rounds: list[ImputedRound] | None = None
+    if has_multi_side_battle(sides):
+        rounds = read_rounds(Path(mp.imputed_root), mp.scale, mp.max_rounds)
+        sides = fill_camp_log_troops(sides, rounds)
+    design = build_design(sides, mp.design)
     if set(design.general_ids.tolist()) != set(published.general_ids.tolist()):
         logger.error(
             "evaluate_design_mismatch",
@@ -128,7 +139,8 @@ def _prepare(conn: Any, mp: ModelParams, ctx: StageContext) -> _Prepared | None:
             "re-run the model stage",
         )
         return None
-    rounds = read_rounds(Path(mp.imputed_root), mp.scale, mp.max_rounds)
+    if rounds is None:
+        rounds = read_rounds(Path(mp.imputed_root), mp.scale, mp.max_rounds)
     check_round_provenance(rounds, published.imputation_run_id)
     return _Prepared(
         published,
@@ -138,6 +150,25 @@ def _prepare(conn: Any, mp: ModelParams, ctx: StageContext) -> _Prepared | None:
         round_x_diffs(design, rounds),
         measured_log_troops(conn, design),
     )
+
+
+def _load_neutral(conn: Any, reconcile_root: Path) -> NeutralDraws:
+    """Reconcile's newest written neutral draws, for the g_unlabelled variants.
+
+    Raises:
+        NotEvaluableError: If no run wrote a neutral fit, or its file is missing
+            or unreadable. The variants report that instead of failing.
+    """
+    run_id = latest_written_neutral_run_id(conn)
+    if run_id is None:
+        raise NotEvaluableError("no reconcile run has written a neutral fit in this database")
+    path = reconcile_root / neutral_draws_path(Path(), run_id).name
+    if not path.is_file():
+        raise NotEvaluableError(f"neutral draws file {path} not found")
+    try:
+        return load_neutral_draws(path)
+    except (OSError, ValueError, KeyError) as exc:
+        raise NotEvaluableError(f"cannot read {path}: {type(exc).__name__}: {exc}") from exc
 
 
 def _expert_section(
@@ -245,7 +276,12 @@ def _counts(prep: _Prepared) -> dict[str, Any]:
 
 
 def _evaluate(
-    conn: Any, prep: _Prepared, mp: ModelParams, params: EvaluateParams, ctx: StageContext
+    conn: Any,
+    prep: _Prepared,
+    mp: ModelParams,
+    params: EvaluateParams,
+    ctx: StageContext,
+    severities: Mapping[str, str],
 ) -> None:
     """Run every section and write the files."""
     timings: dict[str, float] = {}
@@ -262,6 +298,12 @@ def _evaluate(
         prep.measured,
         lambda: load_battle_quality(conn),
         published,
+        lambda: _load_neutral(conn, Path(params.reconcile_root)),
+        lambda: read_imputed_side_ids(
+            Path(mp.imputed_root),
+            mp.scale,
+            [r.index for r in prep.rounds[: params.sensitivity_rounds]],
+        ),
     )
     with _timed(timings, "sensitivity"):
         sens = run_sensitivity(inputs, parse_variants(params.sensitivity_variants))
@@ -280,7 +322,7 @@ def _evaluate(
             rank_tables=tables,
             published=published,
         )
-    gates = build_gates(cv, sens, named_gate, params)
+    gates = build_gates(cv, sens, named_gate, params, severities)
     report = build_report(
         published=published,
         params=params,
@@ -319,7 +361,12 @@ def _evaluate(
     )
 
 
-def _run_body(conn: Any, spec_params: dict[str, Any], ctx: StageContext) -> None:
+def _run_body(
+    conn: Any,
+    spec_params: dict[str, Any],
+    ctx: StageContext,
+    severities: Mapping[str, str] | None = None,
+) -> None:
     params = EvaluateParams.from_mapping(spec_params)
     mp = load_eval_model_params(params)
     prep = _prepare(conn, mp, ctx)
@@ -336,7 +383,7 @@ def _run_body(conn: Any, spec_params: dict[str, Any], ctx: StageContext) -> None
     if ctx.dry_run:
         logger.info("evaluate_dry_run", hint="stopping before any fit; nothing written")
         return
-    _evaluate(conn, prep, mp, params, ctx)
+    _evaluate(conn, prep, mp, params, ctx, severities or {})
 
 
 def run(spec: dict[str, Any], context: StageContext | None = None) -> None:
@@ -348,8 +395,9 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> None:
     """
     ctx = context or StageContext()
     params: dict[str, Any] = spec.get("params") or {}
+    severities = gate_severities(spec.get("quality_checks") or [])
     if ctx.db_conn is not None:
-        _run_body(ctx.db_conn, params, ctx)
+        _run_body(ctx.db_conn, params, ctx, severities)
         return
     with get_connection() as conn:
-        _run_body(conn, params, ctx)
+        _run_body(conn, params, ctx, severities)
