@@ -599,11 +599,13 @@ def _iso_to_literal(value: str) -> str:
     """Convert a SPARQL xsd:dateTime into the mapper's date literal form.
 
     Args:
-        value: A value such as ``"-0031-09-02T00:00:00Z"``, or an empty
-            string when the binding was absent.
+        value: A value such as ``"-0043-03-15T00:00:00Z"`` (44 BC, as XSD
+            1.1 counts a year zero), or an empty string when the binding was
+            absent.
 
     Returns:
         A literal :func:`astronomical_year` understands, or an empty string.
+        A negative year -Y comes back as the historical ``Y + 1 BC``.
     """
     raw = value.strip()
     if not raw:
@@ -627,8 +629,12 @@ def _iso_to_literal(value: str) -> str:
     # the only part the lifespan gate reads, so the rest is made valid.
     month = month if month.isdigit() and month != "00" else "01"
     day = day if day.isdigit() and day != "00" else "01"
-    literal = f"{int(year):04d}-{month}-{day}"
-    return f"{literal} BC" if negative else literal
+    if negative:
+        # The query service writes XSD 1.1 years, which have a year zero
+        # (1 BC), so "-0043" is 44 BC. Wikidata's entity JSON writes
+        # historical years instead and takes a different path.
+        return f"{int(year) + 1:04d}-{month}-{day} BC"
+    return f"{int(year):04d}-{month}-{day}"
 
 
 def _looks_like_qid(value: str) -> bool:

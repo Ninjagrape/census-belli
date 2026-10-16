@@ -42,9 +42,12 @@ from pipeline.resolvers.disambiguate import disambiguate, format_candidates, pro
 from pipeline.resolvers.matcher import (
     AMBIGUITY_MARGIN,
     best_score,
+    career_clusters,
+    command_window,
     lifespan_verdict,
     match_against_identities,
     match_group,
+    partition_by_lifespan,
     rank_for_prompt,
     viable_candidates,
 )
@@ -79,7 +82,9 @@ from pipeline.resolvers.store import (
     load_battle_index,
     load_side_index,
     log_unresolved,
+    prune_stale_commanders,
     remove_orphan_generals,
+    side_of,
     write_identity,
 )
 
@@ -103,6 +108,8 @@ __all__ = [
     "PrefetchedCandidateSource",
     "astronomical_year",
     "best_score",
+    "career_clusters",
+    "command_window",
     "candidate_keys",
     "clean_surface",
     "collect_query_names",
@@ -121,8 +128,11 @@ __all__ = [
     "load_mentions",
     "load_side_index",
     "log_unresolved",
+    "prune_stale_commanders",
+    "side_of",
     "match_against_identities",
     "match_group",
+    "partition_by_lifespan",
     "rank_for_prompt",
     "name_keys",
     "non_person_reason",
