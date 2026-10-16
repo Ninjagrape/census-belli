@@ -52,6 +52,7 @@ FILES = {
 def _build(conn: Connection, params: ReportParams, run_id: int) -> ReportView:
     diagnostics_root = Path(params.diagnostics_root)
     evaluation, reason = load.load_evaluation(Path(params.evaluation_root), run_id)
+    rank_by = load.load_rank_by(conn, run_id)
     return build_view(
         params,
         run_id=run_id,
@@ -63,6 +64,7 @@ def _build(conn: Connection, params: ReportParams, run_id: int) -> ReportView:
         evaluation=evaluation,
         evaluation_reason=reason,
         evaluation_severities=load.load_evaluate_severities(Path(params.evaluate_spec_path)),
+        pooled_draws=load.load_pooled_draws(diagnostics_root, run_id, rank_by),
     )
 
 

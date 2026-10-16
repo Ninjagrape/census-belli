@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
+import numpy as np
 import structlog
 import yaml
 from sqlalchemy import text
@@ -21,6 +22,7 @@ from pipeline.reporters.records import (
     EvaluationInfo,
     GeneralEstimate,
     ModelGate,
+    PooledDraws,
     RubinInfo,
     VariantSummary,
 )
@@ -33,6 +35,8 @@ __all__ = [
     "load_evaluation",
     "load_model_counts",
     "load_model_gates",
+    "load_pooled_draws",
+    "load_rank_by",
     "load_rubin",
     "parse_evaluation",
     "select_run",
@@ -47,7 +51,8 @@ _VARIANT_NAME = re.compile(r"[A-Za-z0-9_-]+")
 _ESTIMATES = text(
     "SELECT e.general_id, g.canonical_name, g.wikidata_id, e.skill_mean, e.skill_median, "
     "e.skill_sd, e.skill_ci_lo, e.skill_ci_hi, e.skill_ci90_lo, e.skill_ci90_hi, "
-    "e.total_war, e.war_per_battle, e.war_sd, e.n_battles, e.rank "
+    "e.total_war, e.war_per_battle, e.war_sd, e.n_battles, e.rank, "
+    "e.war_ci_lo, e.war_ci_hi, e.p_above_next_rank "
     "FROM general_skill_estimates e JOIN generals g ON g.general_id = e.general_id "
     "WHERE e.run_id = :run_id ORDER BY e.rank NULLS LAST, e.general_id"
 )
@@ -64,6 +69,7 @@ _DETAILS = text(
     "ORDER BY d.general_id, b.year_astronomical, d.battle_id, bc.bc_id"
 )
 _COUNTS = text("SELECT diagnostics -> 'counts' FROM model_runs WHERE run_id = :run_id")
+_RANK_BY = text("SELECT config ->> 'rank_by' FROM model_runs WHERE run_id = :run_id")
 _ELIGIBLE = text(
     "SELECT COUNT(*) FROM general_skill_estimates "
     "WHERE run_id = :run_id AND n_battles >= :min_battles"
@@ -127,6 +133,9 @@ def load_estimates(conn: Connection, run_id: int) -> tuple[GeneralEstimate, ...]
             war_sd=_num(r["war_sd"]),
             n_battles=int(r["n_battles"]),
             rank=_int(r["rank"]),
+            war_ci_lo=_num(r["war_ci_lo"]),
+            war_ci_hi=_num(r["war_ci_hi"]),
+            p_above_next_rank=_num(r["p_above_next_rank"]),
         )
         for r in rows
     )
@@ -236,6 +245,57 @@ def load_model_gates(diagnostics_root: Path, run_id: int) -> tuple[ModelGate, ..
         )
         for g in gates
         if isinstance(g, dict)
+    )
+
+
+def load_rank_by(conn: Connection, run_id: int) -> str:
+    """The ``rank_by`` the run was fitted with (``total_war`` when not recorded).
+
+    Args:
+        conn: An open connection.
+        run_id: The model run.
+
+    Returns:
+        ``total_war`` or ``skill_mean``.
+    """
+    value = conn.execute(_RANK_BY, {"run_id": run_id}).scalar()
+    return "skill_mean" if value == "skill_mean" else "total_war"
+
+
+def load_pooled_draws(
+    diagnostics_root: Path, run_id: int, rank_by: str = "total_war"
+) -> PooledDraws | None:
+    """The run's ``pooled_draws.npz``, as per-general draw columns.
+
+    Args:
+        diagnostics_root: Root of the model stage's ``run{N}`` directories.
+        run_id: The model run.
+        rank_by: The run's ranking basis; ``skill_mean`` selects skill draws.
+
+    Returns:
+        The draws, or None when the file is missing or unusable.
+    """
+    path = diagnostics_root / f"run{run_id}" / "pooled_draws.npz"
+    if not path.is_file():
+        return None
+    try:
+        with np.load(path) as npz:
+            ids = np.asarray(npz["general_ids"])
+            war = np.asarray(npz["war_draws"], dtype=float)
+            skill = np.asarray(npz["skill_draws"], dtype=float) if "skill_draws" in npz else None
+    except (OSError, ValueError, KeyError) as exc:
+        logger.warning("report_draws_unreadable", path=str(path), error=type(exc).__name__)
+        return None
+    want_skill = rank_by == "skill_mean"
+    use_skill = want_skill and skill is not None
+    matrix = skill if use_skill and skill is not None else war
+    if matrix.ndim != 2 or matrix.shape[1] != len(ids):
+        logger.warning("report_draws_misshapen", path=str(path), shape=list(matrix.shape))
+        return None
+    return PooledDraws(
+        draws={int(g): matrix[:, i] for i, g in enumerate(ids)},
+        basis="skill" if use_skill else "war",
+        skill_unavailable=want_skill and not use_skill,
     )
 
 

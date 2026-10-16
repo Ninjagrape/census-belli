@@ -193,6 +193,16 @@ def test_a_failed_error_gate_in_the_evaluation_report_is_a_reason() -> None:
     assert reasons == ("evaluation gate named_checks failed: not_evaluable",)
 
 
+def test_a_gate_entry_severity_beats_the_spec_severity() -> None:
+    gates = ({"name": "calibration", "passed": False, "severity": "error", "message": "loose"},)
+
+    reasons = provisional_reasons(
+        [], "", evaluation_gates=gates, evaluation_severities={"calibration": "warning"}
+    )
+
+    assert reasons == ("evaluation gate calibration failed: loose",)
+
+
 def test_the_view_is_provisional_when_an_evaluation_error_gate_failed() -> None:
     info = replace(
         evaluation(Path(".")),

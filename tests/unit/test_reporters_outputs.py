@@ -178,7 +178,7 @@ def test_csv_missing_values_are_empty_cells(tmp_path: Path) -> None:
     write_rankings_csv(tmp_path / "r.csv", v)
 
     row = read_csv_rows(tmp_path / "r.csv")[0]
-    assert row["total_war"] == "" and row["war_normal_approx_lo"] == ""
+    assert row["total_war"] == "" and row["war_ci_lo"] == ""
 
 
 def test_json_round_trips_at_full_float_precision(tmp_path: Path) -> None:
@@ -236,8 +236,8 @@ def test_overlap_is_null_in_json_and_blank_in_csv_when_not_comparable(tmp_path: 
     assert payload["generals"][0]["overlaps_next_rank"] is False
     assert payload["generals"][1]["overlaps_next_rank"] is None
     assert [r["overlaps_next_rank"] for r in rows] == ["false", ""]
-    assert "war_normal_approx_lo" in payload["generals"][0]
-    assert "war_interval_lo" not in payload["generals"][0]
+    assert "war_normal_approx_lo" not in payload["generals"][0]
+    assert payload["generals"][0]["war_interval_method"] == "posterior"
 
 
 def test_csv_text_cells_that_look_like_formulas_are_quoted_but_numbers_are_not(
@@ -273,17 +273,51 @@ def test_rank_overlap_text_does_not_present_the_interval_as_credible() -> None:
     v = _view()
     report = render_markdown(v, [])
 
-    assert "normal approximation" in report
-    assert "is on skill, and is shown beside it" not in report
-    assert "derived here from the stored sd" in report
+    assert "normal approximation" not in report
+    assert "stored 95% credible intervals" in report
     assert "next listed general" in report
 
 
-def test_the_explorer_axis_and_labels_name_the_approximation() -> None:
+def test_a_run_without_stored_war_intervals_falls_back_and_says_so(tmp_path: Path) -> None:
+    ests = [
+        estimate(1, rank=1, total_war=1.0, stored_war_interval=False),
+        estimate(2, rank=2, total_war=5.0, stored_war_interval=False),
+    ]
+    v = view(ests)
+
+    report = render_markdown(v, [])
+    payload = build_payload(v)
+    write_rankings_csv(tmp_path / "r.csv", v)
+
+    assert v.uses_normal_approx
+    assert "normal approximation" in report and "(approx.)" in report
+    assert payload["generals"][0]["war_interval_method"] == "normal_approx"
+    assert "normal approximation" in payload["overlap_method"]
+    assert any("normal approximation" in d for d in v.disclosures)
+    assert read_csv_rows(tmp_path / "r.csv")[0]["war_interval_method"] == "normal_approx"
+
+
+def test_stored_intervals_and_adjacent_probability_are_exported(tmp_path: Path) -> None:
+    v = view([estimate(1, rank=1, p_above_next_rank=0.8125), estimate(2, rank=2)])
+
+    payload = build_payload(v)
+    write_rankings_csv(tmp_path / "r.csv", v)
+    rows = read_csv_rows(tmp_path / "r.csv")
+
+    first = payload["generals"][0]
+    assert (
+        first["p_above_next_rank"] == 0.8125 and payload["generals"][1]["p_above_next_rank"] is None
+    )
+    assert (first["war_ci_lo"], first["war_ci_hi"]) == pytest.approx((1.0 - 0.196, 1.0 + 0.196))
+    assert rows[0]["p_above_next_rank"] == "0.8125" and rows[1]["p_above_next_rank"] == ""
+    assert not v.uses_normal_approx
+
+
+def test_the_explorer_axis_and_labels_name_the_interval() -> None:
     from pipeline.reporters.explorer_script import EXPLORER_JS
 
-    assert "Expected total WAR (bars: normal approximation)" in EXPLORER_JS
-    assert "war_interval" not in EXPLORER_JS
+    assert "Expected total WAR (bars: 95% interval)" in EXPLORER_JS
+    assert "war_normal_approx" not in EXPLORER_JS
 
 
 def test_sensitivity_ranks_are_restricted_to_generals_in_the_payload() -> None:

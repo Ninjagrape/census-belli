@@ -7,11 +7,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 __all__ = [
     "BattleDetail",
     "EvaluationInfo",
     "GeneralEstimate",
     "ModelGate",
+    "PooledDraws",
     "RubinInfo",
     "VariantSummary",
 ]
@@ -40,6 +43,9 @@ class GeneralEstimate:
     war_sd: float | None
     n_battles: int
     rank: int | None
+    war_ci_lo: float | None = None
+    war_ci_hi: float | None = None
+    p_above_next_rank: float | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +68,23 @@ class BattleDetail:
     expected_score_model: float | None
     expected_score_replacement: float | None
     actual_outcome: float | None
+
+
+@dataclass(frozen=True)
+class PooledDraws:
+    """The per-general posterior draws the report re-ranks P(above next) from.
+
+    Attributes:
+        draws: ``general_id -> (N,)`` draws, row ``n`` being the same posterior
+            draw for every general so that comparisons respect correlation.
+        basis: ``war`` or ``skill``; what the draws are.
+        skill_unavailable: The run ranks by skill but the file holds no skill
+            draws, so ``draws`` are WAR.
+    """
+
+    draws: Mapping[int, np.ndarray]
+    basis: str
+    skill_unavailable: bool = False
 
 
 @dataclass(frozen=True)

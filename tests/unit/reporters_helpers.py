@@ -11,6 +11,7 @@ from pipeline.reporters.records import (
     EvaluationInfo,
     GeneralEstimate,
     ModelGate,
+    PooledDraws,
     RubinInfo,
     VariantSummary,
 )
@@ -28,8 +29,16 @@ def estimate(
     total_war: float | None = 1.0,
     war_sd: float | None = 0.1,
     skill_mean: float = 0.5,
+    stored_war_interval: bool = True,
+    p_above_next_rank: float | None = None,
 ) -> GeneralEstimate:
-    """A stored estimate with a 95% skill interval of mean +/- 1."""
+    """A stored estimate with a 95% skill interval of mean +/- 1.
+
+    The stored WAR interval is total_war +/- 1.96 war_sd unless
+    ``stored_war_interval`` is False, which mimics a run from before the model
+    stage stored one.
+    """
+    has_interval = stored_war_interval and total_war is not None and war_sd is not None
     return GeneralEstimate(
         general_id=general_id,
         name=name or f"General {general_id}",
@@ -46,6 +55,9 @@ def estimate(
         war_sd=war_sd,
         n_battles=n_battles,
         rank=rank,
+        war_ci_lo=total_war - 1.96 * war_sd if has_interval else None,  # type: ignore[operator]
+        war_ci_hi=total_war + 1.96 * war_sd if has_interval else None,  # type: ignore[operator]
+        p_above_next_rank=p_above_next_rank,
     )
 
 
@@ -103,6 +115,7 @@ def view(
     gates: Sequence[ModelGate] | None = PASSING_GATES,
     report_params: ReportParams | None = None,
     battles: dict[int, tuple[BattleDetail, ...]] | None = None,
+    pooled_draws: PooledDraws | None = None,
 ) -> ReportView:
     """A view over synthetic estimates."""
     return build_view(
@@ -115,4 +128,5 @@ def view(
         model_gates=gates,
         evaluation=evaluation_info,
         evaluation_reason=evaluation_reason,
+        pooled_draws=pooled_draws,
     )

@@ -166,8 +166,10 @@ def world(engine: Engine) -> dict[str, Any]:
                 text(
                     "INSERT INTO general_skill_estimates (run_id, general_id, skill_mean, "
                     "skill_median, skill_sd, skill_ci_lo, skill_ci_hi, skill_ci90_lo, "
-                    "skill_ci90_hi, total_war, war_per_battle, war_sd, n_battles, rank) "
-                    "VALUES (:r, :g, :m, :m, 0.5, :lo, :hi, :lo9, :hi9, :w, :wp, :sd, :n, :k)"
+                    "skill_ci90_hi, total_war, war_per_battle, war_sd, war_ci_lo, war_ci_hi, "
+                    "p_above_next_rank, n_battles, rank) "
+                    "VALUES (:r, :g, :m, :m, 0.5, :lo, :hi, :lo9, :hi9, :w, :wp, :sd, "
+                    ":wlo, :whi, :p, :n, :k)"
                 ),
                 {
                     "r": run_id,
@@ -180,6 +182,9 @@ def world(engine: Engine) -> dict[str, Any]:
                     "w": total,
                     "wp": total / len(battles),
                     "sd": 0.3,
+                    "wlo": total - 0.9,
+                    "whi": total + 1.1,
+                    "p": None if rank == len(SPECS) else 0.5 + 0.05 * rank,
                     "n": len(battles),
                     "k": rank,
                 },
@@ -374,6 +379,50 @@ def test_clean_run_passes_every_gate_and_writes_consistent_outputs(
     }
     assert {g["name"] for g in manifest["gates"]} == {"export_matches_db", "evaluation_current"}
     assert all(g["passed"] for g in manifest["gates"])
+
+
+def test_stored_war_intervals_replace_the_normal_approximation(
+    conn: Connection, world: dict[str, Any], tmp_path: Path
+) -> None:
+    _, out = _execute(conn, tmp_path, world)
+    payload = _load(out / "rankings.json")
+    markdown = (out / "report.md").read_text(encoding="utf-8")
+    page = (out / "explorer.html").read_text(encoding="utf-8")
+
+    for general in payload["generals"]:
+        if general["headline"]:
+            assert general["war_interval_method"] == "posterior"
+            assert general["war_ci_lo"] == pytest.approx(general["total_war"] - 0.9)
+            assert general["war_ci_hi"] == pytest.approx(general["total_war"] + 1.1)
+    first = next(g for g in payload["generals"] if g["rank"] == 1)
+    assert first["p_above_next_rank"] == pytest.approx(0.55)
+    assert "war_normal_approx_lo" not in first
+    assert "normal approximation" not in payload["overlap_method"]
+    assert "normal approximation" not in markdown
+    assert "war_normal_approx" not in page
+    assert "p_above_next_rank" in _csv_rows(out / "rankings.csv")[0]
+
+
+def test_a_run_without_stored_war_intervals_falls_back_with_a_disclosure(
+    conn: Connection, world: dict[str, Any], tmp_path: Path
+) -> None:
+    conn.execute(
+        text(
+            "UPDATE general_skill_estimates SET war_ci_lo = NULL, war_ci_hi = NULL, "
+            "p_above_next_rank = NULL WHERE run_id = :r"
+        ),
+        {"r": world["run_id"]},
+    )
+
+    results, out = _execute(conn, tmp_path, world)
+
+    payload = _load(out / "rankings.json")
+    headline = [g for g in payload["generals"] if g["headline"]]
+    assert {g["war_interval_method"] for g in headline} == {"normal_approx"}
+    assert all(g["p_above_next_rank"] is None for g in headline)
+    assert any("normal approximation" in d for d in payload["disclosures"])
+    assert "(approx.)" in (out / "report.md").read_text(encoding="utf-8")
+    assert all(r.passed for r in results.values() if r.severity is Severity.ERROR)
 
 
 def test_every_disclosure_reaches_report_markdown_and_explorer(

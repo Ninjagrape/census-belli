@@ -37,7 +37,8 @@ ${cap_note}
 <input id="search" type="search" placeholder="Search by name" aria-label="Search generals">
 <div class="scroll"><table id="general-table"><thead><tr>
 <th>Rank</th><th>General</th><th>Credited battles</th><th>Expected WAR</th><th>WAR sd</th>
-<th>Skill (95% CI)</th><th>Overlaps next listed general</th></tr></thead>
+<th>WAR (95% interval)</th><th>Skill (95% CI)</th><th>P(above next ranked)</th>
+<th>Overlaps next listed general</th></tr></thead>
 <tbody></tbody></table></div>
 <p id="no-match" hidden>No general matches.</p>
 </section>

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from pipeline.reporters.atomic import write_text_atomic
-from pipeline.reporters.disclosures import OVERLAP_METHOD_NOTE
+from pipeline.reporters.disclosures import interval_method_note
 from pipeline.reporters.records import BattleDetail
 from pipeline.reporters.tables import RankedGeneral
 from pipeline.reporters.view import ReportView
@@ -24,7 +24,7 @@ __all__ = [
     "write_rankings_json",
 ]
 
-SCHEMA_VERSION: Final[int] = 1
+SCHEMA_VERSION: Final[int] = 2
 
 # CSV text columns a spreadsheet could read as a formula; numbers are never prefixed.
 TEXT_COLUMNS: Final[frozenset[str]] = frozenset({"name", "wikidata_id"})
@@ -45,8 +45,10 @@ CSV_COLUMNS: Final[tuple[str, ...]] = (
     "total_war",
     "war_per_battle",
     "war_sd",
-    "war_normal_approx_lo",
-    "war_normal_approx_hi",
+    "war_ci_lo",
+    "war_ci_hi",
+    "war_interval_method",
+    "p_above_next_rank",
     "overlaps_next_rank",
     "skill_mean",
     "skill_median",
@@ -61,8 +63,13 @@ CSV_COLUMNS: Final[tuple[str, ...]] = (
 LABELS: Final[dict[str, str]] = {
     "total_war": "Expected WAR (total)",
     "war_per_battle": "Expected WAR per battle",
-    "war_normal_approx": (
-        "Total WAR plus or minus z times war_sd (normal approximation, not a credible interval)"
+    "war_ci": (
+        "95% credible interval on total WAR; war_interval_method says whether it is the stored "
+        "posterior interval or, for older runs, a normal approximation (total WAR plus or "
+        "minus z times war_sd)"
+    ),
+    "p_above_next_rank": (
+        "Share of posterior draws in which WAR exceeds that of the next-ranked general"
     ),
     "expected_score_model": "Expected score (model)",
     "expected_score_replacement": "Expected score (replacement)",
@@ -88,8 +95,14 @@ def _scalars(g: RankedGeneral, provisional: bool) -> dict[str, Any]:
         "total_war": e.total_war,
         "war_per_battle": e.war_per_battle,
         "war_sd": e.war_sd,
-        "war_normal_approx_lo": g.war_lo,
-        "war_normal_approx_hi": g.war_hi,
+        "war_ci_lo": g.war_lo,
+        "war_ci_hi": g.war_hi,
+        "war_interval_method": (
+            None
+            if g.war_lo is None
+            else ("normal_approx" if g.war_interval_approx else "posterior")
+        ),
+        "p_above_next_rank": g.p_above_next,
         "overlaps_next_rank": g.overlaps_next,
         "skill_mean": e.skill_mean,
         "skill_median": e.skill_median,
@@ -228,7 +241,7 @@ def build_payload(view: ReportView, *, limit: int | None = None) -> dict[str, An
         "top_n": view.params.top_n,
         "z": view.z,
         "overlap_threshold": view.params.overlap_threshold,
-        "overlap_method": OVERLAP_METHOD_NOTE,
+        "overlap_method": interval_method_note(uses_normal_approx=view.uses_normal_approx),
         "labels": LABELS,
         "disclosures": list(view.disclosures),
         "n_headline": len(view.headline),

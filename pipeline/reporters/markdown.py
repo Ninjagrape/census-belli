@@ -25,9 +25,9 @@ _PAGE = Template(
     """# General WAR rankings, model run ${run_id}
 ${banner}
 Generals are ranked by expected total WAR (wins above replacement), in the order the model \
-stage stored. This report reads those numbers and recomputes none of them; the approximate WAR \
-interval and the rank overlap flag are derived here from the stored sd. Skill intervals are the \
-stored ${level} credible intervals; the WAR column carries its Rubin-pooled sd.
+stage stored. This report reads those numbers and recomputes none of them; only the rank \
+overlap flag is derived here, from the stored WAR intervals. Skill and WAR intervals are the \
+stored ${level} credible intervals; the WAR sd is Rubin-pooled.
 
 ## Headline ranking
 
@@ -73,6 +73,13 @@ def _ci(lo: float, hi: float) -> str:
     return f"[{lo:.2f}, {hi:.2f}]"
 
 
+def _war_interval(g: RankedGeneral) -> str:
+    if g.war_lo is None or g.war_hi is None:
+        return NA
+    text = _ci(g.war_lo, g.war_hi)
+    return f"{text} (approx.)" if g.war_interval_approx else text
+
+
 def _banner(view: ReportView) -> str:
     if not view.provisional:
         return ""
@@ -92,8 +99,11 @@ def _overlap_cell(value: bool | None) -> str:
 
 
 def _headline_table(top: Sequence[RankedGeneral], show_overlap: bool) -> str:
-    head = "| Rank | General | Credited battles | Expected WAR | WAR sd | Skill (95% CI) |"
-    rule = "|---:|---|---:|---:|---:|---|"
+    head = (
+        "| Rank | General | Credited battles | Expected WAR | WAR sd | WAR (95% interval) "
+        "| P(above next ranked) | Skill (95% CI) |"
+    )
+    rule = "|---:|---|---:|---:|---:|---|---:|---|"
     if show_overlap:
         head, rule = head + " Overlaps next listed general |", rule + "---|"
     lines = [head, rule]
@@ -105,6 +115,8 @@ def _headline_table(top: Sequence[RankedGeneral], show_overlap: bool) -> str:
             str(e.n_battles),
             _num(e.total_war),
             _num(e.war_sd),
+            _war_interval(g),
+            _num(g.p_above_next, 3),
             f"{e.skill_mean:.2f} {_ci(e.skill_ci_lo, e.skill_ci_hi)}",
         ]
         if show_overlap:
@@ -191,13 +203,18 @@ def render_markdown(view: ReportView, figure_names: Sequence[str]) -> str:
     )
     if p.show_rank_overlap:
         intro += (
-            " The last column flags whether a general's approximate WAR interval (total WAR "
-            f"plus or minus {view.z:.2f} times the stored WAR sd, a normal approximation and not "
-            "a credible interval) overlaps the next listed general's by more than "
-            f"{p.overlap_threshold:.0%} of the narrower interval. n/a means there is no next "
-            "listed general or an interval is missing. The stored credible interval is on skill "
-            "only; see the disclosures for the limits of the overlap flag."
+            " The last column flags whether a general's WAR interval overlaps the next listed "
+            f"general's by more than {p.overlap_threshold:.0%} of the narrower interval. n/a "
+            "means there is no next listed general or an interval is missing. "
+            "P(above next ranked) compares each general with the next listed row; the "
+            "disclosures say how it was computed."
         )
+        if view.uses_normal_approx:
+            intro += (
+                " This run stored no WAR credible interval, so intervals marked approx. are "
+                f"total WAR plus or minus {view.z:.2f} times the stored WAR sd, a normal "
+                "approximation and not a credible interval."
+            )
     under_intro = (
         f"{len(view.under_determined)} generals have fewer than {p.min_battles} credited "
         "battles. Their skill is too weakly determined to rank, so they are listed without one."

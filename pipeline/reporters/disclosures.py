@@ -7,18 +7,27 @@ from collections.abc import Iterable, Mapping
 from typing import Any, Final
 
 __all__ = [
+    "INTERVAL_METHOD_NOTE",
     "OVERLAP_METHOD_NOTE",
     "STATIC_DISCLOSURES",
+    "interval_method_note",
     "merge_disclosures",
+    "p_above_next_note",
     "run_disclosures",
 ]
 
+INTERVAL_METHOD_NOTE: Final[str] = (
+    "WAR intervals are the model's stored 95% credible intervals on total WAR, from the pooled "
+    "posterior draws widened for imputation uncertainty. Rank overlap flags compare each "
+    "general's interval only with the next listed general's."
+)
+
 OVERLAP_METHOD_NOTE: Final[str] = (
     "Rank overlap flags compare each general's interval, total WAR plus or minus z times the "
-    "stored Rubin-pooled WAR sd, only with the next listed general's. This is a normal "
-    "approximation that ignores skew in the WAR posterior and the correlation between "
-    "generals' WAR (shared replacement level, shared battles), so it is a rough guide, not a "
-    "probability that the order is right. The model stores no WAR credible interval."
+    "stored Rubin-pooled WAR sd, only with the next listed general's. This run stored no WAR "
+    "credible interval, so this is a normal approximation that ignores skew in the WAR "
+    "posterior and the correlation between generals' WAR (shared replacement level, shared "
+    "battles). It is a rough guide, not a probability that the order is right."
 )
 
 STATIC_DISCLOSURES: Final[tuple[str, ...]] = (
@@ -36,8 +45,64 @@ STATIC_DISCLOSURES: Final[tuple[str, ...]] = (
     "commanded.",
     "Expected score is P(win) plus half of P(indecisive) under the model. It is shown as "
     "expected score, never as a win probability, and WAR is expected WAR.",
-    OVERLAP_METHOD_NOTE,
+    INTERVAL_METHOD_NOTE,
 )
+
+
+def interval_method_note(*, uses_normal_approx: bool) -> str:
+    """The sentence describing how WAR intervals were obtained.
+
+    Args:
+        uses_normal_approx: Whether any listed interval is the fallback
+            normal approximation.
+
+    Returns:
+        The disclosure text.
+    """
+    return OVERLAP_METHOD_NOTE if uses_normal_approx else INTERVAL_METHOD_NOTE
+
+
+_P_NEXT_TAIL: Final[str] = (
+    " It uses the unwidened mixture of pooled posterior draws, while the WAR interval is "
+    "widened by Rubin's total variance T, so it is slightly overconfident relative to that "
+    "interval (a small effect)."
+)
+
+
+def p_above_next_note(source: str) -> str:
+    """The sentence saying what P(above next ranked) is in this report.
+
+    Args:
+        source: ``war`` or ``skill`` (recomputed over the headline ordering from
+            the pooled draws), ``skill_unavailable`` (recomputed on WAR because
+            the run ranks by skill but the draws file holds none) or ``stored``
+            (no draws file, so the model stage's column is shown).
+
+    Returns:
+        The disclosure text.
+    """
+    if source == "stored":
+        return (
+            "P(above next ranked) is the model stage's stored value: the share of pooled "
+            "posterior draws in which a general's WAR exceeds that of the general ranked "
+            "immediately below in the full ranking. This run has no pooled draws file, so it "
+            "could not be recomputed, and where a general below min_battles sits between two "
+            "listed generals it refers to that hidden general, not the next listed row."
+            + _P_NEXT_TAIL
+        )
+    basis = "skill" if source == "skill" else "WAR"
+    note = (
+        f"P(above next ranked) is recomputed from the pooled draws over the headline "
+        f"ordering: the share of draws in which a general's {basis} exceeds that of the next "
+        "listed general, so it accounts for the correlation between them."
+    )
+    if source == "skill_unavailable":
+        note += (
+            " The run ranks by skill but its draws file holds no skill draws, so the "
+            "comparison is on total WAR and may disagree with the skill-based order."
+        )
+    return note + _P_NEXT_TAIL
+
 
 _SPACES = re.compile(r"\s+")
 

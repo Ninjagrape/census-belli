@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from pipeline.reporters.config import ReportParams
+from pipeline.reporters.disclosures import p_above_next_note
+from pipeline.reporters.load import load_pooled_draws
+from pipeline.reporters.records import GeneralEstimate, PooledDraws
 from pipeline.reporters.tables import overlap_share, split_generals, top_headline, z_for_level
-from tests.unit.reporters_helpers import estimate
+from tests.unit.reporters_helpers import estimate, view
 
 # ─── headline versus under-determined ────────────────────────────────────────
 
@@ -97,8 +101,8 @@ def test_overlap_share_is_a_share_of_the_narrower_interval(
 def _pair(threshold: float):  # type: ignore[no-untyped-def]
     # With z=1 the intervals are (0, 2) and (1, 3): an overlap of exactly half.
     ests = [
-        estimate(1, rank=1, total_war=1.0, war_sd=1.0),
-        estimate(2, rank=2, total_war=2.0, war_sd=1.0),
+        estimate(1, rank=1, total_war=1.0, war_sd=1.0, stored_war_interval=False),
+        estimate(2, rank=2, total_war=2.0, war_sd=1.0, stored_war_interval=False),
     ]
     headline, _ = _split(ests, overlap_threshold=threshold)
     return headline
@@ -134,9 +138,27 @@ def test_overlap_flags_can_be_switched_off() -> None:
 
 
 def test_the_overlap_interval_is_total_war_plus_or_minus_z_sd() -> None:
-    headline, _ = _split([estimate(1, rank=1, total_war=3.0, war_sd=0.5)], z=2.0)
+    headline, _ = _split(
+        [estimate(1, rank=1, total_war=3.0, war_sd=0.5, stored_war_interval=False)], z=2.0
+    )
 
     assert (headline[0].war_lo, headline[0].war_hi) == (2.0, 4.0)
+
+
+def test_the_stored_war_interval_wins_over_the_normal_approximation() -> None:
+    est = estimate(1, rank=1, total_war=3.0, war_sd=0.5)
+    stored = GeneralEstimate(**{**est.__dict__, "war_ci_lo": 1.0, "war_ci_hi": 7.0})
+
+    headline, _ = _split([stored], z=2.0)
+
+    assert (headline[0].war_lo, headline[0].war_hi) == (1.0, 7.0)
+    assert not headline[0].war_interval_approx
+
+
+def test_a_general_without_a_stored_interval_is_marked_as_approximate() -> None:
+    headline, _ = _split([estimate(1, rank=1, stored_war_interval=False)], z=2.0)
+
+    assert headline[0].war_interval_approx
 
 
 def test_z_for_the_stored_level_is_the_usual_multiplier() -> None:
@@ -172,3 +194,91 @@ def test_the_spec_defaults_parse() -> None:
 def test_invalid_parameters_are_refused(bad: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         ReportParams.from_mapping(bad)
+
+
+# ─── P(above next) over the headline ordering ────────────────────────────────
+
+
+def _draws(columns: dict[int, list[float]], basis: str = "war") -> PooledDraws:
+    return PooledDraws({g: np.array(v) for g, v in columns.items()}, basis)
+
+
+def test_p_above_next_skips_a_hidden_general_between_two_listed_ones() -> None:
+    ests = [
+        estimate(1, rank=1, n_battles=5, p_above_next_rank=0.99),
+        estimate(2, rank=2, n_battles=1, p_above_next_rank=0.99),
+        estimate(3, rank=3, n_battles=5, p_above_next_rank=0.99),
+    ]
+    # 1 beats the hidden 2 always, but beats the listed 3 in only 1 of 4 draws.
+    pooled = _draws({1: [5, 0, 0, 0], 2: [1, 1, 1, 1], 3: [2, 2, 2, 2]})
+
+    headline, _ = _split(ests, pooled=pooled)
+
+    assert headline[0].p_above_next == pytest.approx(0.25)
+    assert headline[1].p_above_next is None
+
+
+def test_p_above_next_falls_back_to_the_stored_column_without_draws() -> None:
+    ests = [
+        estimate(1, rank=1, p_above_next_rank=0.8),
+        estimate(2, rank=2, p_above_next_rank=None),
+    ]
+
+    headline, _ = _split(ests)
+
+    assert [g.p_above_next for g in headline] == [0.8, None]
+
+
+def test_a_general_missing_from_the_draws_gets_no_probability() -> None:
+    ests = [estimate(1, rank=1, p_above_next_rank=0.7), estimate(2, rank=2)]
+
+    headline, _ = _split(ests, pooled=_draws({1: [1.0, 2.0]}))
+
+    assert headline[0].p_above_next is None
+
+
+def _write_npz(directory, **arrays):  # type: ignore[no-untyped-def]
+    run = directory / "run7"
+    run.mkdir()
+    np.savez(run / "pooled_draws.npz", **arrays)
+
+
+def test_skill_ranked_run_compares_skill_draws(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    _write_npz(
+        tmp_path,
+        general_ids=np.array([1, 2]),
+        war_draws=np.array([[0.0, 1.0], [0.0, 1.0]]),
+        skill_draws=np.array([[2.0, 1.0], [2.0, 1.0]]),
+    )
+
+    pooled = load_pooled_draws(tmp_path, 7, "skill_mean")
+
+    assert pooled is not None and pooled.basis == "skill" and not pooled.skill_unavailable
+    headline, _ = _split([estimate(1, rank=1), estimate(2, rank=2)], pooled=pooled)
+    assert headline[0].p_above_next == 1.0
+
+
+def test_skill_ranked_run_without_skill_draws_keeps_war_and_says_so(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    _write_npz(tmp_path, general_ids=np.array([1, 2]), war_draws=np.array([[0.0, 1.0], [0.0, 1.0]]))
+
+    pooled = load_pooled_draws(tmp_path, 7, "skill_mean")
+
+    assert pooled is not None and pooled.basis == "war" and pooled.skill_unavailable
+    assert "no skill draws" in p_above_next_note("skill_unavailable")
+
+
+def test_missing_draws_file_gives_none_and_the_disclosure_names_the_stored_value(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    assert load_pooled_draws(tmp_path, 7) is None
+    v = view([estimate(1, rank=1), estimate(2, rank=2)])
+    assert any("model stage's stored value" in d for d in v.disclosures)
+    assert any("unwidened mixture" in d for d in v.disclosures)
+
+
+def test_view_with_draws_discloses_the_recomputation() -> None:
+    v = view(
+        [estimate(1, rank=1), estimate(2, rank=2)],
+        pooled_draws=_draws({1: [2.0, 2.0], 2: [1.0, 3.0]}),
+    )
+
+    assert v.headline[0].p_above_next == pytest.approx(0.5)
+    assert any("recomputed from the pooled draws" in d for d in v.disclosures)

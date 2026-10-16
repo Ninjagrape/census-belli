@@ -64,6 +64,12 @@ EXPLORER_JS: Final[str] = r"""
   }
   function ci(g) { return fmt(g.skill_mean, 2) + " [" + fmt(g.skill_ci95_lo, 2) + ", " + fmt(g.skill_ci95_hi, 2) + "]"; }
 
+  function warCi(g) {
+    if (g.war_ci_lo === null || g.war_ci_lo === undefined) { return "n/a"; }
+    return "[" + fmt(g.war_ci_lo, 2) + ", " + fmt(g.war_ci_hi, 2) + "]" +
+      (g.war_interval_method === "normal_approx" ? " (approx.)" : "");
+  }
+
   function renderTable(query) {
     var body = document.querySelector("#general-table tbody");
     body.textContent = "";
@@ -79,7 +85,9 @@ EXPLORER_JS: Final[str] = r"""
       cell(tr, g.n_battles, true);
       cell(tr, fmt(g.total_war, 2), true);
       cell(tr, fmt(g.war_sd, 2), true);
+      cell(tr, warCi(g), false);
       cell(tr, ci(g), false);
+      cell(tr, fmt(g.p_above_next_rank, 3), true);
       var flag = cell(tr, overlapText(g.overlaps_next_rank), false);
       if (g.overlaps_next_rank === true) { flag.className = "flag"; }
       tr.addEventListener("click", function () { showDetail(g); });
@@ -116,7 +124,7 @@ EXPLORER_JS: Final[str] = r"""
 
   function warChart() {
     var host = document.getElementById("chart-war");
-    var top = gens.filter(function (g) { return g.headline && g.war_normal_approx_lo !== null; }).slice(0, 50);
+    var top = gens.filter(function (g) { return g.headline && g.war_ci_lo !== null; }).slice(0, 50);
     if (typeof Plotly === "undefined" || top.length === 0) {
       host.textContent = "No intervals to draw.";
       return;
@@ -129,8 +137,8 @@ EXPLORER_JS: Final[str] = r"""
         x: rows.map(function (g) { return g.total_war; }),
         y: rows.map(function (g) { return rankText(g) + ". " + plain(g.name); }),
         error_x: {type: "data", visible: true, color: color,
-          array: rows.map(function (g) { return g.war_normal_approx_hi - g.total_war; }),
-          arrayminus: rows.map(function (g) { return g.total_war - g.war_normal_approx_lo; })},
+          array: rows.map(function (g) { return g.war_ci_hi - g.total_war; }),
+          arrayminus: rows.map(function (g) { return g.total_war - g.war_ci_lo; })},
         marker: {color: color}
       };
     }
@@ -143,7 +151,7 @@ EXPLORER_JS: Final[str] = r"""
     host.style.height = height + "px";
     var axis = {gridcolor: t.grid.gridcolor, zerolinecolor: t.grid.zerolinecolor, linecolor: t.grid.linecolor};
     Plotly.newPlot(host, traces, {
-      xaxis: Object.assign({title: {text: "Expected total WAR (bars: normal approximation)"}}, axis),
+      xaxis: Object.assign({title: {text: "Expected total WAR (bars: 95% interval)"}}, axis),
       yaxis: Object.assign({autorange: "reversed", type: "category"}, axis),
       font: {color: t.font.color},
       margin: {l: 190, r: 20, t: 20, b: 50}, height: height,

@@ -10,10 +10,13 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from statistics import NormalDist
 
-from pipeline.reporters.records import GeneralEstimate, RubinInfo
+import numpy as np
+
+from pipeline.reporters.records import GeneralEstimate, PooledDraws, RubinInfo
 
 __all__ = [
     "RankedGeneral",
+    "has_stored_war_interval",
     "overlap_share",
     "split_generals",
     "top_headline",
@@ -32,8 +35,13 @@ class RankedGeneral:
         is_headline: Whether the general has enough credited battles to be ranked.
         rank: The stored rank for headline generals; None for under-determined
             ones, whose rank is never shown.
-        war_lo: Lower end of the normal-approximation WAR interval.
-        war_hi: Upper end of the normal-approximation WAR interval.
+        war_lo: Lower end of the WAR interval (stored posterior interval, or
+            the normal approximation for a run that stored none).
+        war_hi: Upper end of the WAR interval.
+        war_interval_approx: Whether ``war_lo``/``war_hi`` are the normal
+            approximation rather than the stored posterior interval.
+        p_above_next: P(score above the next headline general's), recomputed from
+            the pooled draws when available, else the stored value.
         overlaps_next: Whether the interval overlaps the next listed headline
             general's by more than the threshold. None when there is no next
             listed general, when either interval is missing, or when the flag
@@ -47,6 +55,8 @@ class RankedGeneral:
     war_lo: float | None
     war_hi: float | None
     overlaps_next: bool | None = None
+    war_interval_approx: bool = False
+    p_above_next: float | None = None
 
 
 def z_for_level(ci_level: float) -> float:
@@ -61,16 +71,27 @@ def z_for_level(ci_level: float) -> float:
     return NormalDist().inv_cdf(0.5 + ci_level / 2.0)
 
 
+def has_stored_war_interval(estimate: GeneralEstimate) -> bool:
+    """Whether the model stage stored a posterior WAR interval for this general."""
+    return estimate.war_ci_lo is not None and estimate.war_ci_hi is not None
+
+
 def war_interval(estimate: GeneralEstimate, z: float) -> tuple[float, float] | None:
-    """``total_war +/- z * war_sd``, a normal approximation from the Rubin sd.
+    """The stored posterior WAR interval, else ``total_war +/- z * war_sd``.
+
+    The normal approximation is only a fallback for runs from before the
+    model stage stored the interval; it ignores skew and between-general
+    correlation.
 
     Args:
         estimate: The stored estimate.
         z: The multiplier from :func:`z_for_level`.
 
     Returns:
-        The interval, or None when either input is missing.
+        The interval, or None when neither is available.
     """
+    if estimate.war_ci_lo is not None and estimate.war_ci_hi is not None:
+        return estimate.war_ci_lo, estimate.war_ci_hi
     if estimate.total_war is None or estimate.war_sd is None:
         return None
     half = z * estimate.war_sd
@@ -128,6 +149,7 @@ def split_generals(
     z: float,
     overlap_threshold: float,
     show_overlap: bool = True,
+    pooled: PooledDraws | None = None,
 ) -> tuple[tuple[RankedGeneral, ...], tuple[RankedGeneral, ...]]:
     """Split generals into the headline ranking and the under-determined list.
 
@@ -142,6 +164,9 @@ def split_generals(
         z: The multiplier for the WAR interval.
         overlap_threshold: Overlap share above which neighbours are flagged.
         show_overlap: Whether to flag overlaps at all.
+        pooled: Pooled draws; when given, P(above next) is recomputed against
+            the next headline general rather than read from the stored column,
+            which was computed over every general including hidden ones.
 
     Returns:
         ``(headline, under_determined)``.
@@ -151,6 +176,7 @@ def split_generals(
     flags: list[bool | None] = (
         _flag_overlaps(intervals, overlap_threshold) if show_overlap else [None] * len(eligible)
     )
+    p_next = _headline_p_next([e for e, _ in intervals], pooled)
     headline = tuple(
         RankedGeneral(
             estimate=e,
@@ -160,8 +186,10 @@ def split_generals(
             war_lo=iv[0] if iv else None,
             war_hi=iv[1] if iv else None,
             overlaps_next=flag,
+            war_interval_approx=iv is not None and not has_stored_war_interval(e),
+            p_above_next=pn,
         )
-        for (e, iv), flag in zip(intervals, flags, strict=True)
+        for (e, iv), flag, pn in zip(intervals, flags, p_next, strict=True)
     )
     thin = sorted((e for e in estimates if e.n_battles < min_battles), key=_thin_order)
     under = tuple(
@@ -176,6 +204,21 @@ def split_generals(
         for e in thin
     )
     return headline, under
+
+
+def _headline_p_next(
+    eligible: Sequence[GeneralEstimate], pooled: PooledDraws | None
+) -> list[float | None]:
+    """P(i above the next eligible general), draw by draw; stored values without draws."""
+    if pooled is None:
+        return [e.p_above_next_rank for e in eligible]
+    out: list[float | None] = [None] * len(eligible)
+    for i in range(len(eligible) - 1):
+        upper = pooled.draws.get(eligible[i].general_id)
+        lower = pooled.draws.get(eligible[i + 1].general_id)
+        if upper is not None and lower is not None:
+            out[i] = float(np.mean(upper > lower))
+    return out
 
 
 def _thin_order(estimate: GeneralEstimate) -> tuple[int, str, int]:
