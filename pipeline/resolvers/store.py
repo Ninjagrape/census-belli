@@ -17,6 +17,10 @@ is what the extract writer does for troop reports -- would silently discard
 that work, so the conflict clause updates only the columns resolve owns, and
 leaves a ``command_role`` that has already moved off ``unknown`` alone.
 
+**A link resolve no longer makes is removed.** The upsert never deletes, so a
+re-run that moves a mention to a different general would leave both rows and
+credit both. :func:`prune_stale_commanders` removes them at the end of a run.
+
 **An unresolved mention is recorded, not dropped.** It goes to
 ``missing_data_log`` under ``commander_general_id``. That is what gives the
 ``resolution_rate`` gate a denominator: without it the gate would divide
@@ -41,6 +45,8 @@ __all__ = [
     "load_battle_index",
     "load_side_index",
     "log_unresolved",
+    "prune_stale_commanders",
+    "side_of",
     "year_to_date_literal",
     "write_identity",
 ]
@@ -448,6 +454,7 @@ def write_identity(
     counts: ResolveCounts,
     source_cache: dict[tuple[str, str], int],
     unplaced: list[Mention] | None = None,
+    linked: dict[tuple[int, int, int], str] | None = None,
 ) -> int | None:
     """Persist one resolved person and every battle they commanded in.
 
@@ -462,6 +469,9 @@ def write_identity(
             database, so the caller can log it. Without this the mention was
             counted and then forgotten, and the ``resolution_rate`` gate never
             saw it.
+        linked: Receives the (battle id, side id, general id) of every row
+            written, mapped to the command role resolve gave it, which is
+            what :func:`prune_stale_commanders` keeps.
 
     Returns:
         The general id, or None when the identity had no mention that could
@@ -544,6 +554,8 @@ def write_identity(
             },
         )
         counts.commanders_written += 1
+        if linked is not None:
+            linked[(battle_id, side_id, general_id)] = to_schema_command_role(mention.apparent_role)
 
     return general_id
 
@@ -695,6 +707,132 @@ def log_unresolved(
 
 
 _ORPHAN_LOG_LIMIT: Final = 20
+
+_COMMANDERS_ON_SIDES = text(
+    "SELECT bc_id, battle_id, side_id, general_id FROM battle_commanders "
+    "WHERE side_id = ANY(:side_ids)"
+)
+# reports_to_bc_id is the only reference to battle_commanders (config/schema.sql
+# and the migrations), and it is classify's, so it is cleared before the delete.
+_DETACH_REPORTS = text(
+    "UPDATE battle_commanders SET reports_to_bc_id = NULL WHERE reports_to_bc_id = ANY(:bc_ids)"
+)
+_DELETE_COMMANDERS = text("DELETE FROM battle_commanders WHERE bc_id = ANY(:bc_ids)")
+
+# The columns classify owns, at the schema defaults, so classify recomputes the
+# side: it never recomputes one whose rows are all attribution_method 'llm', and
+# a weight set that summed over a commander who is gone must not survive.
+# confidence is left alone because the upsert has just rewritten it.
+_RESET_SIDE_ATTRIBUTION = text(
+    """
+    UPDATE battle_commanders SET
+        command_role       = 'unknown',
+        hierarchy_rank     = 0,
+        reports_to_bc_id   = NULL,
+        attribution_weight = 1.0,
+        attribution_method = 'equal'
+    WHERE side_id = ANY(:side_ids)
+    """
+)
+_RESTORE_ROLE = text(
+    "UPDATE battle_commanders SET command_role = CAST(:command_role AS command_role) "
+    "WHERE battle_id = :battle_id AND side_id = :side_id AND general_id = :general_id"
+)
+
+
+def side_of(
+    mention: Mention,
+    battles: dict[str, int],
+    sides: dict[tuple[int, str], int],
+) -> tuple[int, int] | None:
+    """Find the (battle id, side id) a mention belongs to.
+
+    Args:
+        mention: A commander mention.
+        battles: Battle slug and name to id, from :func:`load_battle_index`.
+        sides: Side id by (battle id, label), from :func:`load_side_index`.
+
+    Returns:
+        The battle and side ids, or None when either is not in the database.
+    """
+    battle_id = battles.get(mention.battle_slug) or battles.get(mention.battle_name)
+    if battle_id is None:
+        return None
+    side_id = sides.get((battle_id, mention.side_label))
+    return None if side_id is None else (battle_id, side_id)
+
+
+def prune_stale_commanders(
+    conn: Connection,
+    processed_sides: set[tuple[int, int]],
+    protected_sides: set[tuple[int, int]],
+    linked: dict[tuple[int, int, int], str],
+) -> tuple[int, int]:
+    """Delete the commander rows this run did not link, and reset their sides.
+
+    Resolve owns the link set. A re-run that moves a mention to another
+    general, or detaches it, leaves the old row behind because the upsert only
+    adds, and both generals are then credited.
+
+    Args:
+        conn: An open connection; the caller owns the transaction.
+        processed_sides: (battle id, side id) of every side with a mention this
+            run, whether or not it resolved.
+        protected_sides: Sides whose answer is pending (a deferred or failed
+            disambiguation) or whose write failed. They keep every row:
+            deleting would lose data that the answer, once imported, may
+            restore.
+        linked: (battle id, side id, general id) of each row written this run,
+            mapped to the command role resolve gave it.
+
+    Returns:
+        The number of rows removed and the number of sides whose attribution
+        was reset.
+    """
+    side_ids = sorted({side for _, side in processed_sides - protected_sides})
+    if not side_ids:
+        return 0, 0
+
+    stale: list[tuple[int, int, int, int]] = []
+    for bc_id, battle_id, side_id, general_id in conn.execute(
+        _COMMANDERS_ON_SIDES, {"side_ids": side_ids}
+    ):
+        if (int(battle_id), int(side_id), int(general_id)) not in linked:
+            stale.append((int(bc_id), int(battle_id), int(side_id), int(general_id)))
+    if not stale:
+        logger.info("resolve_stale_commanders_removed", rows=0, sides_reset=0)
+        return 0, 0
+
+    bc_ids = [bc_id for bc_id, *_ in stale]
+    conn.execute(_DETACH_REPORTS, {"bc_ids": bc_ids})
+    conn.execute(_DELETE_COMMANDERS, {"bc_ids": bc_ids})
+
+    reset_sides = sorted({side_id for _, _, side_id, _ in stale})
+    conn.execute(_RESET_SIDE_ATTRIBUTION, {"side_ids": reset_sides})
+    # The reset also cleared the role resolve itself read off the infobox.
+    for (battle_id, side_id, general_id), role in linked.items():
+        if side_id in reset_sides:
+            conn.execute(
+                _RESTORE_ROLE,
+                {
+                    "command_role": role,
+                    "battle_id": battle_id,
+                    "side_id": side_id,
+                    "general_id": general_id,
+                },
+            )
+
+    logger.info(
+        "resolve_stale_commanders_removed",
+        rows=len(stale),
+        sides_reset=len(reset_sides),
+        removed=[
+            {"battle_id": b, "side_id": s, "general_id": g}
+            for _, b, s, g in stale[:_ORPHAN_LOG_LIMIT]
+        ],
+    )
+    return len(stale), len(reset_sides)
+
 
 _ORPHAN_IDS_SQL: Final = """
     SELECT g.general_id, g.canonical_name

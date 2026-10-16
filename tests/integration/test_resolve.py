@@ -44,7 +44,9 @@ from pipeline.resolvers import (
     load_battle_index,
     load_side_index,
     log_unresolved,
+    prune_stale_commanders,
     remove_orphan_generals,
+    side_of,
     write_identity,
 )
 from pipeline.resolvers.records import BattleContext
@@ -976,3 +978,164 @@ def test_removing_orphans_twice_removes_nothing_the_second_time(conn: Connection
 
     assert len(remove_orphan_generals(conn)) == 1
     assert remove_orphan_generals(conn) == []
+
+
+# ─── Stale links ─────────────────────────────────────────────────────────────
+
+
+def _run_and_prune(
+    conn: Connection,
+    *identities: Identity,
+    pending: list[Mention] | None = None,
+    unresolved: list[Mention] | None = None,
+) -> tuple[int, int]:
+    """Write identities as one run, then prune what the run did not link.
+
+    Args:
+        conn: An open connection.
+        identities: The run's resolved people.
+        pending: Mentions of groups whose answer is deferred this run.
+        unresolved: Mentions the run refused or could not link to anyone.
+
+    Returns:
+        Rows removed and sides reset.
+    """
+    battles = load_battle_index(conn)
+    sides = load_side_index(conn)
+    counts = ResolveCounts()
+    cache: dict[tuple[str, str], int] = {}
+    linked: dict[tuple[int, int, int], str] = {}
+    for identity in identities:
+        write_identity(conn, identity, battles, sides, counts, cache, None, linked)
+    mentions = [m for i in identities for m in i.mentions] + (pending or []) + (unresolved or [])
+    processed = {p for p in (side_of(m, battles, sides) for m in mentions) if p}
+    protected = {p for p in (side_of(m, battles, sides) for m in pending or []) if p}
+    return prune_stale_commanders(conn, processed, protected, linked)
+
+
+def _commanders(conn: Connection, side: str) -> dict[str, tuple[float, str, str]]:
+    """Read a side's rows as qid -> (weight, attribution_method, role)."""
+    rows = conn.execute(
+        text(
+            "SELECT g.wikidata_id, bc.attribution_weight, bc.attribution_method, "
+            "bc.command_role::text FROM battle_commanders bc "
+            "JOIN generals g USING (general_id) "
+            "JOIN battle_sides bs ON bs.side_id = bc.side_id WHERE bs.side_label = :side"
+        ),
+        {"side": side},
+    )
+    return {str(q): (float(w), str(m), str(r)) for q, w, m, r in rows}
+
+
+def _classified_state(conn: Connection) -> None:
+    """Stand in for classify: give every row an LLM-decided weight."""
+    conn.execute(
+        text(
+            "UPDATE battle_commanders SET attribution_weight = 0.5, "
+            "attribution_method = 'llm', hierarchy_rank = 1"
+        )
+    )
+
+
+def _first_run(conn: Connection) -> list[Mention]:
+    """Run once with two commanders on Octavian's side and one opposite."""
+    _seed_battle(conn)
+    wrong = _mention("Agrippa")
+    steady = _mention("Maecenas")
+    other = _mention("Antony", side=OTHER_SIDE)
+    _run_and_prune(
+        conn,
+        _identity("Wrong Agrippa", qid="Q1", mentions=[wrong]),
+        _identity("Maecenas", qid="Q2", mentions=[steady]),
+        _identity("Mark Antony", qid="Q3", mentions=[other]),
+    )
+    _classified_state(conn)
+    return [wrong, steady, other]
+
+
+def test_a_relinked_mention_removes_the_old_row_and_resets_the_side(conn: Connection) -> None:
+    wrong, steady, other = _first_run(conn)
+
+    removed, reset = _run_and_prune(
+        conn,
+        _identity("Marcus Vipsanius Agrippa", qid="Q48174", mentions=[wrong]),
+        _identity("Maecenas", qid="Q2", mentions=[steady]),
+        _identity("Mark Antony", qid="Q3", mentions=[other]),
+    )
+
+    assert (removed, reset) == (1, 1)
+    side = _commanders(conn, SIDE_LABEL)
+    assert set(side) == {"Q2", "Q48174"}
+    # Back at the defaults so classify recomputes the side, with the role
+    # resolve itself read off the infobox put back.
+    assert all(state == (1.0, "equal", "field_commander") for state in side.values())
+    # The opposite side lost nothing, so its classified state is kept.
+    assert _commanders(conn, OTHER_SIDE) == {"Q3": (0.5, "llm", "field_commander")}
+
+
+def test_a_detached_mention_removes_its_row(conn: Connection) -> None:
+    wrong, steady, other = _first_run(conn)
+
+    removed, reset = _run_and_prune(
+        conn,
+        _identity("Maecenas", qid="Q2", mentions=[steady]),
+        _identity("Mark Antony", qid="Q3", mentions=[other]),
+        unresolved=[wrong],
+    )
+
+    assert (removed, reset) == (1, 1)
+    assert set(_commanders(conn, SIDE_LABEL)) == {"Q2"}
+
+
+def test_a_side_with_a_deferred_mention_keeps_its_rows(conn: Connection) -> None:
+    wrong, steady, other = _first_run(conn)
+
+    removed, reset = _run_and_prune(
+        conn,
+        _identity("Marcus Vipsanius Agrippa", qid="Q48174", mentions=[wrong]),
+        _identity("Mark Antony", qid="Q3", mentions=[other]),
+        pending=[steady],
+    )
+
+    assert (removed, reset) == (0, 0)
+    side = _commanders(conn, SIDE_LABEL)
+    assert set(side) == {"Q1", "Q2", "Q48174"}
+    assert side["Q2"] == (0.5, "llm", "field_commander")
+
+
+def test_an_unchanged_rerun_removes_nothing(conn: Connection) -> None:
+    wrong, steady, other = _first_run(conn)
+
+    removed, reset = _run_and_prune(
+        conn,
+        _identity("Wrong Agrippa", qid="Q1", mentions=[wrong]),
+        _identity("Maecenas", qid="Q2", mentions=[steady]),
+        _identity("Mark Antony", qid="Q3", mentions=[other]),
+    )
+
+    assert (removed, reset) == (0, 0)
+    assert _commanders(conn, SIDE_LABEL)["Q1"] == (0.5, "llm", "field_commander")
+
+
+def test_a_removed_row_does_not_leave_a_dangling_reports_to(conn: Connection) -> None:
+    wrong, steady, other = _first_run(conn)
+    conn.execute(
+        text(
+            "UPDATE battle_commanders SET reports_to_bc_id = ("
+            "SELECT bc.bc_id FROM battle_commanders bc JOIN generals g USING (general_id) "
+            "WHERE g.wikidata_id = 'Q1') "
+            "WHERE general_id = (SELECT general_id FROM generals WHERE wikidata_id = 'Q2')"
+        )
+    )
+
+    _run_and_prune(
+        conn,
+        _identity("Marcus Vipsanius Agrippa", qid="Q48174", mentions=[wrong]),
+        _identity("Maecenas", qid="Q2", mentions=[steady]),
+        _identity("Mark Antony", qid="Q3", mentions=[other]),
+    )
+
+    assert (
+        _scalar(conn, "SELECT COUNT(*) FROM battle_commanders WHERE reports_to_bc_id IS NOT NULL")
+        == 0
+    )

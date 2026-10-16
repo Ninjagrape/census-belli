@@ -72,8 +72,10 @@ from pipeline.resolvers import (
     non_person_reason,
     partition_by_lifespan,
     prompt_parts,
+    prune_stale_commanders,
     rank_for_prompt,
     remove_orphan_generals,
+    side_of,
     write_identity,
 )
 from pipeline.resolvers.battles import DEFAULT_NAME_THRESHOLD, DEFAULT_YEAR_SLACK
@@ -955,6 +957,56 @@ def _load_era_bins(params: dict[str, Any]) -> tuple[tuple[str, int | None], ...]
         return ()
 
 
+# An unresolved group with one of these methods is pending, not refused: the
+# answer may still link it, so its side keeps every existing row.
+_PENDING_METHODS: Final = frozenset({"llm_deferred", "llm_failed"})
+
+
+def _prune_stale_commanders(
+    ctx: StageContext,
+    groups: list[MentionGroup],
+    decisions: dict[str, Decision],
+    battles: dict[str, int],
+    sides: dict[tuple[int, str], int],
+    linked: dict[tuple[int, int, int], str],
+    failed_sides: set[tuple[int, int]],
+    counts: ResolveCounts,
+) -> None:
+    """Remove the commander links a re-run no longer makes.
+
+    Args:
+        ctx: The stage context, carrying the connection.
+        groups: Every group the run resolved.
+        decisions: Their final decisions.
+        battles: Battle slug and name to id.
+        sides: Side id by (battle id, label).
+        linked: Every row written this run, keyed by battle, side and general.
+        failed_sides: Sides of identities whose write failed.
+        counts: Counters to accumulate into.
+    """
+    if ctx.limit is not None:
+        # A truncated group list does not cover every mention of a side, so a
+        # row it did not relink may belong to a group that was cut.
+        logger.info("resolve_stale_commander_prune_skipped", limit=ctx.limit)
+        return
+
+    processed: set[tuple[int, int]] = set()
+    protected: set[tuple[int, int]] = set(failed_sides)
+    for group in groups:
+        pending = decisions[group.key].method in _PENDING_METHODS
+        for mention in group.mentions:
+            placed = side_of(mention, battles, sides)
+            if placed is None:
+                continue
+            processed.add(placed)
+            if pending:
+                protected.add(placed)
+
+    counts.commanders_removed, counts.sides_reset = prune_stale_commanders(
+        ctx.db_conn, processed, protected, linked
+    )
+
+
 def _write_database(
     ctx: StageContext,
     groups: list[MentionGroup],
@@ -992,6 +1044,8 @@ def _write_database(
     era_bins = _load_era_bins(params)
     unplaced: list[Mention] = []
     source_cache: dict[tuple[str, str], int] = {}
+    linked: dict[tuple[int, int, int], str] = {}
+    failed_sides: set[tuple[int, int]] = set()
     for identity in identities:
         before_counts = counts.as_dict()
         before_cache = dict(source_cache)
@@ -1002,7 +1056,9 @@ def _write_database(
             # A savepoint per identity: on PostgreSQL one failed statement
             # aborts the whole transaction, and every later write would fail.
             with conn.begin_nested():
-                write_identity(conn, identity, battles, sides, counts, source_cache, unplaced)
+                write_identity(
+                    conn, identity, battles, sides, counts, source_cache, unplaced, linked
+                )
         except Exception as exc:
             # One person who will not go in is a data problem, not a reason
             # to lose the rest of the run's writes.
@@ -1014,6 +1070,11 @@ def _write_database(
             # of the person is now one that never reached the table.
             del unplaced[before_unplaced:]
             unplaced.extend(identity.mentions)
+            failed_sides.update(
+                placed
+                for placed in (side_of(m, battles, sides) for m in identity.mentions)
+                if placed is not None
+            )
             counts.failed_identities += 1
             logger.error(
                 "resolve_write_failed",
@@ -1032,6 +1093,8 @@ def _write_database(
         unplaced=unplaced,
         non_person=_unresolved_mentions(groups, decisions, non_person=True),
     )
+
+    _prune_stale_commanders(ctx, groups, decisions, battles, sides, linked, failed_sides, counts)
 
     # Last write, so a general this run stranded is swept too, and before the
     # quality gates, which count an orphan beside its live namesake.

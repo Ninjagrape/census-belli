@@ -651,7 +651,12 @@ def test_the_escaping_survives_every_language_tag() -> None:
 @pytest.mark.parametrize(
     ("iso", "expected"),
     [
-        ("-0031-09-02T00:00:00Z", -30),
+        # XSD 1.1 has a year zero: "-0031" is astronomical -31 (32 BC).
+        ("-0031-09-02T00:00:00Z", -31),
+        ("-0043-03-15T00:00:00Z", -43),  # Caesar's death, 44 BC
+        ("-0099-07-13T00:00:00Z", -99),  # Caesar's birth, 100 BC
+        ("-0105-09-29T00:00:00Z", -105),  # Pompey's birth, 106 BC
+        ("-0047-09-29T00:00:00Z", -47),  # Pompey's death, 48 BC
         ("1769-08-15T00:00:00Z", 1769),  # the query service's form: unsigned
         ("+1769-08-15T00:00:00Z", 1769),  # the entity dumps' form: signed
         ("", None),

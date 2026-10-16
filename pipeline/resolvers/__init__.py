@@ -82,7 +82,9 @@ from pipeline.resolvers.store import (
     load_battle_index,
     load_side_index,
     log_unresolved,
+    prune_stale_commanders,
     remove_orphan_generals,
+    side_of,
     write_identity,
 )
 
@@ -126,6 +128,8 @@ __all__ = [
     "load_mentions",
     "load_side_index",
     "log_unresolved",
+    "prune_stale_commanders",
+    "side_of",
     "match_against_identities",
     "match_group",
     "partition_by_lifespan",
