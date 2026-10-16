@@ -29,7 +29,7 @@ import re
 from typing import Any, Final
 
 import structlog
-from sqlalchemy import text
+from sqlalchemy import Connection, text
 
 from pipeline.extractors.records import Provenance, to_schema_command_role
 from pipeline.extractors.store import source_id
@@ -692,3 +692,44 @@ def log_unresolved(
     )
     counts.unplaced_rows += len(homeless)
     return homeless
+
+
+_ORPHAN_LOG_LIMIT: Final = 20
+
+_ORPHAN_IDS_SQL: Final = """
+    SELECT g.general_id, g.canonical_name
+      FROM generals g
+     WHERE NOT EXISTS (SELECT 1 FROM battle_commanders bc WHERE bc.general_id = g.general_id)
+       AND NOT EXISTS (SELECT 1 FROM general_skill_estimates s WHERE s.general_id = g.general_id)
+       AND NOT EXISTS (SELECT 1 FROM battle_war_details d WHERE d.general_id = g.general_id)
+     ORDER BY g.general_id
+"""
+
+
+def remove_orphan_generals(conn: Connection) -> list[tuple[int, str]]:
+    """Delete every general that no row references.
+
+    The extract stage deletes stale battle sides, and their commanders with
+    them, when side labels change. A general linked only through those rows
+    survives as an orphan, and a corpus-local orphan sharing a name with a
+    Wikidata-linked general fails the ``no_duplicate_generals`` gate. Generals
+    referenced by ``general_skill_estimates`` or ``battle_war_details`` are
+    published model output and are never removed.
+
+    Args:
+        conn: An open connection; the caller owns the transaction.
+
+    Returns:
+        The ``(general_id, canonical_name)`` pairs removed, ordered by id.
+    """
+    orphans = [(int(row[0]), str(row[1])) for row in conn.execute(text(_ORPHAN_IDS_SQL))]
+    if orphans:
+        ids = [general_id for general_id, _ in orphans]
+        conn.execute(text("DELETE FROM general_aliases WHERE general_id = ANY(:ids)"), {"ids": ids})
+        conn.execute(text("DELETE FROM generals WHERE general_id = ANY(:ids)"), {"ids": ids})
+    logger.info(
+        "resolve_orphan_generals_removed",
+        count=len(orphans),
+        generals=orphans[:_ORPHAN_LOG_LIMIT],
+    )
+    return orphans

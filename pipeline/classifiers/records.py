@@ -26,6 +26,8 @@ __all__ = [
     "BATTLE_TYPES",
     "COMMAND_ROLES",
     "MISSINGNESS_CLASSES",
+    "NO_ESTIMATE_NOTE_PREFIX",
+    "UNLOGGED_TROOP_TOTAL_NOTE",
     "BattleTypeDecision",
     "ClassifyCounts",
     "CommanderRow",
@@ -48,6 +50,12 @@ COMMAND_ROLES: Final[tuple[str, ...]] = (
     "nominal",
     "unknown",
 )
+
+# The note classify's log_unlogged_troop_totals writes on a troop_total gap it
+# finds with no estimate and no log row. Reconcile deletes rows starting with
+# the prefix once it writes an estimate for the side, so both import it here.
+NO_ESTIMATE_NOTE_PREFIX: Final[str] = "classify: no reconciled troop estimate"
+UNLOGGED_TROOP_TOTAL_NOTE: Final[str] = f"{NO_ESTIMATE_NOTE_PREFIX} and no earlier log entry"
 
 # What the extract stage's LLM wrote to CommanderMention.apparent_role
 # (pipeline/extractors/records.py's own COMMAND_ROLES, confusingly -- that

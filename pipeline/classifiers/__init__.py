@@ -32,6 +32,7 @@ from pipeline.classifiers.load import (
     ARTICLE_SUFFIXES,
     HTML_SUFFIXES,
     find_article_path,
+    find_populated_unclassified_log_ids,
     find_unclassified_battle_type_log_ids,
     load_battle_source_slugs,
     load_battle_wikipedia_urls,
@@ -70,6 +71,7 @@ from pipeline.classifiers.roles import (
 )
 from pipeline.classifiers.store import (
     log_unlogged_troop_totals,
+    mark_populated_fields_observed,
     write_battle_type_decisions,
     write_defender_flags,
     write_missingness_decisions,
@@ -106,6 +108,7 @@ __all__ = [
     "extract_categories",
     "find_article_path",
     "load_battle_source_slugs",
+    "find_populated_unclassified_log_ids",
     "find_unclassified_battle_type_log_ids",
     "infer_battle_type",
     "infer_campaign",
@@ -121,6 +124,7 @@ __all__ = [
     "load_siege_sides",
     "load_troop_evidence",
     "log_unlogged_troop_totals",
+    "mark_populated_fields_observed",
     "normalize_name",
     "read_article_text",
     "select_excerpt",

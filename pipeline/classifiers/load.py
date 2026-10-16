@@ -39,6 +39,7 @@ __all__ = [
     "HTML_SUFFIXES",
     "find_article_path",
     "load_battle_source_slugs",
+    "find_populated_unclassified_log_ids",
     "find_unclassified_battle_type_log_ids",
     "load_battle_wikipedia_urls",
     "load_battles_needing_terrain",
@@ -190,10 +191,11 @@ _LOAD_BATTLE_URLS = text("SELECT battle_id, wikipedia_url FROM battles")
 
 _LOAD_BATTLE_SLUGS = text("SELECT battle_id, source_slug FROM battles")
 
-# Unknown battles, plus battles an earlier classify run typed by rule (its
-# missing_data_log note says "classify: inferred"). The second group is read
-# only so the campaign rule can reclassify them; nothing a person or extract set
-# is ever selected. date_end - date_start is computed here because a BC date
+# Unknown battles, plus battles an earlier classify run typed by rule
+# (battle_type_source = 'classify'). The second group is read only so the
+# campaign rule can reclassify them; nothing extract set is ever selected. The
+# source is a column, not a missing_data_log note, because extract deletes those
+# notes on every re-run. date_end - date_start is computed here because a BC date
 # cannot be held by datetime.date, and is trusted only at day precision.
 _LOAD_BATTLES_NEEDING_TYPE = text(
     """
@@ -203,12 +205,7 @@ _LOAD_BATTLES_NEEDING_TYPE = text(
                 THEN b.date_end - b.date_start END AS span_days
     FROM battles b
     WHERE b.battle_type = 'unknown'
-       OR (b.battle_type <> 'campaign'
-           AND EXISTS (
-               SELECT 1 FROM missing_data_log mdl
-               WHERE mdl.battle_id = b.battle_id
-                 AND mdl.field_name = 'battle_type'
-                 AND mdl.notes LIKE 'classify: inferred%'))
+       OR (b.battle_type <> 'campaign' AND b.battle_type_source = 'classify')
     ORDER BY b.battle_id
     """
 )
@@ -434,6 +431,44 @@ def find_unclassified_battle_type_log_ids(
         return set()
     rows = conn.execute(
         _FIND_BATTLE_TYPE_LOG_IDS, {"battle_ids": sorted(battle_ids), "field_name": field_name}
+    ).fetchall()
+    return {int(row[0]) for row in rows}
+
+
+_FIND_POPULATED_LOG_IDS = text(
+    """
+    SELECT mdl.log_id
+    FROM missing_data_log mdl
+    JOIN battles b ON b.battle_id = mdl.battle_id
+    WHERE mdl.missingness_class = 'unclassified'
+      AND mdl.side_id IS NULL
+      AND ((mdl.field_name = 'battle_type' AND b.battle_type <> 'unknown')
+        OR (mdl.field_name = 'terrain' AND b.terrain IS NOT NULL AND cardinality(b.terrain) > 0)
+        OR (mdl.field_name = 'fortified'
+            AND (b.fortified IS NOT NULL OR b.battle_id = ANY(CAST(:fortified_ids AS INT[])))))
+    """
+)
+
+
+def find_populated_unclassified_log_ids(conn: Any, fortified_battle_ids: set[int]) -> set[int]:
+    """Find 'unclassified' covariate rows whose battles column already has a value.
+
+    Extract re-inserts a ``battle_type``, ``terrain`` or ``fortified`` row on
+    every run for a field its own sources did not name, even when classify
+    filled the column on an earlier run. Such a row is not missing data, and
+    must reach neither the missingness heuristics nor the LLM.
+
+    Args:
+        conn: An open database connection.
+        fortified_battle_ids: Battles whose ``fortified`` this run's
+            battle-type pass is about to set. Read before any write, so the
+            column is still NULL when this query runs.
+
+    Returns:
+        The ``missing_data_log.log_id`` values to exclude from missingness.
+    """
+    rows = conn.execute(
+        _FIND_POPULATED_LOG_IDS, {"fortified_ids": sorted(fortified_battle_ids)}
     ).fetchall()
     return {int(row[0]) for row in rows}
 

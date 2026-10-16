@@ -79,6 +79,7 @@ from pipeline.resolvers.store import (
     load_battle_index,
     load_side_index,
     log_unresolved,
+    remove_orphan_generals,
     write_identity,
 )
 
@@ -130,5 +131,6 @@ __all__ = [
     "query_names",
     "to_jsonable",
     "viable_candidates",
+    "remove_orphan_generals",
     "write_identity",
 ]

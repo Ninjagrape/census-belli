@@ -117,6 +117,65 @@ def _literal(year: int, month: int, day: int, bc: bool) -> str:
     return f"{text} BC" if bc else text
 
 
+_LITERAL_YEAR_RE: Final = re.compile(r"^(\d{1,4})-\d{2}-\d{2}( BC)?$")
+_TITLE_YEARS_RE: Final = re.compile(
+    r"\(\s*(\d{1,4})(?:\s*[–-]\s*(\d{1,4}))?\s*(BC|BCE|AD|CE)?\s*\)\s*$", re.IGNORECASE
+)
+
+
+def astronomical_year(literal: str | None) -> int | None:
+    """Return the astronomical year of a date literal (1 BC is 0, 210 BC is -209).
+
+    Args:
+        literal: A literal such as ``0210-01-01 BC``, or None.
+
+    Returns:
+        The year, or None when the text is not a literal.
+    """
+    match = _LITERAL_YEAR_RE.match((literal or "").strip())
+    if match is None:
+        return None
+    year = int(match.group(1))
+    return 1 - year if match.group(2) else year
+
+
+def title_year_span(title: str | None) -> tuple[int, int] | None:
+    """Read an explicit year or range from a trailing parenthesis in a title.
+
+    Args:
+        title: A title such as ``Battle of Herdonia (210 BC)`` or
+            ``Siege of X (537-538)``.
+
+    Returns:
+        (first, last) astronomical years, or None when the title names none.
+    """
+    match = _TITLE_YEARS_RE.search(title or "")
+    if match is None:
+        return None
+    bc = (match.group(3) or "").upper() in ("BC", "BCE")
+    first = int(match.group(1))
+    last = int(match.group(2) or match.group(1))
+    if first < 1 or last < 1:
+        return None
+    if bc:
+        return (1 - max(first, last), 1 - min(first, last))
+    return (min(first, last), max(first, last))
+
+
+def year_precision_literal(astronomical: int) -> str:
+    """Format January 1st of an astronomical year as a date literal.
+
+    Args:
+        astronomical: The astronomical year (no historical year 0 gap).
+
+    Returns:
+        ``YYYY-01-01``, with `` BC`` for years before 1 AD.
+    """
+    if astronomical >= 1:
+        return _literal(astronomical, 1, 1, False)
+    return _literal(1 - astronomical, 1, 1, True)
+
+
 def _days_in_month(year: int, month: int, bc: bool) -> int:
     """Return the length of a month in the proleptic Gregorian calendar.
 

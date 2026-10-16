@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,8 @@ from sqlalchemy import Connection, Engine, text
 
 from pipeline.crawlers.wikipedia import article_filename
 from pipeline.db import DatabaseConfigError, apply_schema, database_url, get_engine
+from pipeline.extractors import BattleExtraction, BattleFacts, MissingField, SideExtraction
+from pipeline.extractors import write_battle as extract_write_battle
 from pipeline.llm.base import request_hash
 from pipeline.llm.factory import llm_params
 from pipeline.quality import QualityRunner
@@ -812,6 +815,25 @@ def test_a_side_with_no_estimate_and_no_log_row_gets_one(conn: Connection, tmp_p
     assert results["missing_data_all_logged"].passed
 
 
+def test_the_unlogged_troop_total_note_is_the_shared_constant(
+    conn: Connection, tmp_path: Path
+) -> None:
+    from pipeline.classifiers.records import NO_ESTIMATE_NOTE_PREFIX, UNLOGGED_TROOP_TOTAL_NOTE
+
+    battle_id = _seed_battle(conn, "Battle of Shared Note", "1750-05-01")
+    side_id = _seed_side(conn, battle_id, "Nobody")
+    classify_stage.run(_load_spec(tmp_path / "raw"), context=StageContext(db_conn=conn))
+
+    note = conn.execute(
+        text(
+            "SELECT notes FROM missing_data_log WHERE side_id = :s AND field_name = 'troop_total'"
+        ),
+        {"s": side_id},
+    ).scalar_one()
+    assert note.startswith(UNLOGGED_TROOP_TOTAL_NOTE)
+    assert UNLOGGED_TROOP_TOTAL_NOTE.startswith(NO_ESTIMATE_NOTE_PREFIX)
+
+
 def test_the_besieged_side_of_a_named_siege_is_marked_defender(
     conn: Connection, tmp_path: Path
 ) -> None:
@@ -1099,7 +1121,10 @@ def test_terrain_is_written_only_where_empty_and_marks_its_log_row(
 def _set_rule_type(conn: Connection, battle_id: int, battle_type: str) -> None:
     """Make a battle look like an earlier classify run typed it by rule."""
     conn.execute(
-        text("UPDATE battles SET battle_type = CAST(:t AS battle_type) WHERE battle_id = :b"),
+        text(
+            "UPDATE battles SET battle_type = CAST(:t AS battle_type), "
+            "battle_type_source = 'classify' WHERE battle_id = :b"
+        ),
         {"t": battle_type, "b": battle_id},
     )
     log_id = _seed_missing(conn, battle_id, "battle_type", missingness_class="observed")
@@ -1127,7 +1152,11 @@ def test_campaign_replaces_a_rule_derived_type_but_never_an_extract_type(
     _set_rule_type(conn, war, "field")
     _set_rule_type(conn, long_op, "field")
     conn.execute(
-        text("UPDATE battles SET battle_type = 'field' WHERE battle_id = :b"), {"b": extract_typed}
+        text(
+            "UPDATE battles SET battle_type = 'field', battle_type_source = 'extract' "
+            "WHERE battle_id = :b"
+        ),
+        {"b": extract_typed},
     )
     spec = _load_spec(raw_root)
 
@@ -1180,3 +1209,220 @@ def test_the_unknown_share_gate_is_a_proportion_of_battles_with_articles(
     assert result().actual_value == pytest.approx(1.0)
     conn.execute(text("UPDATE battles SET battle_type = 'field' WHERE source_slug IS NOT NULL"))
     assert result().passed is True
+
+
+# ─── Provenance of battle_type survives extract re-runs ─────────────────────
+
+_FLEET_URL = "https://en.wikipedia.org/wiki/Battle_of_Longfleet"
+
+
+def _extract_record(
+    *,
+    battle_type: str | None = None,
+    date_end: str | None = None,
+    name: str = "Battle of Longfleet",
+) -> BattleExtraction:
+    """A merged battle as extract writes it, logging every covariate it lacks."""
+    facts = BattleFacts(
+        name=name,
+        wikipedia_url=_FLEET_URL,
+        date_start="1800-01-01",
+        date_end=date_end,
+        date_precision="day",
+        battle_type=battle_type,
+    )
+    absent = [
+        name
+        for name, value in (("battle_type", battle_type), ("terrain", None), ("fortified", None))
+        if value is None
+    ]
+    return BattleExtraction(
+        slug="longfleet",
+        name=name,
+        facts=facts,
+        sides=[SideExtraction(label="A"), SideExtraction(label="B")],
+        missing=[MissingField(field_name=name, notes="no source reported it") for name in absent],
+        n_sources=1,
+    )
+
+
+def _battle_state(conn: Connection, battle_id: int) -> Any:
+    return _row(
+        conn,
+        "SELECT CAST(battle_type AS TEXT) AS battle_type, battle_type_source "
+        "FROM battles WHERE battle_id = :b",
+        b=battle_id,
+    )
+
+
+def test_a_rule_typed_battle_is_still_rewritten_to_campaign_after_extract_reruns(
+    conn: Connection, tmp_path: Path
+) -> None:
+    raw_root = tmp_path / "raw"
+    _write_article(raw_root, _FLEET_URL, _NAVAL_ARTICLE)
+    battle_id = extract_write_battle(conn, _extract_record())
+    spec = _load_spec(raw_root)
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+    state = _battle_state(conn, battle_id)
+    assert (state.battle_type, state.battle_type_source) == ("naval", "classify")
+
+    # Extract owns missing_data_log and rewrites it on every run, which used to
+    # erase the only record that classify had chosen this type.
+    extract_write_battle(conn, _extract_record())
+    state = _battle_state(conn, battle_id)
+    assert (state.battle_type, state.battle_type_source) == ("naval", "classify")
+
+    # A "Battle of" title is exempt from the span rule, so rename to an operation.
+    conn.execute(
+        text(
+            "UPDATE battles SET name = 'Operation Longfleet', date_end = date_start + 200 "
+            "WHERE battle_id = :b"
+        ),
+        {"b": battle_id},
+    )
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    state = _battle_state(conn, battle_id)
+    assert state.battle_type == "campaign"
+    assert state.battle_type_source == "classify"
+    notes = _scalar(
+        conn,
+        "SELECT notes FROM missing_data_log WHERE battle_id = :b AND field_name = 'battle_type'",
+        b=battle_id,
+    )
+    assert "reclassified" in notes
+
+
+def test_a_type_extract_supplied_is_recorded_as_extract_and_never_made_a_campaign(
+    conn: Connection, tmp_path: Path
+) -> None:
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    # An "Operation" with a 200-day day-precision span meets the campaign rule,
+    # so only the battle_type_source guard keeps this extract-typed row a field battle.
+    record = _extract_record(battle_type="field", date_end="1800-07-20", name="Operation Longfleet")
+    battle_id = extract_write_battle(conn, record)
+    assert tuple(_battle_state(conn, battle_id)) == ("field", "extract")
+
+    # A re-run in which no source names a type leaves the provenance alone.
+    extract_write_battle(conn, replace(record, facts=replace(record.facts, battle_type=None)))
+    assert tuple(_battle_state(conn, battle_id)) == ("field", "extract")
+
+    classify_stage.run(_load_spec(raw_root), context=StageContext(db_conn=conn))
+
+    assert tuple(_battle_state(conn, battle_id)) == ("field", "extract")
+
+
+def _populated_covariate_battle(
+    conn: Connection, tmp_path: Path
+) -> tuple[dict[str, Any], Path, dict[str, int]]:
+    """A classified battle whose covariate columns are set but whose rows extract re-logged."""
+    raw_root = tmp_path / "raw"
+    _write_article(raw_root, _FLEET_URL, _NAVAL_ARTICLE)
+    battle_id = extract_write_battle(conn, _extract_record())
+    spec = _load_spec(raw_root)
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+    conn.execute(
+        text(
+            "UPDATE battles SET terrain = ARRAY['coastal'], fortified = FALSE WHERE battle_id = :b"
+        ),
+        {"b": battle_id},
+    )
+    extract_write_battle(conn, _extract_record())
+
+    log_ids = {
+        r.field_name: r.log_id
+        for r in conn.execute(
+            text(
+                "SELECT log_id, field_name FROM missing_data_log WHERE battle_id = :b "
+                "AND field_name IN ('battle_type', 'terrain', 'fortified') "
+                "AND missingness_class = 'unclassified'"
+            ),
+            {"b": battle_id},
+        )
+    }
+    assert set(log_ids) == {"battle_type", "terrain", "fortified"}
+    return spec, raw_root, log_ids
+
+
+def _spy_on_missingness_requests(monkeypatch: pytest.MonkeyPatch) -> list[list[int]]:
+    calls: list[list[int]] = []
+    original = classify_stage._build_missingness_pairs
+
+    def spy(conn_: Any, ids: list[int], spec_: dict[str, Any]) -> Any:
+        calls.append(list(ids))
+        return original(conn_, ids, spec_)
+
+    monkeypatch.setattr(classify_stage, "_build_missingness_pairs", spy)
+    return calls
+
+
+def test_covariate_rows_extract_reinserts_for_populated_columns_end_observed(
+    conn: Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec, _raw_root, log_ids = _populated_covariate_battle(conn, tmp_path)
+    # An open row nothing excludes, so the spy sees a genuinely non-empty input.
+    other = _seed_battle(conn, "Battle of Elsewhere", "1801-01-01")
+    open_id = _seed_missing(conn, other, "troop_total")
+    calls = _spy_on_missingness_requests(monkeypatch)
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    assert calls, "the missingness request builder was never reached"
+    requested = [log_id for ids in calls for log_id in ids]
+    assert open_id in requested
+    assert not set(requested) & set(log_ids.values())
+    for field_name, log_id in log_ids.items():
+        row = _row(
+            conn,
+            "SELECT missingness_class, notes FROM missing_data_log WHERE log_id = :i",
+            i=log_id,
+        )
+        assert row.missingness_class == "observed", field_name
+        assert f"classify: observed {field_name} already set" in row.notes
+    assert "source classify" in _scalar(
+        conn, "SELECT notes FROM missing_data_log WHERE log_id = :i", i=log_ids["battle_type"]
+    )
+
+
+def test_the_offline_export_omits_populated_covariate_rows(
+    conn: Connection, tmp_path: Path
+) -> None:
+    spec, raw_root, log_ids = _populated_covariate_battle(conn, tmp_path)
+    other = _seed_battle(conn, "Battle of Elsewhere", "1801-01-01")
+    open_id = _seed_missing(conn, other, "troop_total")
+
+    exported = {
+        context.log_id
+        for context, _request in classify_stage.build_pending_missingness_requests(
+            conn, spec, raw_root
+        )
+    }
+
+    assert open_id in exported
+    assert not exported & set(log_ids.values())
+
+
+def test_a_fortified_row_settled_by_the_siege_rule_this_run_ends_observed(
+    conn: Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    battle_id = extract_write_battle(conn, _extract_record(name="Siege of Longfleet"))
+    assert _scalar(conn, "SELECT fortified FROM battles WHERE battle_id = :b", b=battle_id) is None
+    fortified_log = _scalar(
+        conn,
+        "SELECT log_id FROM missing_data_log WHERE battle_id = :b AND field_name = 'fortified'",
+        b=battle_id,
+    )
+    calls = _spy_on_missingness_requests(monkeypatch)
+
+    classify_stage.run(_load_spec(raw_root), context=StageContext(db_conn=conn))
+
+    assert _scalar(conn, "SELECT fortified FROM battles WHERE battle_id = :b", b=battle_id) is True
+    assert fortified_log not in [log_id for ids in calls for log_id in ids]
+    row = _row(
+        conn, "SELECT missingness_class FROM missing_data_log WHERE log_id = :i", i=fortified_log
+    )
+    assert row.missingness_class == "observed"

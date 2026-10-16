@@ -62,7 +62,7 @@ params:
   # - campaign: a title naming a war or campaign without battle/siege/raid, or
   #   (other than a "Battle of"/"Siege of" title) dates spanning more than 180 days at day precision. It wins over every
   #   other type, and is the one type allowed to replace a rule-derived type
-  #   (found through the "classify: inferred" note on the battle_type log row).
+  #   (found through battles.battle_type_source = 'classify').
   #   The model excludes campaigns.
   # - siege_defensive is never produced. Which side was besieged is
   #   battle_sides.is_defender, per side; a second article-level value would

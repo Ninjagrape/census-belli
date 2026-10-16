@@ -161,9 +161,7 @@ def _extract_requests(
                             schema_name="extraction",
                             max_tokens=max_tokens,
                             temperature=temperature,
-                            metadata=_metadata(
-                                battle.slug, str(battle.article_path), passage
-                            ),
+                            metadata=_metadata(battle.slug, str(battle.article_path), passage),
                         )
                     )
 
@@ -179,9 +177,7 @@ def _extract_requests(
                     battle.name,
                     body,
                     source_type="web_secondary",
-                    source_title=str(
-                        record.get("title") or record.get("url") or path.name
-                    ),
+                    source_title=str(record.get("title") or record.get("url") or path.name),
                     max_chars=max_passage_chars,
                 ):
                     requests.append(
@@ -267,7 +263,8 @@ def _classify_requests(
                 )
             ]
             missingness_requests = [
-                request for _context, request in build_pending_missingness_requests(conn, spec)
+                request
+                for _context, request in build_pending_missingness_requests(conn, spec, raw_root)
             ]
             return role_requests + missingness_requests
     except Exception as e:

@@ -247,6 +247,10 @@ CREATE TABLE battles (
 
     -- classification
     battle_type     battle_type DEFAULT 'unknown',
+    -- Who set battle_type. NULL while it is 'unknown', and on rows that predate
+    -- the column. Classify rewrites only 'classify' types (the campaign rule);
+    -- missing_data_log cannot hold this because extract rewrites it every run.
+    battle_type_source TEXT CHECK (battle_type_source IN ('extract', 'classify')),
     terrain         TEXT[],                -- e.g. {'mountainous', 'forested'}
     fortified       BOOLEAN,              -- was a fortification involved
     weather         TEXT,                  -- extracted from article if available

@@ -285,6 +285,7 @@ class ResolveCounts:
         self.non_person_mentions = 0
         self.duplicate_battles = 0
         self.failed_identities = 0
+        self.orphan_generals_removed = 0
 
     def as_dict(self) -> dict[str, int]:
         """Render the counts for a structlog call.
@@ -310,6 +311,7 @@ class ResolveCounts:
             "non_person_mentions": self.non_person_mentions,
             "duplicate_battles": self.duplicate_battles,
             "failed_identities": self.failed_identities,
+            "orphan_generals_removed": self.orphan_generals_removed,
         }
 
 

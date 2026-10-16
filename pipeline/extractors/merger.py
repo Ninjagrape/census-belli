@@ -26,6 +26,7 @@ from typing import Any, Final
 
 import structlog
 
+from pipeline.extractors.dates import astronomical_year, title_year_span, year_precision_literal
 from pipeline.extractors.records import (
     BattleExtraction,
     BattleFacts,
@@ -189,13 +190,93 @@ def _match_side(label: str, existing: Iterable[str]) -> str | None:
     return None
 
 
+_DATE_FIELDS: Final[frozenset[str]] = frozenset({"date_start", "date_end", "date_precision"})
+_MAX_DATE_DRIFT_YEARS: Final[int] = 1
+
+
+def _year_gap(a: str | None, b: str | None) -> int | None:
+    """Absolute astronomical-year distance between two date literals."""
+    year_a, year_b = astronomical_year(a), astronomical_year(b)
+    return None if year_a is None or year_b is None else abs(year_a - year_b)
+
+
+def _conflicting_dbpedia_date(
+    sources: Sequence[SourceExtraction], slug_hint: str
+) -> SourceExtraction | None:
+    """Find a DBpedia source whose date contradicts the infobox's.
+
+    DBpedia's ``dbp:date`` fallback can pick up a citation's archive or access
+    date (``{{Webarchive|date=2015-12-19}}``), a year-shaped non-year.
+
+    Args:
+        sources: Every source's view of the battle.
+        slug_hint: Battle name for the log line.
+
+    Returns:
+        The DBpedia source to ignore for date fields, or None.
+    """
+    infobox = next((s for s in sources if s.provenance.source_type == "wikipedia_infobox"), None)
+    if infobox is None:
+        return None
+    for source in sources:
+        if source.provenance.source_type != "dbpedia":
+            continue
+        gap = _year_gap(source.facts.date_start, infobox.facts.date_start)
+        if gap is not None and gap > _MAX_DATE_DRIFT_YEARS:
+            logger.warning(
+                "dbpedia_date_conflicts_with_infobox",
+                battle=slug_hint,
+                dbpedia=source.facts.date_start,
+                infobox=infobox.facts.date_start,
+            )
+            return source
+    return None
+
+
+def _apply_title_year(facts: BattleFacts, disagreements: list[Disagreement], title: str) -> None:
+    """Replace a chosen date that contradicts the year in the battle's title.
+
+    Args:
+        facts: The merged facts, modified in place.
+        disagreements: Disagreement list, appended to.
+        title: The battle title, e.g. ``Battle of Herdonia (210 BC)``.
+    """
+    span = title_year_span(title)
+    year = astronomical_year(facts.date_start)
+    if span is None or year is None:
+        return
+    if span[0] - _MAX_DATE_DRIFT_YEARS <= year <= span[1] + _MAX_DATE_DRIFT_YEARS:
+        return
+    replacement = year_precision_literal(span[0])
+    logger.warning(
+        "chosen_date_conflicts_with_title",
+        battle=title,
+        chosen=facts.date_start,
+        title_years=span,
+    )
+    disagreements.append(
+        Disagreement(
+            field_name="date_start",
+            chosen=replacement,
+            chosen_source="title",
+            rejected={"merged": str(facts.date_start)},
+        )
+    )
+    facts.date_start = replacement
+    facts.date_end = None
+    facts.date_precision = "year"
+    facts.date_circa = None
+
+
 def _merge_scalars(
     sources: Sequence[SourceExtraction],
+    title: str = "",
 ) -> tuple[BattleFacts, list[Disagreement]]:
     """Choose one value per scalar field and record every dissent.
 
     Args:
         sources: Every source's view of the battle.
+        title: The battle title; a year in parentheses guards the chosen date.
 
     Returns:
         The merged facts and the disagreements found.
@@ -204,10 +285,13 @@ def _merge_scalars(
     disagreements: list[Disagreement] = []
 
     ordered = sorted(sources, key=lambda s: _priority(s.provenance.source_type), reverse=True)
+    bad_dates = _conflicting_dbpedia_date(sources, title)
 
     for field_name in _SCALAR_FIELDS:
         offered: list[tuple[str, Any]] = []
         for source in ordered:
+            if source is bad_dates and field_name in _DATE_FIELDS:
+                continue
             value = getattr(source.facts, field_name)
             if value is not None and value != "":
                 offered.append((source.provenance.source_type, value))
@@ -235,9 +319,19 @@ def _merge_scalars(
 
     # Circa qualifies a date, so it comes from the source that supplied the
     # merged date_start; a lower-priority source's circa says nothing about it.
-    dated = next((s for s in ordered if s.facts.date_start), None)
+    dated = next((s for s in ordered if s.facts.date_start and s is not bad_dates), None)
     if dated is not None:
         merged.date_circa = dated.facts.date_circa
+    if bad_dates is not None:
+        disagreements.append(
+            Disagreement(
+                field_name="date_start",
+                chosen=str(merged.date_start),
+                chosen_source=dated.provenance.source_type if dated else "none",
+                rejected={"dbpedia": str(bad_dates.facts.date_start)},
+            )
+        )
+    _apply_title_year(merged, disagreements, title)
 
     # List-valued fields are a union: two sources naming different terrain
     # features are both right far more often than either is wrong.
@@ -785,7 +879,10 @@ def merge_battle(
     Returns:
         The merged battle, with disagreements and missing fields recorded.
     """
-    facts, disagreements = _merge_scalars(sources)
+    title = fallback_name or next(
+        (s.provenance.source_title for s in sources if s.provenance.source_title), ""
+    )
+    facts, disagreements = _merge_scalars(sources, title)
     sides = _merge_sides(sources)
     _assign_outcomes(sides, facts)
 

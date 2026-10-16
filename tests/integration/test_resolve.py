@@ -44,6 +44,7 @@ from pipeline.resolvers import (
     load_battle_index,
     load_side_index,
     log_unresolved,
+    remove_orphan_generals,
     write_identity,
 )
 from pipeline.resolvers.records import BattleContext
@@ -860,3 +861,118 @@ def test_a_rerun_without_a_biography_does_not_blank_an_earlier_one(conn: Connect
         text("SELECT born_year_astronomical, era FROM generals WHERE wikidata_id = 'Q48174'")
     ).one()
     assert tuple(row) == (-61, "ancient")
+
+
+# ─── Orphan generals ─────────────────────────────────────────────────────────
+
+
+def _general_with_alias(conn: Connection, name: str, qid: str | None = None) -> int:
+    """Insert a general with one alias and return its id."""
+    general_id = int(
+        conn.execute(
+            text(
+                "INSERT INTO generals (canonical_name, wikidata_id) "
+                "VALUES (:n, :q) RETURNING general_id"
+            ),
+            {"n": name, "q": qid},
+        ).scalar_one()
+    )
+    conn.execute(
+        text("INSERT INTO general_aliases (general_id, alias_name) VALUES (:g, :a)"),
+        {"g": general_id, "a": name},
+    )
+    return general_id
+
+
+def _exists(conn: Connection, general_id: int) -> bool:
+    return bool(_scalar(conn, "SELECT COUNT(*) FROM generals WHERE general_id = :g", g=general_id))
+
+
+def _seed_orphan_scenario(conn: Connection) -> dict[str, int]:
+    """One orphan, one commander-linked, one model-referenced general."""
+    battle_id = _seed_battle(conn)
+    side_id = int(_scalar(conn, "SELECT MIN(side_id) FROM battle_sides"))
+    orphan = _general_with_alias(conn, "Georgy Zakharov")
+    linked = _general_with_alias(conn, "Linked Commander", "Q111")
+    modelled = _general_with_alias(conn, "Modelled Commander")
+    conn.execute(
+        text("INSERT INTO battle_commanders (battle_id, side_id, general_id) VALUES (:b, :s, :g)"),
+        {"b": battle_id, "s": side_id, "g": linked},
+    )
+    run_id = int(
+        conn.execute(
+            text(
+                "INSERT INTO model_runs (run_name, model_type, config) "
+                "VALUES ('r', 'test', '{}') RETURNING run_id"
+            )
+        ).scalar_one()
+    )
+    conn.execute(
+        text(
+            "INSERT INTO general_skill_estimates (run_id, general_id, skill_mean, skill_sd, "
+            "skill_ci_lo, skill_ci_hi, n_battles) VALUES (:r, :g, 0, 1, -1, 1, 1)"
+        ),
+        {"r": run_id, "g": modelled},
+    )
+    return {"orphan": orphan, "linked": linked, "modelled": modelled}
+
+
+def test_an_orphan_general_is_removed_with_its_aliases(conn: Connection) -> None:
+    ids = _seed_orphan_scenario(conn)
+
+    removed = remove_orphan_generals(conn)
+
+    assert [general_id for general_id, _ in removed] == [ids["orphan"]]
+    assert not _exists(conn, ids["orphan"])
+    assert (
+        _scalar(conn, "SELECT COUNT(*) FROM general_aliases WHERE general_id = :g", g=ids["orphan"])
+        == 0
+    )
+    assert _exists(conn, ids["linked"])
+    assert _exists(conn, ids["modelled"])
+    assert (
+        _scalar(
+            conn, "SELECT COUNT(*) FROM general_aliases WHERE general_id = :g", g=ids["modelled"]
+        )
+        == 1
+    )
+
+
+def test_a_general_in_battle_war_details_survives_the_orphan_sweep(conn: Connection) -> None:
+    battle_id = _seed_battle(conn)
+    general_id = _general_with_alias(conn, "Detailed Commander")
+    run_id = int(
+        conn.execute(
+            text(
+                "INSERT INTO model_runs (run_name, model_type, config) "
+                "VALUES ('r', 'test', '{}') RETURNING run_id"
+            )
+        ).scalar_one()
+    )
+    conn.execute(
+        text(
+            "INSERT INTO battle_war_details (run_id, battle_id, general_id, war_contribution) "
+            "VALUES (:r, :b, :g, 0.1)"
+        ),
+        {"r": run_id, "b": battle_id, "g": general_id},
+    )
+
+    assert remove_orphan_generals(conn) == []
+    assert _exists(conn, general_id)
+
+
+def test_an_orphan_no_longer_trips_the_duplicate_generals_gate(conn: Connection) -> None:
+    _add_linked_general(conn, "Georgy Zakharov", "Q222", 1900, 1950)
+    _general_with_alias(conn, "Georgy Zakharov")
+    assert not _gates(conn)["no_duplicate_generals"].passed
+
+    remove_orphan_generals(conn)
+
+    assert _gates(conn)["no_duplicate_generals"].passed
+
+
+def test_removing_orphans_twice_removes_nothing_the_second_time(conn: Connection) -> None:
+    _seed_orphan_scenario(conn)
+
+    assert len(remove_orphan_generals(conn)) == 1
+    assert remove_orphan_generals(conn) == []

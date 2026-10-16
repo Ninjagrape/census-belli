@@ -70,6 +70,7 @@ from pipeline.resolvers import (
     non_person_reason,
     prompt_parts,
     rank_for_prompt,
+    remove_orphan_generals,
     write_identity,
 )
 from pipeline.resolvers.battles import DEFAULT_NAME_THRESHOLD, DEFAULT_YEAR_SLACK
@@ -837,6 +838,10 @@ def _write_database(
         unplaced=unplaced,
         non_person=_unresolved_mentions(groups, decisions, non_person=True),
     )
+
+    # Last write, so a general this run stranded is swept too, and before the
+    # quality gates, which count an orphan beside its live namesake.
+    counts.orphan_generals_removed = len(remove_orphan_generals(conn))
 
     duplicates = find_duplicate_battles(
         conn,

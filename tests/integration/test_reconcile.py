@@ -977,6 +977,120 @@ def test_a_later_estimate_deletes_a_stale_withheld_row_and_withheld_rows_do_not_
         cleanup.close()
 
 
+def _write_troop_estimate(conn: Connection, side_ids: list[int]) -> None:
+    """Write a troop estimate for each side through the production store."""
+    from datetime import UTC, datetime
+
+    from pipeline.reconcilers import store
+    from pipeline.reconcilers.records import SideEstimate
+
+    run_id = store.start_model_run(conn, model_type="test", run_name="gap", config={})
+    store.write_side_estimates(
+        conn,
+        [
+            SideEstimate(
+                side_id=side_id,
+                quantity="troops",
+                value=5_000.0,
+                lo=4_000.0,
+                hi=6_000.0,
+                run_id=run_id,
+                n_reports=1,
+                n_sources=1,
+                method="single_report_debiased",
+                updated_at=datetime.now(UTC),
+            )
+            for side_id in side_ids
+        ],
+    )
+
+
+def _log_troop_gap(
+    conn: Connection,
+    battle: int,
+    side: int,
+    notes: str,
+    *,
+    missingness_class: str = "unclassified",
+    was_imputed: bool = False,
+) -> None:
+    conn.execute(
+        text(
+            "INSERT INTO missing_data_log (battle_id, side_id, field_name, missingness_class, "
+            "notes, was_imputed) VALUES (:b, :s, 'troop_total', "
+            "CAST(:c AS missingness_class), :n, :i)"
+        ),
+        {"b": battle, "s": side, "c": missingness_class, "n": notes, "i": was_imputed},
+    )
+
+
+def _gap_notes(conn: Connection, side: int) -> list[str]:
+    rows = conn.execute(
+        text(
+            "SELECT notes FROM missing_data_log WHERE side_id = :s "
+            "AND field_name = 'troop_total' ORDER BY log_id"
+        ),
+        {"s": side},
+    ).fetchall()
+    return [str(r[0]) for r in rows]
+
+
+def test_an_estimate_deletes_the_classify_no_estimate_row_for_its_side(conn: Connection) -> None:
+    from pipeline.classifiers.records import UNLOGGED_TROOP_TOTAL_NOTE
+
+    source = _source(conn, "gap-doc")
+    battle = _battle(conn, "Battle of Gap", "1700-01-01")
+    plain = _side(conn, battle, "Plain")
+    mnar = _side(conn, battle, "Mnar")
+    for side in (plain, mnar):
+        _troop(conn, side, source, 5_000.0)
+    _log_troop_gap(conn, battle, plain, UNLOGGED_TROOP_TOTAL_NOTE)
+    _log_troop_gap(
+        conn,
+        battle,
+        mnar,
+        f"{UNLOGGED_TROOP_TOTAL_NOTE} | classify: loser, winner known",
+        missingness_class="mnar",
+    )
+
+    _write_troop_estimate(conn, [plain, mnar])
+
+    assert _gap_notes(conn, plain) == []
+    assert _gap_notes(conn, mnar) == []
+
+
+def test_other_notes_and_imputed_rows_survive_an_estimate(conn: Connection) -> None:
+    from pipeline.classifiers.records import UNLOGGED_TROOP_TOTAL_NOTE
+
+    source = _source(conn, "gap-doc-2")
+    battle = _battle(conn, "Battle of Keep", "1700-01-01")
+    side = _side(conn, battle, "Keep")
+    _troop(conn, side, source, 5_000.0)
+    _log_troop_gap(conn, battle, side, "no troop reports extracted")
+    _log_troop_gap(conn, battle, side, UNLOGGED_TROOP_TOTAL_NOTE, was_imputed=True)
+
+    _write_troop_estimate(conn, [side])
+
+    assert _gap_notes(conn, side) == ["no troop reports extracted", UNLOGGED_TROOP_TOTAL_NOTE]
+
+
+def test_a_side_without_an_estimate_keeps_its_classify_row(conn: Connection) -> None:
+    from pipeline.classifiers.records import UNLOGGED_TROOP_TOTAL_NOTE
+
+    source = _source(conn, "gap-doc-3")
+    battle = _battle(conn, "Battle of Silence Two", "1700-01-01")
+    estimated = _side(conn, battle, "Estimated")
+    unusable = _side(conn, battle, "Unusable")
+    _troop(conn, estimated, source, 5_000.0)
+    _log_troop_gap(conn, battle, estimated, UNLOGGED_TROOP_TOTAL_NOTE)
+    _log_troop_gap(conn, battle, unusable, UNLOGGED_TROOP_TOTAL_NOTE)
+
+    _write_troop_estimate(conn, [estimated])
+
+    assert _gap_notes(conn, estimated) == []
+    assert _gap_notes(conn, unusable) == [UNLOGGED_TROOP_TOTAL_NOTE]
+
+
 def _fabricate_run(conn: Connection, diagnostics_json: str) -> None:
     conn.execute(
         text(

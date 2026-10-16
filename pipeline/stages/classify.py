@@ -63,6 +63,7 @@ from pipeline.classifiers import (
     classify_side_roles,
     extract_categories,
     find_article_path,
+    find_populated_unclassified_log_ids,
     find_unclassified_battle_type_log_ids,
     infer_battle_type,
     infer_campaign,
@@ -79,6 +80,7 @@ from pipeline.classifiers import (
     load_siege_sides,
     load_troop_evidence,
     log_unlogged_troop_totals,
+    mark_populated_fields_observed,
     read_article_text,
     select_excerpt,
     write_battle_type_decisions,
@@ -571,6 +573,36 @@ def _siege_defender_flags(conn: Any) -> dict[int, bool]:
     return flags
 
 
+def _missingness_exclusions(
+    conn: Any,
+    battle_type_decisions: list[BattleTypeDecision],
+    terrain_by_battle: dict[int, tuple[list[str], str]],
+) -> set[int]:
+    """Collect the ``missing_data_log`` rows the missingness pass must skip.
+
+    One computation for the stage and for the offline export
+    (:func:`build_pending_missingness_requests`), so the exported requests
+    cannot drift from the ones the stage builds.
+
+    Args:
+        conn: An open database connection.
+        battle_type_decisions: This run's battle-type decisions.
+        terrain_by_battle: This run's terrain inference.
+
+    Returns:
+        The ``log_id`` values of rows this run settles through another route:
+        battle types and terrain it infers, and covariate rows whose column
+        is already populated.
+    """
+    observed_battle_ids = {d.battle_id for d in battle_type_decisions if d.battle_type != "unknown"}
+    exclude = find_unclassified_battle_type_log_ids(conn, observed_battle_ids)
+    exclude |= find_unclassified_battle_type_log_ids(conn, set(terrain_by_battle), "terrain")
+    exclude |= find_populated_unclassified_log_ids(
+        conn, {d.battle_id for d in battle_type_decisions if d.fortified is not None}
+    )
+    return exclude
+
+
 def _classify_missingness_rows(
     conn: Any, counts: ClassifyCounts, *, exclude_log_ids: set[int]
 ) -> tuple[list[MissingnessDecision], list[int]]:
@@ -632,26 +664,32 @@ def _build_missingness_pairs(
 
 
 def build_pending_missingness_requests(
-    conn: Any, spec: dict[str, Any]
+    conn: Any, spec: dict[str, Any], raw_root: Path = Path("data/raw")
 ) -> list[tuple[MissingnessContext, LLMRequest]]:
     """Build the missingness request for every row the heuristics cannot settle.
 
     The path ``scripts/llm_offline.py`` calls, so an exported request and the
-    one the stage builds hash alike. It does not know which ``battle_type`` or
-    ``terrain`` rows the stage's own inference will settle, so it may export a
-    request the stage then never needs; that costs one answer, never a miss.
+    one the stage builds hash alike. It applies the stage's own exclusions
+    (rows the battle-type and terrain inference settle, and populated
+    covariate rows), computed read-only from the same inference.
 
     Args:
         conn: An open database connection.
         spec: The loaded ``agents/classify.yaml``.
+        raw_root: The ``data/raw`` directory the inference reads articles from.
 
     Returns:
         ``(context, request)`` pairs in ``log_id`` order.
     """
+    exclude = _missingness_exclusions(
+        conn,
+        _infer_battle_types(conn, raw_root, ClassifyCounts()),
+        _infer_terrain(conn, raw_root),
+    )
     undecided = [
         record.log_id
         for record in load_missingness_inputs(conn)
-        if classify_missingness(record) is None
+        if record.log_id not in exclude and classify_missingness(record) is None
     ]
     return _build_missingness_pairs(conn, undecided, spec)
 
@@ -791,12 +829,8 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
         _tally_role_method(decision, counts)
 
     battle_type_decisions = _infer_battle_types(conn, raw_root, counts)
-    observed_battle_ids = {d.battle_id for d in battle_type_decisions if d.battle_type != "unknown"}
-    exclude_log_ids = find_unclassified_battle_type_log_ids(conn, observed_battle_ids)
     terrain_by_battle = _infer_terrain(conn, raw_root)
-    exclude_log_ids |= find_unclassified_battle_type_log_ids(
-        conn, set(terrain_by_battle), "terrain"
-    )
+    exclude_log_ids = _missingness_exclusions(conn, battle_type_decisions, terrain_by_battle)
     if not ctx.dry_run:
         # Before the missingness read, so a newly logged gap is classified in
         # this same run rather than waiting for the next.
@@ -825,6 +859,7 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
     write_role_decisions(conn, all_role_decisions)
     write_battle_type_decisions(conn, battle_type_decisions)
     counts.terrain_set = write_terrain(conn, terrain_by_battle)
+    mark_populated_fields_observed(conn)
     write_missingness_decisions(conn, missingness_decisions)
     # The siege-title rule first: it reads the besieged place off the title,
     # which beats the model's reading, and the writer only fills NULLs.

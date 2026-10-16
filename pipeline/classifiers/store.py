@@ -13,9 +13,14 @@ every run, including one resolve itself already guessed at.
 
 **Battle type and missingness never move backwards.** A ``battles.battle_type``
 already something other than 'unknown' is never touched (the guard is in the
-``WHERE`` clause, not just in Python, per the brief), and ``fortified`` is
-only ever added to, never cleared: ``COALESCE(:fortified, fortified)`` keeps
-whatever the row already had when this run has no fortification evidence.
+``WHERE`` clause, not just in Python, per the brief), except that the campaign
+rule may rewrite a type this stage chose itself, and then clears the
+``fortified`` flag that type set. The record of who chose a type is
+``battles.battle_type_source``, not a ``missing_data_log`` note: extract owns
+that table and deletes its rows on every re-run, so a note cannot outlive it.
+Otherwise ``fortified`` is only ever added to, never cleared:
+``COALESCE(:fortified, fortified)`` keeps whatever the row already had when
+this run has no fortification evidence.
 A ``missing_data_log`` row moves out of 'unclassified' at most once; the same
 ``WHERE missingness_class = 'unclassified'`` guard is what makes a second run
 a no-op rather than a duplicated note.
@@ -33,10 +38,16 @@ from typing import Any, Final
 import structlog
 from sqlalchemy import text
 
-from pipeline.classifiers.records import BattleTypeDecision, MissingnessDecision, RoleDecision
+from pipeline.classifiers.records import (
+    UNLOGGED_TROOP_TOTAL_NOTE,
+    BattleTypeDecision,
+    MissingnessDecision,
+    RoleDecision,
+)
 
 __all__ = [
     "log_unlogged_troop_totals",
+    "mark_populated_fields_observed",
     "write_terrain",
     "write_defender_flags",
     "write_battle_type_decisions",
@@ -65,6 +76,8 @@ _UPDATE_BATTLE_TYPE = text(
     """
     UPDATE battles SET
         battle_type = CAST(:battle_type AS battle_type),
+        battle_type_source = CASE WHEN CAST(:battle_type AS TEXT) = 'unknown'
+                                  THEN battle_type_source ELSE 'classify' END,
         fortified   = COALESCE(:fortified, fortified)
     WHERE battle_id = :battle_id
       AND battle_type = 'unknown'
@@ -90,11 +103,12 @@ _MARK_BATTLE_TYPE_OBSERVED = text(
     """
 )
 
-# The one place a non-'unknown' battle_type is rewritten. The EXISTS guard
-# limits it to a type an earlier classify run chose by rule (its log note says
-# so), so a type extract or a person set is untouched; fortified is cleared
-# because only a rule-derived siege or similar set it. Once campaign, a battle
-# no longer matches, so a re-run is a no-op.
+# The one place a non-'unknown' battle_type is rewritten. battle_type_source
+# limits it to a type an earlier classify run chose by rule, so a type extract
+# set is untouched; the source lives on battles because the log note it used to
+# rely on is deleted whenever extract re-runs. fortified is cleared because only
+# a rule-derived siege or similar set it. Once campaign, a battle no longer
+# matches, so a re-run is a no-op.
 _REPLACE_RULE_TYPE_WITH_CAMPAIGN = text(
     """
     UPDATE battles SET
@@ -102,23 +116,19 @@ _REPLACE_RULE_TYPE_WITH_CAMPAIGN = text(
         fortified   = NULL
     WHERE battle_id = :battle_id
       AND battle_type NOT IN ('unknown', 'campaign')
-      AND EXISTS (
-          SELECT 1 FROM missing_data_log mdl
-          WHERE mdl.battle_id = battles.battle_id
-            AND mdl.field_name = 'battle_type'
-            AND mdl.notes LIKE 'classify: inferred%'
-      )
+      AND battle_type_source = 'classify'
     """
 )
 
 _NOTE_CAMPAIGN_REPLACEMENT = text(
     """
     UPDATE missing_data_log SET
-        notes = notes || E'\\n' || :note
+        notes = CASE
+            WHEN notes IS NULL OR notes = '' THEN :note
+            ELSE notes || E'\\n' || :note
+        END
     WHERE battle_id = :battle_id
       AND field_name = 'battle_type'
-      AND missingness_class = 'observed'
-      AND notes LIKE 'classify: inferred%'
     """
 )
 
@@ -141,6 +151,32 @@ _MARK_TERRAIN_OBSERVED = text(
     WHERE battle_id = :battle_id
       AND field_name = 'terrain'
       AND missingness_class = 'unclassified'
+    """
+)
+
+# Battle-level covariate rows only (side_id IS NULL); the value shown in the note
+# is the one now on the battle. The source is battle_type's alone, since the
+# other two columns do not record one.
+_MARK_POPULATED_OBSERVED = text(
+    """
+    UPDATE missing_data_log mdl SET
+        missingness_class = 'observed',
+        notes = CASE WHEN mdl.notes IS NULL OR mdl.notes = '' THEN '' ELSE mdl.notes || E'\n' END
+            || 'classify: observed ' || mdl.field_name || ' already set ('
+            || CASE mdl.field_name
+                 WHEN 'battle_type' THEN CAST(b.battle_type AS TEXT) || ', source '
+                                         || COALESCE(b.battle_type_source, 'unrecorded')
+                 WHEN 'terrain' THEN array_to_string(b.terrain, ',')
+                 ELSE CAST(b.fortified AS TEXT)
+               END
+            || ')'
+    FROM battles b
+    WHERE b.battle_id = mdl.battle_id
+      AND mdl.side_id IS NULL
+      AND mdl.missingness_class = 'unclassified'
+      AND ((mdl.field_name = 'battle_type' AND b.battle_type <> 'unknown')
+        OR (mdl.field_name = 'terrain' AND b.terrain IS NOT NULL AND cardinality(b.terrain) > 0)
+        OR (mdl.field_name = 'fortified' AND b.fortified IS NOT NULL))
     """
 )
 
@@ -239,6 +275,23 @@ def write_battle_type_decisions(conn: Any, decisions: list[BattleTypeDecision]) 
     return typed
 
 
+def mark_populated_fields_observed(conn: Any) -> int:
+    """Mark 'unclassified' covariate rows 'observed' where the column has a value.
+
+    Run after this stage's own battle-type and terrain writes, so a field set
+    in this run counts. Extract re-inserts these rows on every run whatever
+    classify has since filled in, and the missingness classifier must not
+    reason about a field that is not missing.
+
+    Args:
+        conn: An open database connection.
+
+    Returns:
+        How many rows were marked.
+    """
+    return int(conn.execute(_MARK_POPULATED_OBSERVED).rowcount or 0)
+
+
 def write_missingness_decisions(conn: Any, decisions: list[MissingnessDecision]) -> int:
     """Write every missingness decision onto its ``missing_data_log`` row.
 
@@ -301,7 +354,7 @@ def log_unlogged_troop_totals(conn: Any) -> int:
     """
     result = conn.execute(
         _LOG_UNLOGGED_TROOP_TOTALS,
-        {"note": f"{_NOTE_PREFIX}no reconciled troop estimate and no earlier log entry"},
+        {"note": UNLOGGED_TROOP_TOTAL_NOTE},
     )
     return int(result.rowcount or 0)
 

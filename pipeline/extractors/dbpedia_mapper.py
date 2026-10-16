@@ -216,7 +216,8 @@ def _first_date(predicates: dict[str, Any]) -> tuple[str | None, str | None]:
     ``dbp:date`` carries whatever the infobox held, which on Actium includes
     a 2014 citation access date alongside the real one. ``dbo:date`` is the
     extracted, typed value, so it is tried first and the raw property is only
-    a fallback.
+    a fallback. The merger guards that fallback: a DBpedia date more than a
+    year from the infobox's is ignored.
 
     Args:
         predicates: The resource's predicate mapping.

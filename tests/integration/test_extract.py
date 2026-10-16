@@ -420,3 +420,244 @@ def test_an_unparsed_infobox_date_flags_the_battle_and_logs_it_missing(conn: Any
     assert row[1] is True
     assert "unparsed_date" in row[2]
     assert "sometime" in note
+
+
+# ─── Sides that a re-run no longer produces are removed ─────────────────────
+
+
+def _relabelled(battle: Any, old: str, new: str) -> Any:
+    """Return a copy of ``battle`` with one side's label changed."""
+    sides = [replace(s, label=new) if s.label == old else s for s in battle.sides]
+    return replace(battle, sides=sides)
+
+
+def _side_rows(conn: Any, battle_id: int) -> dict[str, int]:
+    rows = conn.execute(
+        text("SELECT side_label, side_id FROM battle_sides WHERE battle_id = :id"),
+        {"id": battle_id},
+    ).fetchall()
+    return {row[0]: int(row[1]) for row in rows}
+
+
+def _count_for_side(conn: Any, table: str, side_id: int) -> int:
+    # table comes from a fixed literal in the tests below, never from input.
+    return int(
+        conn.execute(
+            text(f"SELECT COUNT(*) FROM {table} WHERE side_id = :s"),  # noqa: S608
+            {"s": side_id},
+        ).scalar_one()
+    )
+
+
+def _add_commander(conn: Any, battle_id: int, side_id: int, name: str, parent: int | None) -> int:
+    general_id = conn.execute(
+        text("INSERT INTO generals (canonical_name) VALUES (:n) RETURNING general_id"),
+        {"n": name},
+    ).scalar_one()
+    return int(
+        conn.execute(
+            text(
+                "INSERT INTO battle_commanders (battle_id, side_id, general_id, reports_to_bc_id) "
+                "VALUES (:b, :s, :g, :p) RETURNING bc_id"
+            ),
+            {"b": battle_id, "s": side_id, "g": general_id, "p": parent},
+        ).scalar_one()
+    )
+
+
+def test_a_relabelled_side_replaces_the_old_one_and_its_dependents(conn: Any) -> None:
+    battle = _actium()
+    old_label = battle.sides[0].label
+    counts = ExtractWriteCounts()
+    battle_id = write_battle(conn, battle, counts)
+    old_side = _side_rows(conn, battle_id)[old_label]
+    _add_commander(conn, battle_id, old_side, "Stale Commander", None)
+    conn.execute(
+        text(
+            "INSERT INTO missing_data_log (battle_id, side_id, field_name, was_imputed) "
+            "VALUES (:b, :s, 'troops', TRUE)"
+        ),
+        {"b": battle_id, "s": old_side},
+    )
+    assert _count_for_side(conn, "troop_reports", old_side) > 0
+
+    second = ExtractWriteCounts()
+    write_battle(conn, _relabelled(battle, old_label, "Renamed Side"), second)
+
+    sides = _side_rows(conn, battle_id)
+    assert len(sides) == 2
+    assert old_label not in sides
+    assert second.stale_sides_removed == 1
+    for table in ("troop_reports", "casualty_reports", "battle_commanders", "missing_data_log"):
+        assert _count_for_side(conn, table, old_side) == 0, table
+    assert _count_for_side(conn, "troop_reports", sides["Renamed Side"]) > 0
+
+
+def test_a_surviving_commander_reporting_to_a_stale_one_is_detached(conn: Any) -> None:
+    battle = _actium()
+    old_label, kept_label = battle.sides[0].label, battle.sides[1].label
+    battle_id = write_battle(conn, battle)
+    rows = _side_rows(conn, battle_id)
+    stale_bc = _add_commander(conn, battle_id, rows[old_label], "Stale", None)
+    kept_bc = _add_commander(conn, battle_id, rows[kept_label], "Kept", stale_bc)
+
+    write_battle(conn, _relabelled(battle, old_label, "Renamed Side"))
+
+    parent = conn.execute(
+        text("SELECT reports_to_bc_id FROM battle_commanders WHERE bc_id = :b"), {"b": kept_bc}
+    ).scalar_one()
+    assert parent is None
+
+
+def test_a_rerun_that_produced_no_sides_leaves_existing_sides_alone(conn: Any) -> None:
+    battle = _actium()
+    battle_id = write_battle(conn, battle)
+    before = _side_rows(conn, battle_id)
+
+    counts = ExtractWriteCounts()
+    write_battle(conn, replace(battle, sides=[]), counts)
+
+    assert _side_rows(conn, battle_id) == before
+    assert counts.stale_sides_removed == 0
+
+
+def test_rerunning_identical_input_removes_no_sides(conn: Any) -> None:
+    battle = _actium()
+    battle_id = write_battle(conn, battle)
+    before = _side_rows(conn, battle_id)
+
+    counts = ExtractWriteCounts()
+    write_battle(conn, battle, counts)
+
+    assert counts.stale_sides_removed == 0
+    assert _side_rows(conn, battle_id) == before
+
+
+# ─── Stale-side cleanup under a deferred LLM pass ───────────────────────────
+
+
+def _three_sided(slug: str = "tri") -> Any:
+    from pipeline.extractors import SideExtraction
+
+    record = _record(slug)
+    return replace(record, sides=[*record.sides, SideExtraction(label="C")])
+
+
+def _deferred(record: Any) -> Any:
+    from pipeline.extractors import ExtractionFailure
+
+    failure = ExtractionFailure(
+        battle_name=record.name, source_ref="x", status="deferred", error="pending", passage_index=0
+    )
+    return replace(record, failures=[failure])
+
+
+def _add_troop(conn: Any, side_id: int, method: str) -> None:
+    source_id = conn.execute(
+        text(
+            "INSERT INTO sources (source_type, title) VALUES ('wikipedia_infobox', 't') "
+            "RETURNING source_id"
+        )
+    ).scalar_one()
+    conn.execute(
+        text(
+            "INSERT INTO troop_reports (side_id, source_id, reported_value, extraction_method) "
+            "VALUES (:s, :src, 10, CAST(:m AS extraction_method))"
+        ),
+        {"s": side_id, "src": source_id, "m": method},
+    )
+
+
+def _shrunk(record: Any) -> Any:
+    return replace(record, sides=[s for s in record.sides if s.label != "C"])
+
+
+def test_a_deferred_record_keeps_a_stale_side_holding_llm_rows(conn: Any) -> None:
+    record = _three_sided()
+    battle_id = write_battle(conn, record)
+    _add_troop(conn, _side_rows(conn, battle_id)["C"], "llm_extraction")
+
+    counts = ExtractWriteCounts()
+    write_battle(conn, _deferred(_shrunk(record)), counts)
+
+    assert "C" in _side_rows(conn, battle_id)
+    assert counts.stale_sides_removed == 0
+
+
+def test_a_deferred_record_still_removes_a_stale_side_with_only_deterministic_rows(
+    conn: Any,
+) -> None:
+    record = _three_sided()
+    battle_id = write_battle(conn, record)
+    _add_troop(conn, _side_rows(conn, battle_id)["C"], "infobox_parser")
+
+    counts = ExtractWriteCounts()
+    write_battle(conn, _deferred(_shrunk(record)), counts)
+
+    assert "C" not in _side_rows(conn, battle_id)
+    assert counts.stale_sides_removed == 1
+
+
+def test_a_non_deferred_record_removes_a_stale_side_even_with_llm_rows(conn: Any) -> None:
+    record = _three_sided()
+    battle_id = write_battle(conn, record)
+    _add_troop(conn, _side_rows(conn, battle_id)["C"], "llm_extraction")
+
+    write_battle(conn, _shrunk(record))
+
+    assert "C" not in _side_rows(conn, battle_id)
+
+
+def test_two_records_with_one_qid_become_two_battles_and_keep_their_sides(conn: Any) -> None:
+    first = _record("first")
+    second = _record("second")
+    first = replace(first, facts=replace(first.facts, wikidata_id="Q987654321"))
+    second = replace(second, facts=replace(second.facts, wikidata_id="Q987654321"))
+    counts = ExtractWriteCounts()
+
+    first_id = write_battle(conn, first, counts)
+    second_id = write_battle(conn, second, counts)
+
+    assert first_id != second_id
+    qids = dict(
+        conn.execute(
+            text("SELECT battle_id, wikidata_id FROM battles WHERE battle_id IN (:a, :b)"),
+            {"a": first_id, "b": second_id},
+        ).fetchall()
+    )
+    assert qids == {first_id: "Q987654321", second_id: None}
+    assert set(_side_rows(conn, first_id)) == {"A", "B"}
+    assert set(_side_rows(conn, second_id)) == {"A", "B"}
+
+
+def test_a_battle_written_twice_in_one_run_skips_stale_cleanup(conn: Any) -> None:
+    record = _three_sided()
+    counts = ExtractWriteCounts()
+    battle_id = write_battle(conn, record, counts)
+
+    write_battle(conn, _shrunk(record), counts)
+
+    assert "C" in _side_rows(conn, battle_id)
+    assert counts.stale_sides_removed == 0
+
+
+def test_stale_removal_counts_rows_extract_did_not_own(conn: Any) -> None:
+    import structlog
+
+    record = _three_sided()
+    battle_id = write_battle(conn, record)
+    stale = _side_rows(conn, battle_id)["C"]
+    _add_troop(conn, stale, "manual")
+    _add_commander(conn, battle_id, stale, "Resolved Commander", None)
+
+    with structlog.testing.capture_logs() as logs:
+        write_battle(conn, _shrunk(record))
+
+    (event,) = [e for e in logs if e["event"] == "extract_stale_sides_removed"]
+    assert event["log_level"] == "warning"
+    assert event["non_extract_rows_deleted"] == {
+        "troop_reports": 1,
+        "casualty_reports": 0,
+        "battle_commanders": 1,
+        "missing_data_log": 0,
+    }

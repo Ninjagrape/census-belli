@@ -145,6 +145,7 @@ def test_the_npz_has_the_documented_arrays_and_dtypes(tmp_path: Path) -> None:
 
 def test_neutral_estimates_are_stamped_with_their_own_run_id() -> None:
     from datetime import UTC, datetime
+    from types import SimpleNamespace
 
     from pipeline.reconcilers.records import SideEstimate
     from pipeline.reconcilers.store import write_neutral_estimates, write_side_estimates
@@ -153,8 +154,9 @@ def test_neutral_estimates_are_stamped_with_their_own_run_id() -> None:
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object]]] = []
 
-        def execute(self, statement: object, params: dict[str, object]) -> None:
+        def execute(self, statement: object, params: dict[str, object]) -> SimpleNamespace:
             self.calls.append((str(statement), params))
+            return SimpleNamespace(rowcount=0)
 
     _, _, summary = _summary()
     conn = _Conn()

@@ -36,6 +36,7 @@ from typing import Any, Final
 import structlog
 from sqlalchemy import text
 
+from pipeline.classifiers.records import NO_ESTIMATE_NOTE_PREFIX
 from pipeline.reconcilers.records import (
     NeutralSideEstimate,
     Quantity,
@@ -251,6 +252,20 @@ _DELETE_STALE_WITHHELD = text(
     """
 )
 
+# Classify runs after reconcile but can see a side before reconcile has re-run
+# (extract recreated it), and logs it as having no estimate. Once reconcile writes
+# one, that row contradicts the value and impute would still target it. Only
+# classify's own un-imputed gap rows go; every other note is another stage's.
+_DELETE_STALE_CLASSIFY_GAP = text(
+    """
+    DELETE FROM missing_data_log
+    WHERE side_id = ANY(CAST(:side_ids AS INT[]))
+      AND field_name = 'troop_total'
+      AND was_imputed = FALSE
+      AND notes LIKE :prefix || '%'
+    """
+)
+
 _FIELD_BY_QUANTITY: Final[dict[Quantity, str]] = {
     "troops": "troop_total",
     "casualties": "casualties",
@@ -377,6 +392,13 @@ def write_side_estimates(conn: Any, estimates: list[SideEstimate]) -> int:
                 "prefix": WITHHELD_NOTE_PREFIX,
             },
         )
+    troop_side_ids = sorted(e.side_id for e in estimates if e.quantity == "troops")
+    if troop_side_ids:
+        deleted = conn.execute(
+            _DELETE_STALE_CLASSIFY_GAP,
+            {"side_ids": troop_side_ids, "prefix": NO_ESTIMATE_NOTE_PREFIX},
+        ).rowcount
+        logger.info("reconcile_stale_classify_gap_deleted", rows=int(deleted or 0))
     return written
 
 

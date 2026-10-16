@@ -58,6 +58,7 @@ _INSERT_SOURCE = text(
 )
 
 _FIND_BATTLE_BY_QID = text("SELECT battle_id FROM battles WHERE wikidata_id = :wikidata_id")
+_BATTLE_SLUG = text("SELECT source_slug FROM battles WHERE battle_id = :battle_id")
 _FIND_BATTLE_BY_SLUG = text("SELECT battle_id FROM battles WHERE source_slug = :slug")
 # Only a row that predates source_slug may be claimed by name. A row that
 # already has a slug belongs to a different article that happens to share
@@ -74,13 +75,15 @@ _INSERT_BATTLE = text(
     """
     INSERT INTO battles (
         name, source_slug, wikidata_id, wikipedia_url, date_start, date_end, date_precision,
-        date_circa, latitude, longitude, location_name, battle_type, terrain, fortified,
-        weather, n_sources, needs_review, review_notes
+        date_circa, latitude, longitude, location_name, battle_type, battle_type_source,
+        terrain, fortified, weather, n_sources, needs_review, review_notes
     ) VALUES (
         :name, :source_slug, :wikidata_id, :wikipedia_url,
         CAST(:date_start AS DATE), CAST(:date_end AS DATE), :date_precision,
         :date_circa, :latitude, :longitude, :location_name,
-        CAST(COALESCE(:battle_type, 'unknown') AS battle_type), :terrain, :fortified,
+        CAST(COALESCE(:battle_type, 'unknown') AS battle_type),
+        CASE WHEN CAST(:battle_type AS TEXT) IS NOT NULL THEN 'extract' END,
+        :terrain, :fortified,
         :weather, :n_sources, :needs_review, :review_notes
     )
     RETURNING battle_id
@@ -104,6 +107,9 @@ _UPDATE_BATTLE = text(
         longitude = COALESCE(:longitude, longitude),
         location_name = COALESCE(:location_name, location_name),
         battle_type = COALESCE(CAST(:battle_type AS battle_type), battle_type),
+        -- Provenance follows the value: only a type this run supplied is extract's.
+        battle_type_source = CASE WHEN CAST(:battle_type AS TEXT) IS NOT NULL THEN 'extract'
+                                  ELSE battle_type_source END,
         terrain = COALESCE(:terrain, terrain),
         fortified = COALESCE(:fortified, fortified),
         weather = COALESCE(:weather, weather),
@@ -154,6 +160,58 @@ _CLEAR_CASUALTIES = text(
     "AND extraction_method = ANY(CAST(:methods AS extraction_method[]))"
 )
 
+# A side this run no longer produces is removed with everything on it. There
+# are no FK cascades, so dependents go first; a commander on a surviving side
+# may report to one on a stale side, so that link is cut before the delete.
+_FIND_STALE_SIDES = text(
+    "SELECT side_id, side_label FROM battle_sides WHERE battle_id = :battle_id "
+    "AND NOT (side_id = ANY(CAST(:keep AS INT[]))) ORDER BY side_id"
+)
+_DETACH_STALE_PARENTS = text(
+    "UPDATE battle_commanders SET reports_to_bc_id = NULL WHERE reports_to_bc_id IN "
+    "(SELECT bc_id FROM battle_commanders WHERE side_id = ANY(CAST(:ids AS INT[])))"
+)
+_COUNT_FOREIGN_REPORTS: Final[dict[str, Any]] = {
+    table: text(
+        f"SELECT COUNT(*) FROM {table} WHERE side_id = ANY(CAST(:ids AS INT[])) "  # noqa: S608
+        "AND NOT (COALESCE(CAST(extraction_method AS TEXT), '') = ANY(CAST(:methods AS TEXT[])))"
+    )
+    for table in ("troop_reports", "casualty_reports")
+}
+# Extraction methods only the LLM body pass produces. A stale side holding
+# such a row may be waiting for that pass to be answered, see
+# ``_remove_stale_sides``.
+_LLM_METHODS: Final[tuple[str, ...]] = ("llm_extraction",)
+_FIND_SIDES_WITH_LLM_ROWS = text(
+    "SELECT side_id FROM troop_reports WHERE side_id = ANY(CAST(:ids AS INT[])) "
+    "AND CAST(extraction_method AS TEXT) = ANY(CAST(:methods AS TEXT[])) "
+    "UNION SELECT side_id FROM casualty_reports WHERE side_id = ANY(CAST(:ids AS INT[])) "
+    "AND CAST(extraction_method AS TEXT) = ANY(CAST(:methods AS TEXT[])) "
+    "UNION SELECT side_id FROM battle_commanders WHERE side_id = ANY(CAST(:ids AS INT[])) "
+    "AND CAST(extraction_method AS TEXT) = ANY(CAST(:methods AS TEXT[]))"
+)
+# Extract writes no commanders, and only un-imputed missing rows; anything
+# else on a stale side belongs to another stage or to a person.
+_COUNT_FOREIGN_COMMANDERS = text(
+    "SELECT COUNT(*) FROM battle_commanders WHERE side_id = ANY(CAST(:ids AS INT[]))"
+)
+_COUNT_FOREIGN_MISSING = text(
+    "SELECT COUNT(*) FROM missing_data_log WHERE side_id = ANY(CAST(:ids AS INT[])) "
+    "AND was_imputed = TRUE"
+)
+_STALE_DEPENDENT_TABLES: Final[tuple[str, ...]] = (
+    "missing_data_log",
+    "casualty_reports",
+    "troop_reports",
+    "battle_commanders",
+)
+# Table names are fixed literals above, never input; values stay bound.
+_DELETE_STALE_DEPENDENTS: Final[dict[str, Any]] = {
+    table: text(f"DELETE FROM {table} WHERE side_id = ANY(CAST(:ids AS INT[]))")  # noqa: S608
+    for table in _STALE_DEPENDENT_TABLES
+}
+_DELETE_STALE_SIDES = text("DELETE FROM battle_sides WHERE side_id = ANY(CAST(:ids AS INT[]))")
+
 _INSERT_TROOP = text(
     """
     INSERT INTO troop_reports (
@@ -197,10 +255,13 @@ class ExtractWriteCounts:
     def __init__(self) -> None:
         self.battles = 0
         self.sides = 0
+        self.stale_sides_removed = 0
         self.troop_reports = 0
         self.casualty_reports = 0
         self.missing_rows = 0
         self.failed_battles = 0
+        # Not in as_dict: a set of ids is not a counter.
+        self.written_battle_ids: set[int] = set()
 
     def as_dict(self) -> dict[str, int]:
         """Render the counts for a structlog call.
@@ -211,6 +272,7 @@ class ExtractWriteCounts:
         return {
             "battles": self.battles,
             "sides": self.sides,
+            "stale_sides_removed": self.stale_sides_removed,
             "troop_reports": self.troop_reports,
             "casualty_reports": self.casualty_reports,
             "missing_rows": self.missing_rows,
@@ -287,7 +349,22 @@ def _upsert_battle(conn: Any, battle: BattleExtraction) -> int:
     if battle.slug:
         existing = conn.execute(_FIND_BATTLE_BY_SLUG, {"slug": battle.slug}).fetchone()
     if existing is None and facts.wikidata_id:
-        existing = conn.execute(_FIND_BATTLE_BY_QID, {"wikidata_id": facts.wikidata_id}).fetchone()
+        by_qid = conn.execute(_FIND_BATTLE_BY_QID, {"wikidata_id": facts.wikidata_id}).fetchone()
+        if by_qid is not None:
+            owner_slug = conn.execute(_BATTLE_SLUG, {"battle_id": int(by_qid[0])}).scalar_one()
+            if owner_slug is None or owner_slug == battle.slug:
+                existing = by_qid
+            else:
+                # A different article already owns this entity: adopting its
+                # row would overwrite that battle and delete its sides.
+                logger.warning(
+                    "extract_wikidata_id_owned_by_other_slug",
+                    slug=battle.slug,
+                    owner_slug=owner_slug,
+                    wikidata_id=facts.wikidata_id,
+                    owner_battle_id=int(by_qid[0]),
+                )
+                params["wikidata_id"] = None
     if existing is None:
         existing = conn.execute(_FIND_LEGACY_BATTLE_BY_NAME, {"name": battle.name}).fetchone()
 
@@ -415,6 +492,93 @@ def _upsert_side(conn: Any, battle_id: int, side: SideExtraction) -> int:
     return side_id
 
 
+def _remove_stale_sides(
+    conn: Any,
+    battle_id: int,
+    kept_side_ids: list[int],
+    counts: ExtractWriteCounts,
+    *,
+    llm_pending: bool = False,
+) -> None:
+    """Delete the battle's sides that this run did not write, with their rows.
+
+    Side labels change between extract versions, so a relabelled side is a new
+    row and the old one lingers with its own commanders and reports. Nothing
+    is removed when this run wrote no sides, so a failed parse cannot wipe a
+    battle.
+
+    Args:
+        conn: An open database connection.
+        battle_id: The battle just written.
+        kept_side_ids: Ids of every side this run wrote for the battle.
+        counts: Counters to accumulate into.
+        llm_pending: Whether the record still has LLM passages deferred. Its
+            sides then lack whatever only the LLM pass produces, so a stale
+            side holding LLM-method rows is kept until that pass is answered.
+            Stale sides without such rows (older deterministic runs) still go.
+    """
+    if not kept_side_ids:
+        return
+
+    stale = conn.execute(
+        _FIND_STALE_SIDES, {"battle_id": battle_id, "keep": kept_side_ids}
+    ).fetchall()
+    if llm_pending and stale:
+        held = {
+            int(row[0])
+            for row in conn.execute(
+                _FIND_SIDES_WITH_LLM_ROWS,
+                {"ids": [int(r[0]) for r in stale], "methods": list(_LLM_METHODS)},
+            )
+        }
+        for row in stale:
+            if int(row[0]) in held:
+                logger.info(
+                    "extract_stale_side_kept_pending_llm",
+                    battle_id=battle_id,
+                    side_id=int(row[0]),
+                    label=str(row[1]),
+                )
+        stale = [row for row in stale if int(row[0]) not in held]
+    if not stale:
+        return
+
+    ids = [int(row[0]) for row in stale]
+    labels = [str(row[1]) for row in stale]
+
+    # Counted before the delete: rows from other methods (manual corrections),
+    # resolve's commanders and imputed missingness go too, because the side
+    # they hang off is gone.
+    non_extract = {
+        table: int(conn.execute(query, {"ids": ids, "methods": list(_OWNED_METHODS)}).scalar_one())
+        for table, query in _COUNT_FOREIGN_REPORTS.items()
+    }
+    non_extract["battle_commanders"] = int(
+        conn.execute(_COUNT_FOREIGN_COMMANDERS, {"ids": ids}).scalar_one()
+    )
+    non_extract["missing_data_log"] = int(
+        conn.execute(_COUNT_FOREIGN_MISSING, {"ids": ids}).scalar_one()
+    )
+
+    conn.execute(_DETACH_STALE_PARENTS, {"ids": ids})
+    deleted = {
+        table: conn.execute(_DELETE_STALE_DEPENDENTS[table], {"ids": ids}).rowcount
+        for table in _STALE_DEPENDENT_TABLES
+    }
+    conn.execute(_DELETE_STALE_SIDES, {"ids": ids})
+
+    counts.stale_sides_removed += len(ids)
+    log = logger.warning if any(non_extract.values()) else logger.info
+    log(
+        "extract_stale_sides_removed",
+        battle_id=battle_id,
+        side_ids=ids,
+        side_labels=labels,
+        rows_deleted=deleted,
+        non_extract_rows_deleted=non_extract,
+    )
+
+
 def write_battle(
     conn: Any,
     battle: BattleExtraction,
@@ -481,6 +645,20 @@ def write_battle(
                 },
             )
             tally.casualty_reports += 1
+
+    if battle_id in tally.written_battle_ids:
+        # Two records resolved to one row this run; each one's sides look
+        # stale to the other, so cleanup would delete the first record's.
+        logger.warning("extract_battle_written_twice_skipping_cleanup", battle_id=battle_id)
+    else:
+        _remove_stale_sides(
+            conn,
+            battle_id,
+            sorted(set(side_ids.values())),
+            tally,
+            llm_pending=bool(battle.deferred_failures),
+        )
+    tally.written_battle_ids.add(battle_id)
 
     conn.execute(_CLEAR_MISSING, {"battle_id": battle_id})
     for missing in battle.missing:
