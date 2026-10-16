@@ -12,11 +12,10 @@ dependencies = [
     "httpx>=0.27",
     "beautifulsoup4>=4.12",
     "mwparserfromhell>=0.6",
-    "SPARQLWrapper>=2.0",
 
     # data processing
+    "numpy>=1.26",
     "pandas>=2.2",
-    "polars>=1.0",
 
     # database
     "sqlalchemy>=2.0",
@@ -40,7 +39,6 @@ dependencies = [
     # fits a 300-side hierarchical model in 19s. It is the default sampler for
     # the reconcile stage; see agents/reconcile.yaml params.nuts_sampler.
     "nutpie>=0.13",
-    "cmdstanpy>=1.2",
 
     # LLM extraction
     # anthropic 1.x is a major-version break from 0.x (httpx2, removed
@@ -57,8 +55,6 @@ dependencies = [
     # Nothing read .env until pipeline.config.load_env existed; the file was
     # written, documented, and consumed only by an unused docker-compose.
     "python-dotenv>=1.0",
-    "click>=8.1",
-    "tqdm>=4.66",
 
     # visualisation
     "plotly>=5.18",

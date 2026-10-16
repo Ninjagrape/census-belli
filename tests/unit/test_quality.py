@@ -239,30 +239,13 @@ def test_prose_check_without_method_fails_rather_than_passes() -> None:
 # ─── Non-SQL method checks ───────────────────────────────────────────────────
 
 
-# diagnostics_json is deliberately absent: it has a handler in
-# METHOD_HANDLERS now, so it no longer reports "not implemented". The tests
-# for its real behaviour are at the foot of this file.
-@pytest.mark.parametrize(
-    "method",
-    [
-        "posterior_check",
-    ],
-)
-def test_unimplemented_methods_fail_visibly(method: str) -> None:
-    """An unimplemented gate must not silently pass."""
-    check = {"name": f"check_{method}", "method": method, "severity": "error"}
-    result = QualityRunner(None).run_one(check)
-
-    assert result.passed is False
-    assert "not implemented" in result.message
-
-
 def test_unknown_method_fails() -> None:
     check = {"name": "mystery", "method": "telepathy", "severity": "warning"}
     result = QualityRunner(None).run_one(check)
 
     assert result.passed is False
     assert "Unknown check method" in result.message
+    assert "not implemented" in result.message
 
 
 # ─── Severity and blocking ───────────────────────────────────────────────────
@@ -294,7 +277,7 @@ def test_has_blocking_failure_only_for_errors() -> None:
 def test_run_all_preserves_spec_order() -> None:
     checks = [
         {"name": "a", "check": "SELECT 1", "threshold": "= 1", "severity": "warning"},
-        {"name": "b", "method": "posterior_check", "severity": "warning"},
+        {"name": "b", "method": "telepathy", "severity": "warning"},
         {"name": "c", "check": "SELECT 1", "threshold": "= 1", "severity": "warning"},
     ]
     results = QualityRunner(StubConnection(value=1)).run_all(checks)

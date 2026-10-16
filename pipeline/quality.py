@@ -945,7 +945,6 @@ UNIMPLEMENTED_METHODS: dict[str, str] = {
         "Requires model_runs.diagnostics from the reconcile/model stage "
         "(rhat, ess_bulk, divergences via ArviZ)"
     ),
-    "posterior_check": "Requires the fitted posterior from the model stage",
     "imputation_gate": "Requires data/imputed/{scale}/gate_report.json from the impute stage",
     "model_gate": (
         "Requires data/processed/model_diagnostics/run{N}/gate_report.json from the model stage"
