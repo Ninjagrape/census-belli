@@ -1,8 +1,8 @@
 """
 The targeted outcome request: who won, for battles the merge could not decide.
 
-The deterministic path (infobox result text, demonym matching, the coalition
-rule) decides most battles. A battle left with two or more sides and no
+The deterministic path (infobox result text and demonym matching) decides
+most battles. A battle left with two or more sides and no
 outcome on any of them is asked about once, with a short and bounded prompt:
 the infobox result line verbatim, each side as the infobox lists it, and the
 start of the article. The model only names the winner. How decisive the win
@@ -17,6 +17,7 @@ answered without touching the passage requests.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -68,6 +69,7 @@ _WINNER_UNCLEAR: Final[str] = "unclear"
 _GRADED_LEVELS: Final[frozenset[str]] = frozenset(
     {"decisive_victory", "victory", "pyrrhic_victory"}
 )
+_SIDE_PREFIX_RE: Final[re.Pattern[str]] = re.compile(r"^side\s*\d+\s*[:\-]\s*", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -194,6 +196,18 @@ def _level_for(battle: BattleExtraction) -> str:
     return level if level in _GRADED_LEVELS and level is not None else "victory"
 
 
+def _normalise_winner(winner: str) -> str:
+    """Drop a "Side N:" prefix and surrounding whitespace from a model answer.
+
+    Args:
+        winner: The ``winner`` string as the model wrote it.
+
+    Returns:
+        The winner without the prefix, for comparison against side labels.
+    """
+    return _SIDE_PREFIX_RE.sub("", winner.strip()).strip()
+
+
 def apply_outcome_answer(battle: BattleExtraction, data: dict[str, Any]) -> bool:
     """Write an outcome answer onto the battle's sides.
 
@@ -203,18 +217,30 @@ def apply_outcome_answer(battle: BattleExtraction, data: dict[str, Any]) -> bool
 
     Returns:
         True when outcomes were written. A winner that is "unclear", or not
-        one of the side labels exactly, writes nothing.
+        one of the side labels (case-insensitive, after dropping a "Side N:"
+        prefix), writes nothing, and neither does "indecisive" when the
+        sources graded a victory.
     """
-    winner = str(data.get("winner") or "").strip()
+    winner = _normalise_winner(str(data.get("winner") or ""))
     evidence = str(data.get("evidence") or "").strip()
 
     if winner.lower() == _WINNER_INDECISIVE:
+        if battle.facts.outcome_level in _GRADED_LEVELS:
+            logger.warning(
+                "outcome_indecisive_contradicts_graded_victory",
+                battle=battle.name,
+                answer=winner,
+                outcome_level=battle.facts.outcome_level,
+            )
+            return False
         for side in battle.sides:
             side.outcome = _WINNER_INDECISIVE
         if battle.facts.outcome_level is None:
             battle.facts.outcome_level = _WINNER_INDECISIVE
     else:
-        chosen = next((s for s in battle.sides if s.label == winner), None)
+        chosen = next(
+            (s for s in battle.sides if s.label.strip().casefold() == winner.casefold()), None
+        )
         if chosen is None:
             if winner.lower() != _WINNER_UNCLEAR:
                 logger.warning("outcome_winner_not_a_side", battle=battle.name, winner=winner)

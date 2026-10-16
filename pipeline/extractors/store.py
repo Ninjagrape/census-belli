@@ -247,6 +247,10 @@ _INSERT_CASUALTY = text(
 _CLEAR_MISSING = text(
     "DELETE FROM missing_data_log WHERE battle_id = :battle_id AND was_imputed = FALSE"
 )
+_STORED_OUTCOMES = text(
+    "SELECT side_id FROM battle_sides WHERE battle_id = :battle_id AND outcome IS NOT NULL"
+)
+_OUTCOME_GAP_FIELDS = frozenset({"outcome", "outcome_level"})
 _INSERT_MISSING = text(
     """
     INSERT INTO missing_data_log (battle_id, side_id, field_name, notes)
@@ -673,7 +677,18 @@ def write_battle(
     tally.written_battle_ids.add(battle_id)
 
     conn.execute(_CLEAR_MISSING, {"battle_id": battle_id})
+    # A kept outcome came from the first record, whose own gap list is gone
+    # now; this record's list can still name it as missing.
+    decided_sides = (
+        {int(r[0]) for r in conn.execute(_STORED_OUTCOMES, {"battle_id": battle_id})}
+        if written_before
+        else set()
+    )
     for missing in battle.missing:
+        if missing.field_name in _OUTCOME_GAP_FIELDS and decided_sides:
+            gap_side = side_ids.get(missing.side_label) if missing.side_label else None
+            if gap_side is None or gap_side in decided_sides:
+                continue
         conn.execute(
             _INSERT_MISSING,
             {
@@ -714,6 +729,7 @@ def write_battle_isolated(
     """
     before_counts = counts.as_dict()
     before_cache = dict(source_cache)
+    before_written = set(counts.written_battle_ids)
     try:
         with conn.begin_nested():
             return write_battle(conn, battle, counts, source_cache)
@@ -725,6 +741,8 @@ def write_battle_isolated(
             error_type=type(exc).__name__,
         )
         _restore(counts, before_counts)
+        counts.written_battle_ids.clear()
+        counts.written_battle_ids.update(before_written)
         source_cache.clear()
         source_cache.update(before_cache)
         counts.failed_battles += 1

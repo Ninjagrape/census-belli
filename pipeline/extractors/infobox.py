@@ -724,7 +724,6 @@ def _build_extraction(
             label=label,
             aliases=labels[1:],
             polity=label if labels else None,
-            belligerents=len(labels),
         )
         for _, value in commanders.get(index, []):
             side.commanders.extend(

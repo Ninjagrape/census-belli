@@ -200,6 +200,41 @@ def test_an_indecisive_answer_marks_every_side() -> None:
     assert {s.outcome for s in merged.sides} == {"indecisive"}
 
 
+@pytest.mark.parametrize(
+    "winner",
+    [
+        "Side 1: Kingdom of Varra",
+        "side 1 - Kingdom of Varra",
+        "  kingdom of varra  ",
+        "Side 1:Kingdom of Varra",
+    ],
+)
+def test_the_winner_is_normalised_before_matching_a_side_label(winner: str) -> None:
+    merged = _undecided()
+
+    assert apply_outcome_answer(merged, {"winner": winner, "evidence": "e"})
+
+    assert {s.label: s.outcome for s in merged.sides}["Kingdom of Varra"] == "victory"
+
+
+def test_a_partial_label_is_still_not_matched() -> None:
+    merged = _undecided()
+
+    assert not apply_outcome_answer(merged, {"winner": "Side 1: Kingdom", "evidence": ""})
+
+
+@pytest.mark.parametrize("level", ["victory", "decisive_victory", "pyrrhic_victory"])
+def test_an_indecisive_answer_is_rejected_when_the_sources_graded_a_victory(level: str) -> None:
+    merged = _undecided()
+    merged.facts.outcome_level = level
+
+    assert not apply_outcome_answer(merged, {"winner": "indecisive", "evidence": "draw"})
+
+    assert all(s.outcome is None for s in merged.sides)
+    assert merged.outcome_method == ""
+    assert merged.facts.outcome_level == level
+
+
 def test_an_applied_answer_retracts_the_outcome_gaps() -> None:
     merged = _undecided()
     merged.missing = [

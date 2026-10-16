@@ -530,10 +530,8 @@ def _merge_sides(sources: Sequence[SourceExtraction]) -> list[SideExtraction]:
                     aliases=list(side.aliases),
                     polity=side.polity,
                     outcome=side.outcome,
-                    belligerents=side.belligerents,
                 )
             target = merged[key]
-            target.belligerents = max(target.belligerents, side.belligerents)
             if side.label != target.label and side.label not in target.aliases:
                 target.aliases.append(side.label)
             for alias in side.aliases:
@@ -763,26 +761,6 @@ def _victor_groups(victor: str) -> list[list[str]]:
     return groups
 
 
-_COALITION_WORDS: Final[frozenset[str]] = frozenset({"coalition", "allied", "allies", "alliance"})
-_ORDINALS: Final[frozenset[str]] = frozenset(
-    {"first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth"}
-)
-
-
-def _is_coalition_victor(groups: Sequence[Sequence[str]]) -> bool:
-    """Whether a victor label only says that an alliance won.
-
-    Args:
-        groups: The label's token groups.
-
-    Returns:
-        True for "Coalition", "Allied" or "Seventh Coalition": a coalition
-        word, optionally with an ordinal, and nothing that names a polity.
-    """
-    tokens = {token for group in groups for token in group}
-    return bool(tokens & _COALITION_WORDS) and tokens <= _COALITION_WORDS | _ORDINALS
-
-
 def _winning_sides(victor: str, sides: Sequence[SideExtraction]) -> list[SideExtraction]:
     """Find the sides a victor label points at.
 
@@ -818,12 +796,6 @@ def _winning_sides(victor: str, sides: Sequence[SideExtraction]) -> list[SideExt
     winners = matches(by_label)
     if winners:
         return winners
-
-    if _is_coalition_victor(groups):
-        # "Coalition victory" names no polity. It points at the side the
-        # infobox shows as a coalition, but only when exactly one side is.
-        coalitions = [side for side in sides if side.belligerents > 1]
-        return coalitions if len(coalitions) == 1 else []
 
     by_commander = {index: _commander_tokens(side) for index, side in enumerate(sides)}
     return [

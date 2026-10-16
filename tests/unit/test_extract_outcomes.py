@@ -15,6 +15,7 @@ from pipeline.extractors import (
     SourceExtraction,
     merge_battle,
 )
+from pipeline.extractors.outcome import needs_outcome_request
 
 
 def _source(source_type: str, facts: BattleFacts, sides: list[SideExtraction]) -> SourceExtraction:
@@ -34,8 +35,8 @@ def _outcomes(
     return {s.label: s.outcome for s in merge_battle("x", [source]).sides}
 
 
-def _side(label: str, belligerents: int = 1) -> SideExtraction:
-    return SideExtraction(label=label, polity=label, belligerents=belligerents)
+def _side(label: str, aliases: list[str] | None = None) -> SideExtraction:
+    return SideExtraction(label=label, polity=label, aliases=aliases or [])
 
 
 # ─── Victor and level come from the source that parsed them ──────────────────
@@ -107,33 +108,48 @@ def test_a_dbpedia_sentence_is_reduced_to_its_victor() -> None:
 # ─── Coalition victors ───────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("victor", ["Coalition", "Seventh Coalition", "Allied"])
-def test_a_coalition_victor_picks_the_one_multi_belligerent_side(victor: str) -> None:
-    outcomes = _outcomes(
-        victor,
+def _merged(victor: str, sides: list[SideExtraction]):  # noqa: ANN202
+    source = _source(
+        "wikipedia_infobox", BattleFacts(victor=victor, outcome_level="victory"), sides
+    )
+    return merge_battle("x", [source])
+
+
+def test_a_coalition_victor_does_not_credit_the_side_with_most_belligerents() -> None:
+    # France leads three belligerents, Russia one: counting belligerents would
+    # credit France for a "Coalition victory", which here means the opposite.
+    merged = _merged(
+        "Coalition",
         [
-            _side("First French Empire"),
-            _side("United Kingdom of Great Britain and Ireland", belligerents=4),
+            _side("France", ["Duchy of Warsaw", "Confederation of the Rhine"]),
+            _side("Russia"),
         ],
     )
 
-    assert outcomes["United Kingdom of Great Britain and Ireland"] == "victory"
-    assert outcomes["First French Empire"] == "defeat"
+    assert all(s.outcome is None for s in merged.sides)
+    assert needs_outcome_request(merged)
 
 
-def test_a_coalition_victor_is_ambiguous_when_both_sides_are_coalitions() -> None:
-    outcomes = _outcomes(
-        "Coalition",
-        [_side("Russian Empire", belligerents=3), _side("First French Empire", belligerents=5)],
+def test_a_waterloo_shaped_coalition_victor_is_left_to_the_outcome_request() -> None:
+    merged = _merged(
+        "Seventh Coalition",
+        [
+            _side("First French Empire"),
+            _side(
+                "United Kingdom of Great Britain and Ireland",
+                ["Prussia", "Netherlands", "Hanover", "Nassau", "Brunswick"],
+            ),
+        ],
     )
 
-    assert all(o is None for o in outcomes.values())
+    assert all(s.outcome is None for s in merged.sides)
+    assert needs_outcome_request(merged)
 
 
-def test_a_coalition_victor_is_ambiguous_when_no_side_is_a_coalition() -> None:
-    outcomes = _outcomes("Coalition", [_side("France"), _side("United Kingdom")])
+def test_a_side_labelled_allies_is_still_matched_by_allied() -> None:
+    outcomes = _outcomes("Allied", [_side("Allies"), _side("Axis")])
 
-    assert all(o is None for o in outcomes.values())
+    assert outcomes == {"Allies": "victory", "Axis": "defeat"}
 
 
 # ─── Compound victors ────────────────────────────────────────────────────────

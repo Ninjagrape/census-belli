@@ -261,10 +261,6 @@ class SideExtraction:
     aliases: list[str] = field(default_factory=list)
     polity: str | None = None
     outcome: str | None = None
-    # How many belligerents the infobox listed for this side. Aliases cannot
-    # stand in: other sources add their own spellings of a label there, which
-    # says nothing about whether the side was a coalition.
-    belligerents: int = 0
     commanders: list[CommanderMention] = field(default_factory=list)
     troop_reports: list[TroopReport] = field(default_factory=list)
     casualty_reports: list[CasualtyReport] = field(default_factory=list)
