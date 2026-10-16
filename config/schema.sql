@@ -17,6 +17,7 @@ CREATE TYPE battle_type AS ENUM (
     'combined',
     'amphibious',
     'guerrilla',
+    'campaign',  -- a war or multi-month operation in the battle corpus; excluded from the model
     'unknown'
 );
 
@@ -220,6 +221,7 @@ CREATE TABLE battles (
     date_start      DATE,
     date_end        DATE,
     date_precision  TEXT DEFAULT 'day',    -- 'day', 'month', 'year', 'decade', 'century'
+    date_circa      BOOLEAN NOT NULL DEFAULT FALSE,  -- the source date is hedged ("c.", "circa", "or", "late 1250s"); date_start is a best reading
 
     -- Astronomical year of date_start, as a plain integer.
     --
@@ -343,6 +345,7 @@ CREATE TABLE battle_commanders (
     command_role        command_role NOT NULL DEFAULT 'unknown',
     reports_to_bc_id    INT REFERENCES battle_commanders(bc_id),  -- parent in command chain
     hierarchy_rank      INT DEFAULT 0,     -- 0 = top commander on this side, 1 = direct report, etc.
+    infobox_order       INT,               -- 0-based position in the infobox commander list for this side; NULL if not from an infobox
 
     -- attribution (may be learned by the model or set by extraction)
     attribution_weight  DOUBLE PRECISION DEFAULT 1.0  -- 0..1, how much credit this person gets
@@ -575,6 +578,9 @@ CREATE TABLE general_skill_estimates (
     total_war       DOUBLE PRECISION,
     war_per_battle  DOUBLE PRECISION,
     war_sd          DOUBLE PRECISION,           -- uncertainty on total WAR
+    war_ci_lo       DOUBLE PRECISION,           -- 95% interval on total WAR, from pooled draws
+    war_ci_hi       DOUBLE PRECISION,
+    p_above_next_rank DOUBLE PRECISION,         -- P(total WAR > that of the next-ranked general), pooled draws
 
     n_battles       INT NOT NULL,
     rank            INT,                        -- within this model run
