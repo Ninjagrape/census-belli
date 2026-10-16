@@ -510,7 +510,9 @@ def _infer_battle_types(
     for battle in load_battles_needing_type(conn):
         battle_id = battle["battle_id"]
         if battle["current_type"] != "unknown":
-            campaign = infer_campaign(battle_id, battle["name"], battle["span_days"])
+            campaign = infer_campaign(
+                battle_id, battle["name"], battle["span_days"], battle["date_precision"]
+            )
             if campaign is None:
                 continue
             decision = replace(campaign, replaces_rule_type=True)
@@ -527,6 +529,7 @@ def _infer_battle_types(
                 branches,
                 strengths,
                 battle["span_days"],
+                battle["date_precision"],
             )
         decisions.append(decision)
         counts.battles_typed += 1

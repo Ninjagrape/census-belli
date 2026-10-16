@@ -34,6 +34,7 @@ logger = structlog.get_logger()
 
 __all__ = [
     "CAMPAIGN_MIN_SPAN_DAYS",
+    "SIEGE_CAMPAIGN_MIN_SPAN_DAYS",
     "extract_categories",
     "infer_battle_type",
     "infer_campaign",
@@ -53,20 +54,34 @@ _INVOLVING_CATEGORY_RE: Final = re.compile(r"\binvolving\b", re.IGNORECASE)
 # A war or a multi-month operation is not a battle, and the model excludes it.
 # "War" is case-sensitive so "Warsaw" and "wartime" never match. A title that
 # also says battle, siege, skirmish or raid names an engagement inside a war.
-_WAR_NAME_RE: Final = re.compile(r"\bWars?\b")
+_WAR_NAME_RE: Final = re.compile(r"\b(?:Wars?|Crisis)\b")
+# "Operation Bagration", "Operation Overlord": a named military operation, not
+# an engagement, whatever its dates. Case-sensitive on the name so "Operational
+# ..." and a lowercase "operation" in running text never match.
+_OPERATION_NAME_RE: Final = re.compile(r"^\s*Operation\s+[A-Z]")
 _CAMPAIGN_WORD_RE: Final = re.compile(r"\bcampaigns?\b", re.IGNORECASE)
 _ENGAGEMENT_NAME_RE: Final = re.compile(r"\b(?:battles?|sieges?|skirmish|raid)\b", re.IGNORECASE)
 # A title that is itself an invasion or conquest names a multi-phase operation.
 _CAMPAIGN_OPERATION_NAME_RE: Final = re.compile(
     r"\b(?:invasions?|conquests?)\s+of\b", re.IGNORECASE
 )
-# Titles that name one engagement are never demoted on dates alone: Verdun
-# (300 days), Stalingrad and the Siege of Leningrad really are single "battles"
-# in the literature, and a span rule cannot tell them from an operation.
+# Titles that name one engagement are not demoted on the 180-day span: Verdun
+# (300 days) and Stalingrad really are single "battles" in the literature, and
+# a short span rule cannot tell them from an operation.
 _ENGAGEMENT_TITLE_PREFIX_RE: Final = re.compile(r"^\s*(?:battles?|sieges?)\s+of\b", re.IGNORECASE)
+_SIEGE_TITLE_PREFIX_RE: Final = re.compile(r"^\s*sieges?\s+of\b", re.IGNORECASE)
 # Longer than this, for a title that does not name an engagement, and the
 # article covers an operation, not a single engagement.
 CAMPAIGN_MIN_SPAN_DAYS: Final[int] = 180
+# A siege over two years is many engagements, so the "Siege of" exemption
+# above stops here. Two years, not one, keeps year-long sieges such as Rome
+# (537-538, 375 days) as single sieges. The Siege of Leningrad (872 days)
+# decided it: crediting a commander with a "victory" over 900 days is not a
+# battle result. The user chose this on 2026-10-16, overriding the earlier
+# Leningrad exemption.
+SIEGE_CAMPAIGN_MIN_SPAN_DAYS: Final[int] = 730
+# A date known only to the decade or coarser cannot belong to one engagement.
+_COARSE_DATE_PRECISIONS: Final[frozenset[str]] = frozenset({"decade", "century", "millennium"})
 
 # Guerrilla only from the word itself in a category, or repeated in the text.
 # Insurgency vocabulary is deliberately not used: urban set-piece battles of an
@@ -153,7 +168,10 @@ def extract_categories(wikitext: str) -> list[str]:
 
 
 def infer_campaign(
-    battle_id: int, battle_name: str, span_days: int | None = None
+    battle_id: int,
+    battle_name: str,
+    span_days: int | None = None,
+    date_precision: str | None = None,
 ) -> BattleTypeDecision | None:
     """Recognise an article that covers a war or a multi-month operation.
 
@@ -165,15 +183,29 @@ def infer_campaign(
         battle_name: The article title.
         span_days: ``date_end - date_start`` in days when both are known to the
             day, else None. Computed in SQL because a BC date cannot be held
-            by ``datetime.date``.
+            by ``datetime.date``. A negative span (end before start) is bad
+            data and meets no span rule.
+        date_precision: The battle's ``date_precision``, when known.
 
     Returns:
-        A 'campaign' decision when the title names a war or campaign without
-        also naming a battle, siege or raid, or when the dates span more than
-        ``CAMPAIGN_MIN_SPAN_DAYS``; None otherwise.
+        A 'campaign' decision when the title names a war, crisis, campaign or
+        "Operation X" without also naming a battle, siege or raid; when the
+        dates are known only to the decade or coarser; when the dates span
+        more than ``CAMPAIGN_MIN_SPAN_DAYS`` (a "Battle of"/"Siege of" title
+        is exempt) or a siege spans more than ``SIEGE_CAMPAIGN_MIN_SPAN_DAYS``;
+        None otherwise.
     """
     name = battle_name or ""
     engagement = _ENGAGEMENT_NAME_RE.search(name) is not None
+    if date_precision in _COARSE_DATE_PRECISIONS:
+        return _campaign(
+            battle_id,
+            name,
+            f"dates are only known to the {date_precision}, not one engagement",
+            0.8,
+        )
+    if not engagement and _OPERATION_NAME_RE.match(name):
+        return _campaign(battle_id, name, "title names an operation, not a battle or siege", 0.85)
     if not engagement and (_WAR_NAME_RE.search(name) or _CAMPAIGN_WORD_RE.search(name)):
         return _campaign(
             battle_id, name, "title names a war or campaign, not a battle or siege", 0.9
@@ -181,6 +213,17 @@ def infer_campaign(
     if not engagement and _CAMPAIGN_OPERATION_NAME_RE.search(name):
         return _campaign(
             battle_id, name, "title names an invasion or conquest, not a battle or siege", 0.85
+        )
+    if (
+        span_days is not None
+        and span_days > SIEGE_CAMPAIGN_MIN_SPAN_DAYS
+        and _SIEGE_TITLE_PREFIX_RE.match(name)
+    ):
+        return _campaign(
+            battle_id,
+            name,
+            f"siege spans {span_days} days (more than {SIEGE_CAMPAIGN_MIN_SPAN_DAYS})",
+            0.8,
         )
     if (
         span_days is not None
@@ -240,6 +283,7 @@ def infer_battle_type(
     troop_branches: Sequence[str],
     strength_strings: Sequence[str],
     span_days: int | None = None,
+    date_precision: str | None = None,
 ) -> BattleTypeDecision:
     """Infer a battle's type from whatever evidence extraction produced.
 
@@ -247,8 +291,9 @@ def infer_battle_type(
 
     0. **Campaign**, from a title that names a war or campaign, or dates that
        span more than 180 days (:func:`infer_campaign`; a title starting
-       "Battle of"/"Siege of" is exempt from the span rule, and an
-       "Invasion of"/"Conquest of" title is a campaign). It wins over every
+       "Battle of"/"Siege of" is exempt from the span rule, though a siege over
+       730 days is not), or dates known only to the decade or coarser. An
+       "Operation X", "Invasion of" or "Conquest of" title is a campaign. It wins over every
        other type: an article about a war is not a battle whatever its
        categories say, and the model excludes it.
     1. **Siege**, from the battle's name or a "Sieges ..." category. Neither
@@ -310,13 +355,14 @@ def infer_battle_type(
             for ship vocabulary the branch alone might not have captured.
         span_days: ``date_end - date_start`` in days when known, for the
             campaign rule.
+        date_precision: The battle's ``date_precision``, for the campaign rule.
 
     Returns:
         A decision carrying the matched evidence and a confidence that is
         highest for an explicit category, lower for an inferred branch or
         vocabulary match, and 0.0 for 'unknown'.
     """
-    campaign = infer_campaign(battle_id, battle_name, span_days)
+    campaign = infer_campaign(battle_id, battle_name, span_days, date_precision)
     if campaign is not None:
         return campaign
 

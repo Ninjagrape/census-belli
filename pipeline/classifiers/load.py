@@ -202,7 +202,8 @@ _LOAD_BATTLES_NEEDING_TYPE = text(
     SELECT b.battle_id, b.name, b.wikipedia_url, b.source_slug,
            CAST(b.battle_type AS TEXT),
            CASE WHEN b.date_precision = 'day' AND b.date_end IS NOT NULL
-                THEN b.date_end - b.date_start END AS span_days
+                THEN b.date_end - b.date_start END AS span_days,
+           b.date_precision
     FROM battles b
     WHERE b.battle_type = 'unknown'
        OR (b.battle_type <> 'campaign' AND b.battle_type_source = 'classify')
@@ -263,7 +264,7 @@ def load_battles_needing_type(conn: Any) -> list[dict[str, Any]]:
 
     Returns:
         One mapping per battle with ``battle_id``, ``name``,
-        ``wikipedia_url``, ``source_slug``, ``current_type`` and ``span_days``.
+        ``wikipedia_url``, ``source_slug``, ``current_type``, ``span_days`` and ``date_precision``.
         ``current_type`` is 'unknown' for a battle nothing has typed, or the
         type an earlier classify run chose by rule; only the campaign rule may
         change the latter (a type extract or a person set is never listed).
@@ -277,8 +278,9 @@ def load_battles_needing_type(conn: Any) -> list[dict[str, Any]]:
             "source_slug": slug,
             "current_type": str(current_type),
             "span_days": int(span) if span is not None else None,
+            "date_precision": precision,
         }
-        for bid, name, url, slug, current_type, span in conn.execute(
+        for bid, name, url, slug, current_type, span, precision in conn.execute(
             _LOAD_BATTLES_NEEDING_TYPE
         ).fetchall()
     ]

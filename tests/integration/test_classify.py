@@ -1142,7 +1142,7 @@ def test_campaign_replaces_a_rule_derived_type_but_never_an_extract_type(
     raw_root = tmp_path / "raw"
     raw_root.mkdir()
     war = _seed_battle(conn, "Six-Day War", "1967-06-05")
-    long_op = _seed_battle(conn, "Operation Longrun", "1944-01-01")
+    long_op = _seed_battle(conn, "Expedition Longrun", "1944-01-01")
     extract_typed = _seed_battle(conn, "Operation Extracted", "1944-01-01")
     for battle_id in (long_op, extract_typed):
         conn.execute(
@@ -1171,6 +1171,47 @@ def test_campaign_replaces_a_rule_derived_type_but_never_an_extract_type(
 
     classify_stage.run(spec, context=StageContext(db_conn=conn))
     assert kind(war) == "campaign"
+
+
+def test_r3_campaign_typing_rewrites_classify_typed_corpus_rows(
+    conn: Connection, tmp_path: Path
+) -> None:
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    # (name, start, end, precision, typed by, expected type)
+    cases = [
+        ("Battle of Moscow", "1941-01-01", "1942-04-20", "decade", "classify", "campaign"),
+        ("Operation Barbarossa", "1941-06-22", "1941-12-05", "day", "classify", "campaign"),
+        ("Siege of Leningrad", "1941-09-08", "1944-01-27", "day", "classify", "campaign"),
+        ("Suez Crisis", "1957-03-01", "1956-11-07", "month", "classify", "campaign"),
+        ("Siege of Tobruk", "1941-04-10", "1941-11-27", "day", "classify", "siege_offensive"),
+        ("Battle of Verdun", "1916-02-21", "1916-12-18", "day", "classify", "field"),
+        ("Battle of Moscow", "1941-01-01", "1942-04-20", "decade", "extract", "field"),
+        ("Operation Torch", "1942-11-16", "1942-11-16", "day", "extract", "field"),
+    ]
+    ids = []
+    for name, start, end, precision, source, _ in cases:
+        battle_id = _seed_battle(conn, name, start)
+        kind = "siege_offensive" if name.startswith("Siege") else "field"
+        conn.execute(
+            text(
+                "UPDATE battles SET date_end = CAST(:e AS DATE), date_precision = :p, "
+                "battle_type = CAST(:t AS battle_type), battle_type_source = :s "
+                "WHERE battle_id = :b"
+            ),
+            {"e": end, "p": precision, "t": kind, "s": source, "b": battle_id},
+        )
+        if source == "classify":
+            _set_rule_type(conn, battle_id, kind)
+        ids.append(battle_id)
+
+    classify_stage.run(_load_spec(raw_root), context=StageContext(db_conn=conn))
+
+    for battle_id, case in zip(ids, cases, strict=True):
+        assert (
+            _scalar(conn, "SELECT battle_type FROM battles WHERE battle_id = :b", b=battle_id)
+            == case[5]
+        ), case[:2]
 
 
 def test_an_unknown_war_titled_battle_becomes_a_campaign_without_an_article(
@@ -1273,10 +1314,10 @@ def test_a_rule_typed_battle_is_still_rewritten_to_campaign_after_extract_reruns
     state = _battle_state(conn, battle_id)
     assert (state.battle_type, state.battle_type_source) == ("naval", "classify")
 
-    # A "Battle of" title is exempt from the span rule, so rename to an operation.
+    # A "Battle of" title is exempt from the span rule, so rename it to a neutral title.
     conn.execute(
         text(
-            "UPDATE battles SET name = 'Operation Longfleet', date_end = date_start + 200 "
+            "UPDATE battles SET name = 'Expedition Longfleet', date_end = date_start + 200 "
             "WHERE battle_id = :b"
         ),
         {"b": battle_id},

@@ -71,7 +71,7 @@ def test_naval_vessels_among_many_counts_do_not_make_a_battle_naval() -> None:
 def test_operation_torch_is_amphibious_when_the_article_says_so_repeatedly() -> None:
     decision = infer_battle_type(
         141,
-        "Operation Torch",
+        "Landings at Torch",
         "Torch was the first major Allied amphibious operation. The amphibious landings "
         "were followed by an amphibious assault on Oran.",
         [],
@@ -156,10 +156,10 @@ def test_a_war_title_naming_a_battle_stays_an_engagement() -> None:
 
 
 def test_a_span_over_180_days_is_a_campaign_and_180_is_not() -> None:
-    assert infer_campaign(1, "Operation Example", 181) is not None
-    assert infer_campaign(1, "Operation Example", 180) is None
-    assert infer_campaign(1, "Operation Example", 91) is None
-    assert infer_campaign(1, "Operation Example", None) is None
+    assert infer_campaign(1, "Expedition Example", 181) is not None
+    assert infer_campaign(1, "Expedition Example", 180) is None
+    assert infer_campaign(1, "Expedition Example", 91) is None
+    assert infer_campaign(1, "Expedition Example", None) is None
 
 
 @pytest.mark.parametrize(
@@ -167,19 +167,107 @@ def test_a_span_over_180_days_is_a_campaign_and_180_is_not() -> None:
     [
         ("Battle of Verdun", 300),
         ("Battle of Stalingrad", 200),
-        ("Siege of Leningrad", 872),
+        ("Siege of Tobruk", 241),
+        ("Siege of Example", 365),
         ("Battles of Ypres", 400),
-        ("Sieges of Gibraltar", 1000),
     ],
 )
 def test_battle_and_siege_titles_are_exempt_from_the_span_rule(name: str, span: int) -> None:
     assert infer_campaign(1, name, span) is None
 
 
-def test_siege_of_leningrad_is_typed_a_siege_not_a_campaign() -> None:
+def test_siege_of_leningrad_is_a_campaign_because_it_lasted_over_two_years() -> None:
     decision = infer_battle_type(1, "Siege of Leningrad", "text", [], [], [], 872)
 
+    assert decision.battle_type == "campaign"
+
+
+@pytest.mark.parametrize(
+    ("name", "span"), [("Siege of Leningrad", 872), ("Sieges of Gibraltar", 1000)]
+)
+def test_a_siege_over_two_years_is_a_campaign(name: str, span: int) -> None:
+    decision = infer_campaign(1, name, span)
+
+    assert decision is not None
+    assert decision.battle_type == "campaign"
+
+
+def test_a_siege_under_two_years_is_still_a_siege() -> None:
+    decision = infer_battle_type(1, "Siege of Tobruk", "text", [], [], [], 241)
+
     assert decision.battle_type == "siege_offensive"
+
+
+def test_a_year_long_siege_such_as_rome_537_538_stays_a_siege() -> None:
+    assert infer_campaign(1, "Siege of Rome (537–538)", 375) is None
+    decision = infer_battle_type(1, "Siege of Rome (537–538)", "text", [], [], [], 375)
+
+    assert decision.battle_type == "siege_offensive"
+
+
+@pytest.mark.parametrize(
+    ("name", "span"),
+    [
+        ("Operation Bagration", 10),
+        ("Operation Barbarossa", 166),
+        ("Operation Overlord", 80),
+        ("Operation Torch", 0),
+        ("Operation Torch", None),
+    ],
+)
+def test_an_operation_title_is_a_campaign_whatever_its_span(name: str, span: int | None) -> None:
+    decision = infer_campaign(1, name, span)
+
+    assert decision is not None
+    assert decision.battle_type == "campaign"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Battle of the Operation Hills",
+        "Siege of Operation Fort",
+        "Raid on Operation Base",
+        "Operational Maneuver at Example",
+        "Co-operation of Example",
+        "Operation",
+    ],
+)
+def test_operation_look_alikes_are_not_campaigns(name: str) -> None:
+    assert infer_campaign(1, name) is None
+
+
+def test_a_crisis_title_is_a_campaign_like_a_war() -> None:
+    decision = infer_campaign(1, "Suez Crisis", None, "month")
+
+    assert decision is not None
+    assert decision.battle_type == "campaign"
+    assert infer_campaign(1, "Battle of the Crisis Pass") is None
+
+
+@pytest.mark.parametrize("precision", ["decade", "century", "millennium"])
+def test_a_coarse_date_precision_is_a_campaign_even_for_a_battle_title(precision: str) -> None:
+    decision = infer_campaign(122, "Battle of Moscow", None, precision)
+
+    assert decision is not None
+    assert decision.battle_type == "campaign"
+
+
+@pytest.mark.parametrize("precision", ["day", "month", "year", None])
+def test_finer_precisions_are_not_campaigns_on_precision_alone(precision: str | None) -> None:
+    assert infer_campaign(1, "Battle of Cannae", None, precision) is None
+
+
+def test_the_precision_reaches_infer_battle_type() -> None:
+    decision = infer_battle_type(
+        122, "Battle of Moscow", "text", [], [], [], None, date_precision="decade"
+    )
+
+    assert decision.battle_type == "campaign"
+
+
+def test_an_end_date_before_the_start_is_not_a_campaign_signal() -> None:
+    assert infer_campaign(1, "Battle of Ulm", -1) is None
 
 
 @pytest.mark.parametrize(
@@ -219,7 +307,7 @@ def test_campaign_wins_over_a_naval_category() -> None:
 def test_operation_badr_is_not_a_siege_from_a_country_grouping_category() -> None:
     decision = infer_battle_type(
         2,
-        "Operation Badr (1973)",
+        "Action at Badr (1973)",
         "Egyptian forces crossed the Suez Canal and stormed the Bar Lev Line.",
         ["Sieges involving Israel", "Battles of the Yom Kippur War"],
         ["infantry", "armour", "total"],
@@ -336,9 +424,7 @@ def test_a_sieges_involving_category_counts_when_the_lead_says_siege() -> None:
 def test_a_sieges_involving_category_is_ignored_when_the_lead_is_silent() -> None:
     article = "Forces advanced. " * 200 + "A siege followed."
 
-    decision = infer_battle_type(
-        14, "Operation Example", article, ["Sieges involving Israel"], [], []
-    )
+    decision = infer_battle_type(14, "Action Example", article, ["Sieges involving Israel"], [], [])
 
     assert decision.battle_type == "field"
 
