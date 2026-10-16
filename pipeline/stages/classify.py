@@ -488,6 +488,33 @@ def _tally_battle_type(decision: BattleTypeDecision, counts: ClassifyCounts) -> 
         counts.battle_type_unknown += 1
 
 
+def _infer_one(conn: Any, raw_root: Path, battle: dict[str, Any]) -> BattleTypeDecision:
+    """Type one battle from its article, troop evidence, title and dates.
+
+    Args:
+        conn: An open database connection.
+        raw_root: The ``data/raw`` directory, or a test fixture root.
+        battle: One row from ``load_battles_needing_type``.
+
+    Returns:
+        The decision; 'unknown' when no rule fires.
+    """
+    article_text, categories = _load_article(
+        raw_root, battle["wikipedia_url"], battle.get("source_slug")
+    )
+    branches, strengths = load_troop_evidence(conn, battle["battle_id"])
+    return infer_battle_type(
+        battle["battle_id"],
+        battle["name"],
+        article_text or None,
+        categories,
+        branches,
+        strengths,
+        battle["span_days"],
+        battle["date_precision"],
+    )
+
+
 def _infer_battle_types(
     conn: Any,
     raw_root: Path,
@@ -504,30 +531,40 @@ def _infer_battle_types(
         One decision per battle read. A battle an earlier run typed by rule is
         revisited only for the campaign rule (title and dates, no article
         read); the decision is marked ``replaces_rule_type`` and no other
-        decision is produced for it.
+        decision is produced for it. A classify-typed campaign is re-checked
+        the same way: if the rule still fires it is skipped silently, else it
+        is re-typed from scratch (``reverts_campaign``) and logged.
     """
     decisions: list[BattleTypeDecision] = []
     for battle in load_battles_needing_type(conn):
         battle_id = battle["battle_id"]
-        if battle["current_type"] != "unknown":
-            campaign = infer_campaign(battle_id, battle["name"], battle["span_days"])
+        if battle["current_type"] == "campaign":
+            if infer_campaign(
+                battle_id,
+                battle["name"],
+                battle["span_days"],
+                battle["date_precision"],
+                log=False,
+            ):
+                continue
+            decision = replace(_infer_one(conn, raw_root, battle), reverts_campaign=True)
+            logger.info(
+                "classify_campaign_reverted",
+                battle_id=battle_id,
+                battle_name=battle["name"],
+                old_type="campaign",
+                new_type=decision.battle_type,
+                reason=decision.evidence,
+            )
+        elif battle["current_type"] != "unknown":
+            campaign = infer_campaign(
+                battle_id, battle["name"], battle["span_days"], battle["date_precision"]
+            )
             if campaign is None:
                 continue
             decision = replace(campaign, replaces_rule_type=True)
         else:
-            article_text, categories = _load_article(
-                raw_root, battle["wikipedia_url"], battle.get("source_slug")
-            )
-            branches, strengths = load_troop_evidence(conn, battle_id)
-            decision = infer_battle_type(
-                battle_id,
-                battle["name"],
-                article_text or None,
-                categories,
-                branches,
-                strengths,
-                battle["span_days"],
-            )
+            decision = _infer_one(conn, raw_root, battle)
         decisions.append(decision)
         counts.battles_typed += 1
         _tally_battle_type(decision, counts)

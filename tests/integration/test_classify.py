@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import structlog.testing
 import yaml
 from sqlalchemy import Connection, Engine, text
 
@@ -1142,7 +1143,7 @@ def test_campaign_replaces_a_rule_derived_type_but_never_an_extract_type(
     raw_root = tmp_path / "raw"
     raw_root.mkdir()
     war = _seed_battle(conn, "Six-Day War", "1967-06-05")
-    long_op = _seed_battle(conn, "Operation Longrun", "1944-01-01")
+    long_op = _seed_battle(conn, "Expedition Longrun", "1944-01-01")
     extract_typed = _seed_battle(conn, "Operation Extracted", "1944-01-01")
     for battle_id in (long_op, extract_typed):
         conn.execute(
@@ -1171,6 +1172,47 @@ def test_campaign_replaces_a_rule_derived_type_but_never_an_extract_type(
 
     classify_stage.run(spec, context=StageContext(db_conn=conn))
     assert kind(war) == "campaign"
+
+
+def test_r3_campaign_typing_rewrites_classify_typed_corpus_rows(
+    conn: Connection, tmp_path: Path
+) -> None:
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    # (name, start, end, precision, typed by, expected type)
+    cases = [
+        ("Battle of Moscow", "1941-01-01", "1942-04-20", "decade", "classify", "campaign"),
+        ("Operation Barbarossa", "1941-06-22", "1941-12-05", "day", "classify", "campaign"),
+        ("Siege of Leningrad", "1941-09-08", "1944-01-27", "day", "classify", "campaign"),
+        ("Suez Crisis", "1957-03-01", "1956-11-07", "month", "classify", "campaign"),
+        ("Siege of Tobruk", "1941-04-10", "1941-11-27", "day", "classify", "siege_offensive"),
+        ("Battle of Verdun", "1916-02-21", "1916-12-18", "day", "classify", "field"),
+        ("Battle of Moscow", "1941-01-01", "1942-04-20", "decade", "extract", "field"),
+        ("Operation Torch", "1942-11-16", "1942-11-16", "day", "extract", "field"),
+    ]
+    ids = []
+    for name, start, end, precision, source, _ in cases:
+        battle_id = _seed_battle(conn, name, start)
+        kind = "siege_offensive" if name.startswith("Siege") else "field"
+        conn.execute(
+            text(
+                "UPDATE battles SET date_end = CAST(:e AS DATE), date_precision = :p, "
+                "battle_type = CAST(:t AS battle_type), battle_type_source = :s "
+                "WHERE battle_id = :b"
+            ),
+            {"e": end, "p": precision, "t": kind, "s": source, "b": battle_id},
+        )
+        if source == "classify":
+            _set_rule_type(conn, battle_id, kind)
+        ids.append(battle_id)
+
+    classify_stage.run(_load_spec(raw_root), context=StageContext(db_conn=conn))
+
+    for battle_id, case in zip(ids, cases, strict=True):
+        assert (
+            _scalar(conn, "SELECT battle_type FROM battles WHERE battle_id = :b", b=battle_id)
+            == case[5]
+        ), case[:2]
 
 
 def test_an_unknown_war_titled_battle_becomes_a_campaign_without_an_article(
@@ -1273,10 +1315,10 @@ def test_a_rule_typed_battle_is_still_rewritten_to_campaign_after_extract_reruns
     state = _battle_state(conn, battle_id)
     assert (state.battle_type, state.battle_type_source) == ("naval", "classify")
 
-    # A "Battle of" title is exempt from the span rule, so rename to an operation.
+    # A "Battle of" title is exempt from the span rule, so rename it to a neutral title.
     conn.execute(
         text(
-            "UPDATE battles SET name = 'Operation Longfleet', date_end = date_start + 200 "
+            "UPDATE battles SET name = 'Expedition Longfleet', date_end = date_start + 200 "
             "WHERE battle_id = :b"
         ),
         {"b": battle_id},
@@ -1426,3 +1468,124 @@ def test_a_fortified_row_settled_by_the_siege_rule_this_run_ends_observed(
         conn, "SELECT missingness_class FROM missing_data_log WHERE log_id = :i", i=fortified_log
     )
     assert row.missingness_class == "observed"
+
+
+def _set_campaign(conn: Connection, battle_id: int, source: str, precision: str) -> None:
+    conn.execute(
+        text(
+            "UPDATE battles SET battle_type = 'campaign', battle_type_source = :s, "
+            "date_precision = :p WHERE battle_id = :b"
+        ),
+        {"s": source, "p": precision, "b": battle_id},
+    )
+
+
+def _kind(conn: Connection, battle_id: int) -> str:
+    return _scalar(conn, "SELECT battle_type FROM battles WHERE battle_id = :b", b=battle_id)
+
+
+def test_a_classify_typed_campaign_reverts_when_its_date_precision_is_refined(
+    conn: Connection, tmp_path: Path
+) -> None:
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    siege = _seed_battle(conn, "Siege of Tobruk", "1941-04-10")
+    conn.execute(
+        text("UPDATE battles SET date_end = '1941-11-27' WHERE battle_id = :b"), {"b": siege}
+    )
+    _set_campaign(conn, siege, "classify", "decade")
+    _seed_missing(conn, siege, "battle_type", missingness_class="observed")
+    spec = _load_spec(raw_root)
+
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+    assert _kind(conn, siege) == "campaign"
+
+    conn.execute(
+        text("UPDATE battles SET date_precision = 'day' WHERE battle_id = :b"), {"b": siege}
+    )
+    with structlog.testing.capture_logs() as logs:
+        classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    assert _kind(conn, siege) == "siege_offensive"
+    reverted = [e for e in logs if e["event"] == "classify_campaign_reverted"]
+    assert len(reverted) == 1
+    assert reverted[0]["battle_id"] == siege
+    assert reverted[0]["old_type"] == "campaign"
+    assert reverted[0]["new_type"] == "siege_offensive"
+    notes = _scalar(
+        conn,
+        "SELECT notes FROM missing_data_log WHERE battle_id = :b AND field_name = 'battle_type'",
+        b=siege,
+    )
+    assert "reverted 'campaign' to 'siege_offensive'" in notes
+
+    with structlog.testing.capture_logs() as logs:
+        classify_stage.run(spec, context=StageContext(db_conn=conn))
+    assert _kind(conn, siege) == "siege_offensive"
+    assert not [e for e in logs if e["event"].startswith("classify_campaign")]
+
+
+def test_a_campaign_reverting_to_unknown_ends_in_a_never_typed_battles_row_state(
+    conn: Connection, tmp_path: Path
+) -> None:
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    reverted = _seed_battle(conn, "Battle of Nowhere", "1941-04-10")
+    untouched = _seed_battle(conn, "Battle of Elsewhere", "1941-04-10")
+    _set_campaign(conn, reverted, "classify", "day")
+    reverted_log = _seed_missing(conn, reverted, "battle_type", missingness_class="observed")
+    untouched_log = _seed_missing(conn, untouched, "battle_type")
+    spec = _load_spec(raw_root)
+
+    # The missingness pass reads before the type pass writes, so the reopened
+    # row is classified on the following run, as any unclassified row would be.
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+    classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    assert _kind(conn, reverted) == "unknown"
+    assert _kind(conn, untouched) == "unknown"
+    sql = "SELECT missingness_class FROM missing_data_log WHERE log_id = :i"
+    assert _scalar(conn, sql, i=reverted_log) == _scalar(conn, sql, i=untouched_log)
+    assert _scalar(conn, sql, i=reverted_log) != "observed"
+
+
+def test_a_classify_typed_campaign_whose_rule_still_fires_is_untouched_and_silent(
+    conn: Connection, tmp_path: Path
+) -> None:
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    war = _seed_battle(conn, "Yom Kippur War", "1973-10-06")
+    _set_campaign(conn, war, "classify", "day")
+    log_id = _seed_missing(conn, war, "battle_type", missingness_class="observed")
+    conn.execute(
+        text("UPDATE missing_data_log SET notes = 'classify: inferred' WHERE log_id = :i"),
+        {"i": log_id},
+    )
+    spec = _load_spec(raw_root)
+
+    with structlog.testing.capture_logs() as logs:
+        classify_stage.run(spec, context=StageContext(db_conn=conn))
+        classify_stage.run(spec, context=StageContext(db_conn=conn))
+
+    assert _kind(conn, war) == "campaign"
+    assert not [e for e in logs if e["event"].startswith("classify_campaign")]
+    notes = _scalar(conn, "SELECT notes FROM missing_data_log WHERE log_id = :i", i=log_id)
+    assert notes == "classify: inferred"
+
+
+def test_an_extract_typed_campaign_is_never_retyped(conn: Connection, tmp_path: Path) -> None:
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    siege = _seed_battle(conn, "Siege of Tobruk", "1941-04-10")
+    unsourced = _seed_battle(conn, "Siege of Malta", "1941-04-10")
+    _set_campaign(conn, siege, "extract", "day")
+    _set_campaign(conn, unsourced, "extract", "day")
+    conn.execute(
+        text("UPDATE battles SET battle_type_source = NULL WHERE battle_id = :b"),
+        {"b": unsourced},
+    )
+
+    classify_stage.run(_load_spec(raw_root), context=StageContext(db_conn=conn))
+
+    assert _kind(conn, siege) == "campaign"
+    assert _kind(conn, unsourced) == "campaign"

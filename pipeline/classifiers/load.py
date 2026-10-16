@@ -192,8 +192,9 @@ _LOAD_BATTLE_URLS = text("SELECT battle_id, wikipedia_url FROM battles")
 _LOAD_BATTLE_SLUGS = text("SELECT battle_id, source_slug FROM battles")
 
 # Unknown battles, plus battles an earlier classify run typed by rule
-# (battle_type_source = 'classify'). The second group is read only so the
-# campaign rule can reclassify them; nothing extract set is ever selected. The
+# (battle_type_source = 'classify'), campaigns included. The second group is
+# re-evaluated every run: the campaign rule may demote a type, and a campaign
+# whose rule no longer fires is re-typed. Nothing extract set is ever selected. The
 # source is a column, not a missing_data_log note, because extract deletes those
 # notes on every re-run. date_end - date_start is computed here because a BC date
 # cannot be held by datetime.date, and is trusted only at day precision.
@@ -202,10 +203,11 @@ _LOAD_BATTLES_NEEDING_TYPE = text(
     SELECT b.battle_id, b.name, b.wikipedia_url, b.source_slug,
            CAST(b.battle_type AS TEXT),
            CASE WHEN b.date_precision = 'day' AND b.date_end IS NOT NULL
-                THEN b.date_end - b.date_start END AS span_days
+                THEN b.date_end - b.date_start END AS span_days,
+           b.date_precision
     FROM battles b
     WHERE b.battle_type = 'unknown'
-       OR (b.battle_type <> 'campaign' AND b.battle_type_source = 'classify')
+       OR b.battle_type_source = 'classify'
     ORDER BY b.battle_id
     """
 )
@@ -263,10 +265,11 @@ def load_battles_needing_type(conn: Any) -> list[dict[str, Any]]:
 
     Returns:
         One mapping per battle with ``battle_id``, ``name``,
-        ``wikipedia_url``, ``source_slug``, ``current_type`` and ``span_days``.
+        ``wikipedia_url``, ``source_slug``, ``current_type``, ``span_days`` and ``date_precision``.
         ``current_type`` is 'unknown' for a battle nothing has typed, or the
-        type an earlier classify run chose by rule; only the campaign rule may
-        change the latter (a type extract or a person set is never listed).
+        type an earlier classify run chose by rule (possibly 'campaign'); the
+        campaign rule may demote the latter and a stale campaign reverts (a
+        type extract or a person set is never listed).
         ``span_days`` is None unless both dates are known to the day.
     """
     return [
@@ -277,8 +280,9 @@ def load_battles_needing_type(conn: Any) -> list[dict[str, Any]]:
             "source_slug": slug,
             "current_type": str(current_type),
             "span_days": int(span) if span is not None else None,
+            "date_precision": precision,
         }
-        for bid, name, url, slug, current_type, span in conn.execute(
+        for bid, name, url, slug, current_type, span, precision in conn.execute(
             _LOAD_BATTLES_NEEDING_TYPE
         ).fetchall()
     ]

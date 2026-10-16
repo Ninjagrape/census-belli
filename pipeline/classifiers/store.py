@@ -120,6 +120,33 @@ _REPLACE_RULE_TYPE_WITH_CAMPAIGN = text(
     """
 )
 
+# Undoes a classify-typed campaign no rule supports any more. The source stays
+# 'classify', so an 'unknown' result is simply retried on the next run.
+_REVERT_CAMPAIGN = text(
+    """
+    UPDATE battles SET
+        battle_type = CAST(:battle_type AS battle_type),
+        fortified   = :fortified
+    WHERE battle_id = :battle_id
+      AND battle_type = 'campaign'
+      AND battle_type_source = 'classify'
+    """
+)
+
+# A revert to 'unknown' leaves nothing observed: put the row back to
+# 'unclassified', the state extract inserts it in and classify leaves a battle it
+# cannot type in until the missingness pass classifies it. Guarded on 'observed'
+# so a row the missingness pass already classified is not reopened.
+_UNMARK_BATTLE_TYPE_OBSERVED = text(
+    """
+    UPDATE missing_data_log SET missingness_class = 'unclassified'
+    WHERE battle_id = :battle_id
+      AND field_name = 'battle_type'
+      AND side_id IS NULL
+      AND missingness_class = 'observed'
+    """
+)
+
 _NOTE_CAMPAIGN_REPLACEMENT = text(
     """
     UPDATE missing_data_log SET
@@ -239,6 +266,30 @@ def write_battle_type_decisions(conn: Any, decisions: list[BattleTypeDecision]) 
     """
     typed = 0
     for decision in decisions:
+        if decision.reverts_campaign:
+            reverted = conn.execute(
+                _REVERT_CAMPAIGN,
+                {
+                    "battle_id": decision.battle_id,
+                    "battle_type": decision.battle_type,
+                    "fortified": decision.fortified,
+                },
+            )
+            if int(reverted.rowcount or 0):
+                typed += decision.battle_type != "unknown"
+                if decision.battle_type == "unknown":
+                    conn.execute(_UNMARK_BATTLE_TYPE_OBSERVED, {"battle_id": decision.battle_id})
+                conn.execute(
+                    _NOTE_CAMPAIGN_REPLACEMENT,
+                    {
+                        "battle_id": decision.battle_id,
+                        "note": (
+                            f"{_NOTE_PREFIX}reverted 'campaign' to {decision.battle_type!r} "
+                            f"({decision.evidence})"
+                        ),
+                    },
+                )
+            continue
         if decision.replaces_rule_type:
             replaced = conn.execute(
                 _REPLACE_RULE_TYPE_WITH_CAMPAIGN, {"battle_id": decision.battle_id}

@@ -59,8 +59,10 @@ params:
 
   # battle_type notes, kept here because the enum has members this stage
   # deliberately does not produce:
-  # - campaign: a title naming a war or campaign without battle/siege/raid, or
-  #   (other than a "Battle of"/"Siege of" title) dates spanning more than 180 days at day precision. It wins over every
+  # - campaign: a title naming a war, crisis or campaign, or "Operation X",
+  #   without battle/siege/raid; dates known only to the decade or coarser;
+  #   a siege spanning more than 730 days; or (other than a "Battle of"/"Siege
+  #   of" title) dates spanning more than 180 days at day precision. It wins over every
   #   other type, and is the one type allowed to replace a rule-derived type
   #   (found through battles.battle_type_source = 'classify').
   #   The model excludes campaigns.

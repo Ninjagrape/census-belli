@@ -250,6 +250,8 @@ class BattleTypeDecision:
         replaces_rule_type: True for a campaign decision that may overwrite a
             type an earlier classify run derived by rule (never one extract
             or a person set). See ``write_battle_type_decisions``.
+        reverts_campaign: True for a non-campaign decision that replaces a
+            classify-typed 'campaign' no rule supports any more.
     """
 
     battle_id: int
@@ -258,6 +260,7 @@ class BattleTypeDecision:
     confidence: float
     fortified: bool | None = None
     replaces_rule_type: bool = False
+    reverts_campaign: bool = False
 
     def __post_init__(self) -> None:
         _check_enum(self.battle_type, BATTLE_TYPES, "battle_type")
