@@ -57,6 +57,16 @@ __all__ = [
 
 logger = structlog.get_logger()
 
+# Qids whose contradictory lifespan has been logged, so the warning appears once
+# per candidate rather than once per mention the window is asked about.
+_CONTRADICTORY_LOGGED: set[str] = set()
+
+
+def reset_contradictory_log() -> None:
+    """Forget which contradictory lifespans were logged (a test hook)."""
+    _CONTRADICTORY_LOGGED.clear()
+
+
 # Dates in this corpus are imprecise, and a commander who died in the battle
 # is the normal case rather than the exception, so the window is opened at
 # both ends by a couple of years before anything is rejected on it.
@@ -129,7 +139,12 @@ def command_window(candidate: Candidate) -> tuple[int, int] | None:
 
     Returns:
         ``(low, high)`` inclusive, or None when the candidate has no dated
-        life and the window cannot be drawn. A known birth opens the window
+        life. A contradictory life (earliest possible birth after the latest
+        possible death) gives an empty window, ``(1, 0)``, which no year falls
+        in: the candidate is rejected, not skipped. A stub with impossible
+        dates is evidence of nothing, and linking it on the name alone risks a
+        false merge. A real person rejected this way stays unlinked and
+        visible, and the overrides file can relink him. A known birth opens the window
         at birth plus :data:`MIN_COMMAND_AGE_YEARS`. A half-dated life is
         bounded at the missing end rather than left open. Wikidata carries
         many ancients with a birth and no death -- often an explicit "no
@@ -146,6 +161,26 @@ def command_window(candidate: Candidate) -> tuple[int, int] | None:
     death = candidate.death_year
     if birth is None and death is None:
         return None
+
+    # Wikidata stubs exist whose birth is after their death (born 700, died
+    # 645). Abstaining would let the name alone link such a stub for a battle
+    # in any year, a false merge nothing downstream detects, so the window is
+    # empty and the candidate is rejected for every dated battle.
+    if (
+        birth is not None
+        and death is not None
+        and birth - candidate.birth_slack > death + candidate.death_slack
+    ):
+        if candidate.qid not in _CONTRADICTORY_LOGGED:
+            _CONTRADICTORY_LOGGED.add(candidate.qid)
+            logger.warning(
+                "resolve_contradictory_lifespan",
+                qid=candidate.qid,
+                born=birth,
+                died=death,
+                action="candidate rejected for every dated battle",
+            )
+        return 1, 0
 
     # A decade- or century-precision date is read at its widest: the earliest
     # possible birth opens the window and the latest possible death closes it,
@@ -616,5 +651,8 @@ def match_against_identities(
         score=top_score,
         runner_up=scored[1][1].canonical_name if len(scored) > 1 else None,
         candidates_considered=len(scored),
+        # Carried so the per-mention lifespan guard can judge the link; a
+        # corpus identity with no Wikidata lifespan leaves it a no-op.
+        candidate=top.candidate,
         reasoning=f"matched an identity already resolved in this corpus at {top_score:.1f}",
     )

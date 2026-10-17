@@ -296,6 +296,7 @@ def _build_identities(
                 method=decision.method,
                 birth_year=decision.candidate.birth_year if decision.candidate else None,
                 death_year=decision.candidate.death_year if decision.candidate else None,
+                candidate=decision.candidate,
             )
             identities[key] = identity
         elif decision.confidence > identity.confidence:
@@ -637,12 +638,22 @@ def resolve_groups(
         {key: d for key, d in decisions.items() if d.status == "linked"},
     )
     if anchors:
-        for group in groups:
-            if decisions[group.key].status != "new":
-                continue
-            attached = match_against_identities(group, anchors, threshold=threshold, margin=margin)
-            if attached is not None:
-                decisions[group.key] = attached
+        position = 0
+        while position < len(groups):
+            group = groups[position]
+            current = decisions.get(group.key)
+            if current is not None and current.status == "new":
+                attached = match_against_identities(
+                    group, anchors, threshold=threshold, margin=margin
+                )
+                if attached is not None:
+                    decisions[group.key] = attached
+                    # The same per-mention guard as for a candidate link: the
+                    # identity's Wikidata lifespan binds the corpus match too.
+                    before = len(groups)
+                    resolver.guard(position)
+                    resolver.decide_from(before)
+            position += 1
 
     index = 0
     while index < len(groups):
@@ -671,6 +682,11 @@ def resolve_groups(
                 resolver.guard(index)
                 resolver.decide_from(before)
         index += 1
+
+    # A corpus link can detach every mention of its group, leaving a husk.
+    for group in [g for g in groups if not g.mentions]:
+        decisions.pop(group.key, None)
+    groups[:] = [g for g in groups if g.mentions]
 
     for group in groups:
         decision = decisions[group.key]
