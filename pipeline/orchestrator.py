@@ -28,6 +28,7 @@ from pipeline.config import SpecError, load_env, merge_overrides, parse_set_over
 from pipeline.config import load_agent_spec as _load_spec
 from pipeline.db import DatabaseConfigError, get_connection, get_engine
 from pipeline.logging_config import configure as configure_logging
+from pipeline.overrides import KINDS_BY_STAGE, OverrideError, load_overrides
 from pipeline.quality import (
     QualityCheckResult,
     QualityRunner,
@@ -430,6 +431,19 @@ def run_pipeline(
         if not _stage_is_built(s):
             logger.error("stage_not_built", stage=s, reason=f"no module pipeline/stages/{s}.py")
             sys.exit(1)
+
+    # A bad overrides file must fail the run before any stage writes, not
+    # when the owning stage is reached.
+    try:
+        overrides = load_overrides()
+    except OverrideError as exc:
+        logger.error("overrides_invalid", error=str(exc))
+        sys.exit(1)
+    logger.info(
+        "overrides_loaded",
+        total=len(overrides),
+        per_stage={s: len(overrides.for_stage(s)) for s in KINDS_BY_STAGE},
+    )
 
     results = []
     for stage in stages:
