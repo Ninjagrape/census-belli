@@ -313,9 +313,12 @@ def test_a_side_without_commanders_does_not_crash_classify(
     )
 
 
-def test_dry_run_writes_nothing_but_reports(conn: Connection, tmp_path: Path) -> None:
+def test_dry_run_writes_nothing_and_leaves_the_report_alone(
+    conn: Connection, tmp_path: Path
+) -> None:
     seed, spec = _seed(conn, tmp_path, _entries())
     _cache_llm_answer(conn, seed)
+    report = Path(spec["params"]["processed_root"]) / "overrides_classify.json"
     before = _commanders(conn)
 
     classify_stage.run(spec, context=StageContext(db_conn=conn, dry_run=True))
@@ -328,7 +331,38 @@ def test_dry_run_writes_nothing_but_reports(conn: Connection, tmp_path: Path) ->
         ).scalar_one()
         is None
     )
-    assert _gate(conn, spec).passed
+    assert not report.exists()
+
+    _run(conn, spec)
+    written = report.read_bytes()
+    classify_stage.run(spec, context=StageContext(db_conn=conn, dry_run=True))
+
+    assert report.read_bytes() == written
+
+
+def test_manual_type_clears_fortified_only_over_a_classify_type(
+    conn: Connection, tmp_path: Path
+) -> None:
+    seed, spec = _seed(conn, tmp_path, _TYPE_YAML.format(slug=ACTIUM_SLUG))
+    _cache_llm_answer(conn, seed)
+    read = text("SELECT fortified FROM battles WHERE battle_id = :b")
+
+    def reset(source: str) -> None:
+        conn.execute(
+            text(
+                "UPDATE battles SET battle_type = 'siege_offensive', battle_type_source = :s, "
+                "fortified = TRUE WHERE battle_id = :b"
+            ),
+            {"s": source, "b": seed["actium_id"]},
+        )
+
+    reset("extract")
+    _run(conn, spec)
+    assert conn.execute(read, {"b": seed["actium_id"]}).scalar_one() is True
+
+    reset("classify")
+    _run(conn, spec)
+    assert conn.execute(read, {"b": seed["actium_id"]}).scalar_one() is None
 
 
 def test_yaml_declares_the_overrides_check() -> None:

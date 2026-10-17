@@ -257,3 +257,24 @@ def test_rule_pass_skips_battles_a_manual_type_covers(monkeypatch: pytest.Monkey
 
     assert skipped == []
     assert counts.battles_typed == 0
+
+
+def test_multiline_source_head_is_one_line_and_idempotent_over_three_runs() -> None:
+    entry = replace(_attribution(GOOD_VALUE), source="Plutarch,\n  Life of Antony,\n\tch. 65")
+    side = _side()
+    stored = {c.bc_id: c.role_evidence for c in side.commanders}
+    seen: list[str] = []
+
+    for _ in range(3):
+        current = replace(
+            side,
+            commanders=tuple(replace(c, role_evidence=stored[c.bc_id]) for c in side.commanders),
+        )
+        match = match_attribution(entry, [current], SLUGS)
+        assert isinstance(match, ManualSide)
+        stored = dict(match.evidence)
+        seen.append(stored[101])
+
+    assert seen[0] == seen[1] == seen[2]
+    assert seen[0].startswith("[manual ov-0001] Plutarch, Life of Antony, ch. 65")
+    assert seen[0].count("[manual ") == 1

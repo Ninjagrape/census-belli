@@ -21,6 +21,16 @@ rejects, makes the entry unmatched with a reason, and nothing is written for
 it. Resolve may reset a side whenever it prunes a link, which is why this runs
 on every classify run. A side with no linked commanders is not loaded as a
 side group at all, so an entry for it is unmatched rather than a crash.
+
+**Removing an entry.** Nothing is undone. Deleting a ``battle_type`` entry
+leaves ``battle_type_source = 'manual'`` and the type in place until extract
+re-runs with its own type. Deleting an ``attribution`` entry leaves the
+``[manual ...]`` prefix on ``role_evidence``, and the side is recomputed by
+rule on the next run.
+
+**Fortified.** A manual type written over a row whose previous source was
+'classify' also clears ``fortified``, as the campaign replacement does: the
+flag was inferred for the old type and means nothing for the new one.
 """
 
 from __future__ import annotations
@@ -53,12 +63,14 @@ logger = structlog.get_logger()
 MANUAL_METHOD: Final[str] = "manual"
 _EVIDENCE_PREFIX: Final[str] = "[manual "
 _QID_RE: Final[re.Pattern[str]] = re.compile(r"^[Qq][1-9]\d*$")
+_HEAD_RE: Final[re.Pattern[str]] = re.compile(r"^\[manual ov-\d{4}\][^\n]*(?:\n|$)")
 
 _WRITE_BATTLE_TYPE = text(
     """
     UPDATE battles SET
         battle_type = CAST(:battle_type AS battle_type),
-        battle_type_source = 'manual'
+        battle_type_source = 'manual',
+        fortified = CASE WHEN battle_type_source = 'classify' THEN NULL ELSE fortified END
     WHERE battle_id = :battle_id
     """
 )
@@ -149,10 +161,10 @@ def _find_commander(key: str, commanders: Sequence[CommanderRow]) -> CommanderRo
 
 def _evidence_text(entry: OverrideEntry, existing: str) -> str:
     """Prefix the stored evidence with the override citation, replacing an older prefix."""
-    base = existing
-    if base.startswith(_EVIDENCE_PREFIX):
-        base = base.split("\n", 1)[1] if "\n" in base else ""
-    head = f"{_EVIDENCE_PREFIX}{entry.id}] {entry.source}"
+    base = _HEAD_RE.sub("", existing, count=1)
+    # One line, so the head is always exactly the first line and a re-run strips
+    # exactly what it wrote, whatever whitespace the curator's source holds.
+    head = f"{_EVIDENCE_PREFIX}{entry.id}] {' '.join(entry.source.split())}"
     return f"{head}\n{base}" if base else head
 
 

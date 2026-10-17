@@ -84,6 +84,13 @@ def stub_stage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
     monkeypatch.setattr(orchestrator, "load_agent_spec", _load)
 
+    # The stub reports from an empty file of its own, so these tests do not
+    # depend on what config/overrides.yaml holds (write() requires every entry
+    # of the stage to be reported). The gate re-hashes the file the report
+    # names, which is this one.
+    empty_overrides = tmp_path / "overrides_empty.yaml"
+    empty_overrides.write_text("version: 1\nentries: []\n", encoding="utf-8")
+
     def _install(stage: str) -> types.ModuleType:
         module = types.ModuleType(f"pipeline.stages.{stage}")
 
@@ -92,7 +99,7 @@ def stub_stage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
             # overrides_gate; the real stage writes the same file.
             if stage in KINDS_BY_STAGE:
                 root = Path((spec.get("params") or {}).get("processed_root", "data/processed"))
-                OverrideReport(stage, load_overrides(required=False)).write(root)
+                OverrideReport(stage, load_overrides(empty_overrides)).write(root)
 
         module.run = _run  # type: ignore[attr-defined]
         monkeypatch.setitem(sys.modules, f"pipeline.stages.{stage}", module)
@@ -262,3 +269,41 @@ def test_every_stage_spec_loads() -> None:
         spec = orchestrator.load_agent_spec(stage)
         assert spec["stage"] == stage
         assert "quality_checks" in spec, f"{stage} declares no quality gate"
+
+
+# ─── The stub does not depend on the real overrides file ─────────────────────
+
+
+def test_stub_gate_ignores_a_populated_default_overrides_file(
+    stub_stage, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Real entries for the stage must not break the stubbed run."""
+    populated = tmp_path / "populated.yaml"
+    populated.write_text(
+        "version: 1\n"
+        "entries:\n"
+        "  - id: ov-0001\n"
+        "    kind: battle_type\n"
+        "    target: {battle: battle_of_actium}\n"
+        "    value: field\n"
+        "    source: Plutarch\n"
+        "    note: ''\n"
+        "    reviewed: {by: lee, on: 2026-10-17}\n"
+        "  - id: ov-0002\n"
+        "    kind: outcome\n"
+        "    target: {battle: battle_of_actium}\n"
+        "    value: {Octavian: victory, Antony: defeat}\n"
+        "    source: Plutarch\n"
+        "    note: ''\n"
+        "    reviewed: {by: lee, on: 2026-10-17}\n",
+        encoding="utf-8",
+    )
+    assert len(load_overrides(populated).entries) == 2
+    monkeypatch.setattr("pipeline.overrides.DEFAULT_PATH", populated)
+    stub_stage("classify")
+
+    result = orchestrator.run_stage("classify", db_conn=ScriptedConnection([10, 2, 0]))
+
+    assert result.success is True
+    gate = [c for c in result.quality_checks if c.name == "overrides_applied"]
+    assert gate and all(c.passed for c in gate)

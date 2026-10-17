@@ -961,7 +961,10 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
     overrides_file, explicit = overrides_path(params)
     overrides = load_overrides(overrides_file, required=explicit)
     processed_root = Path(str(params.get("processed_root", PROCESSED_ROOT)))
-    clear_report("classify", processed_root)
+    # A dry run leaves the previous real run's report alone: it writes nothing
+    # else, so the report must keep describing what the database holds.
+    if not ctx.dry_run:
+        clear_report("classify", processed_root)
     report = OverrideReport("classify", overrides, limited=ctx.limit is not None)
     entries = overrides.for_stage("classify")
 
@@ -1048,7 +1051,6 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
 
     if ctx.dry_run:
         counts.terrain_set = len(terrain_by_battle)
-        report.write(processed_root)
         logger.info("classify_dry_run", **counts.as_dict())
         return None
 
