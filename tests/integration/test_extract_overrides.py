@@ -21,6 +21,9 @@ from sqlalchemy import Engine, text
 
 from pipeline.config import load_agent_spec
 from pipeline.db import DatabaseConfigError, apply_schema, database_url, get_engine
+from pipeline.extractors import BattleExtraction, BattleFacts, SideExtraction
+from pipeline.extractors.override_apply import apply_extract_overrides
+from pipeline.overrides import OverrideReport, load_overrides
 from pipeline.quality import QualityRunner
 from pipeline.stages import extract
 from pipeline.stages.base import StageContext
@@ -249,3 +252,74 @@ def test_the_overrides_gate_passes_a_clean_run_and_fails_a_rotted_entry(
 
     assert result.passed is False
     assert "ov-0009" in result.message and "battle not found" in result.message
+
+
+def _duplicate(outcomes: tuple[str, str], date_start: str) -> BattleExtraction:
+    """Build one of two records that resolve to the same ``battles`` row."""
+    return BattleExtraction(
+        slug="dup",
+        name="Battle of Dup",
+        facts=BattleFacts(name="Battle of Dup", date_start=date_start, date_precision="day"),
+        sides=[
+            SideExtraction(label="Red", outcome=outcomes[0]),
+            SideExtraction(label="Blue", outcome=outcomes[1]),
+        ],
+        n_sources=1,
+    )
+
+
+DUP_OUTCOME = _entry(5, "outcome", {"battle": "dup"}, {"Red": "defeat", "Blue": "victory"})
+DUP_DATE = _entry(
+    6, "battle_date", {"battle": "dup"}, {"start": "1650-05-05", "end": None, "precision": "day"}
+)
+
+
+@pytest.mark.parametrize("override_on", [0, 1])
+def test_an_override_survives_a_second_record_for_the_same_battle(
+    conn: Any, tmp_path: Path, override_on: int
+) -> None:
+    records = [
+        _duplicate(("victory", "defeat"), "1700-01-01"),
+        _duplicate(("indecisive", "indecisive"), "1701-02-02"),
+    ]
+    path = _write_overrides(tmp_path / "overrides.yaml", DUP_OUTCOME, DUP_DATE)
+    overrides = load_overrides(path)
+    report = OverrideReport("extract", overrides, limited=False)
+    applied = apply_extract_overrides(
+        [records[override_on]], overrides.for_stage("extract"), report
+    )
+
+    extract._attach_outcome_provenance(conn, records, applied)
+    extract._write_battles(conn, records)
+
+    sides = conn.execute(
+        text(
+            "SELECT s.side_label, s.outcome::text, src.title FROM battle_sides s "
+            "JOIN battles b USING (battle_id) "
+            "LEFT JOIN sources src ON src.source_id = s.outcome_source "
+            "WHERE b.source_slug = 'dup'"
+        )
+    ).fetchall()
+    assert {r[0]: (r[1], r[2]) for r in sides} == {
+        "Red": ("defeat", CITATION),
+        "Blue": ("victory", CITATION),
+    }
+    dates = conn.execute(
+        text("SELECT date_start::text, date_precision FROM battles WHERE source_slug = 'dup'")
+    ).one()
+    assert tuple(dates) == ("1650-05-05", "day")
+
+
+def test_a_dry_run_leaves_an_existing_report_untouched(
+    conn: Any, raw_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    overrides = _write_overrides(tmp_path / "overrides.yaml", OUTCOME)
+    processed = tmp_path / "processed"
+    processed.mkdir()
+    report_file = processed / "overrides_extract.json"
+    report_file.write_text('{"sentinel": true}', encoding="utf-8")
+    monkeypatch.setattr("pipeline.llm.offline.REQUEST_DIR", tmp_path / "llm_requests")
+
+    extract.run(_spec(raw_root, processed, overrides), StageContext(db_conn=conn, dry_run=True))
+
+    assert report_file.read_text(encoding="utf-8") == '{"sentinel": true}'

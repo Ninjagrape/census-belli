@@ -12,8 +12,12 @@ import yaml
 
 from pipeline.extractors import BattleExtraction, BattleFacts, MissingField, SideExtraction
 from pipeline.extractors.outcome import OUTCOME_STAGE, OutcomePass
-from pipeline.extractors.override_apply import apply_extract_overrides, outcome_override_slugs
-from pipeline.extractors.records import ExtractionFailure
+from pipeline.extractors.override_apply import (
+    apply_extract_overrides,
+    carries_override,
+    outcome_override_slugs,
+)
+from pipeline.extractors.records import Disagreement, ExtractionFailure
 from pipeline.llm import CallStatus, LLMRequest, LLMResponse, LLMService
 from pipeline.overrides import OverrideEntry, OverrideReport, load_overrides
 from pipeline.stages import extract
@@ -370,3 +374,108 @@ def test_an_overridden_battle_issues_no_outcome_request(tmp_path: Path) -> None:
     asked = extract.extract_battle(raw, **kwargs)
     assert len(provider.requests) == 1
     assert any(s.outcome for s in asked.sides)
+
+
+def _disputed() -> BattleExtraction:
+    battle = _battle()
+    battle.disagreements = [
+        Disagreement("victor", "France", "wikipedia", {"dbpedia": "Russia"}),
+        Disagreement("outcome_level", "victory", "wikipedia", {"dbpedia": "defeat"}),
+        Disagreement("date_start", "1812-09-08", "wikipedia", {"dbpedia": "1812-09-07"}),
+        Disagreement("wikidata_id", "Q1", "wikipedia", {"dbpedia": "Q2"}),
+    ]
+    return battle
+
+
+OUTCOME_ENTRY = _entry(
+    1, "outcome", {"battle": "borodino"}, {"French Empire": "victory", "Russian Empire": "defeat"}
+)
+DATE_ENTRY = _entry(
+    2,
+    "battle_date",
+    {"battle": "borodino"},
+    {"start": "1812-09-07", "end": None, "precision": "day"},
+)
+
+
+def test_outcome_override_drops_outcome_disagreements_only(tmp_path: Path) -> None:
+    battle = _disputed()
+
+    _apply(tmp_path, [battle], OUTCOME_ENTRY)
+
+    assert {d.field_name for d in battle.disagreements} == {"date_start", "wikidata_id"}
+    assert "victor" not in battle.review_notes
+
+
+def test_battle_date_override_drops_date_disagreements_only(tmp_path: Path) -> None:
+    battle = _disputed()
+    battle.failures = []
+
+    _apply(tmp_path, [battle], DATE_ENTRY)
+
+    assert {d.field_name for d in battle.disagreements} == {
+        "victor",
+        "outcome_level",
+        "wikidata_id",
+    }
+    assert "date_start" not in battle.review_notes
+
+
+def test_an_override_that_settles_the_only_disagreement_clears_needs_review(
+    tmp_path: Path,
+) -> None:
+    battle = _battle()
+    battle.failures = []
+    battle.disagreements = [Disagreement("victor", "France", "wikipedia", {"dbpedia": "Russia"})]
+    assert battle.needs_review
+
+    _apply(tmp_path, [battle], OUTCOME_ENTRY)
+
+    assert not battle.needs_review
+    assert battle.review_notes == ""
+
+
+def test_an_unmatched_override_keeps_its_disagreements(tmp_path: Path) -> None:
+    battle = _disputed()
+    bad = _entry(3, "outcome", {"battle": "borodino"}, {"Nobody": "victory", "Nemo": "defeat"})
+
+    _apply(tmp_path, [battle], bad)
+
+    assert len(battle.disagreements) == 4
+
+
+def test_carries_override_flags_only_applied_battles(tmp_path: Path) -> None:
+    hit, miss = _battle(), _battle("other")
+
+    _apply(tmp_path, [hit, miss], OUTCOME_ENTRY)
+
+    assert carries_override(hit) is True
+    assert carries_override(miss) is False
+
+
+class _FailingConn:
+    """A connection whose savepoint opens but whose statements fail."""
+
+    def begin_nested(self) -> Any:
+        return self
+
+    def __enter__(self) -> _FailingConn:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def execute(self, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("insert failed")
+
+
+def test_a_failed_provenance_lookup_leaves_the_source_null_and_the_outcome(
+    tmp_path: Path,
+) -> None:
+    battle = _battle()
+    applied, _ = _apply(tmp_path, [battle], OUTCOME_ENTRY)
+
+    extract._attach_outcome_provenance(_FailingConn(), [battle], applied)
+
+    assert all(s.outcome_source_id is None for s in battle.sides)
+    assert [s.outcome for s in battle.sides] == ["victory", "defeat"]

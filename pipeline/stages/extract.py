@@ -70,7 +70,11 @@ from pipeline.extractors.outcome import (
     needs_outcome_request,
     resolve_outcome,
 )
-from pipeline.extractors.override_apply import apply_extract_overrides, outcome_override_slugs
+from pipeline.extractors.override_apply import (
+    apply_extract_overrides,
+    carries_override,
+    outcome_override_slugs,
+)
 from pipeline.extractors.store import reserve_battle_id
 from pipeline.llm import LLMService
 from pipeline.overrides import (
@@ -822,9 +826,42 @@ def _attach_outcome_provenance(
         entry = outcome_entries.get(battle.slug)
         if entry is None:
             continue
-        source = manual_source_id(conn, entry)
+        source: int | None = None
+        try:
+            # A savepoint: a failed insert would otherwise abort the shared
+            # transaction and lose every battle write after it.
+            with conn.begin_nested():
+                source = manual_source_id(conn, entry)
+        except Exception as exc:
+            logger.error(
+                "extract_override_provenance_failed",
+                id=entry.id,
+                error=str(exc)[:300],
+                error_type=type(exc).__name__,
+            )
         for side in battle.sides:
             side.outcome_source_id = source
+
+
+def _write_battles(conn: Any, merged: list[BattleExtraction]) -> None:
+    """Write every merged battle, each inside its own savepoint.
+
+    Records carrying an applied override go last (stable otherwise). Two
+    records can resolve to one ``battles`` row, and the later write wins the
+    date and outcome columns, so writing the overridden record last is what
+    keeps the override's values.
+
+    Args:
+        conn: An open database connection.
+        merged: This run's battles, after the overrides were applied.
+    """
+    counts = ExtractWriteCounts()
+    cache: dict[tuple[str, str], int] = {}
+    for record in sorted(merged, key=carries_override):
+        # A row that will not go in is a data problem, not a reason to
+        # lose the rest of the run's writes; each battle has a savepoint.
+        write_battle_isolated(conn, record, counts, cache)
+    logger.info("extract_rows_written", **counts.as_dict())
 
 
 def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutcome | None:
@@ -860,7 +897,10 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
     # stale report goes first so a crash leaves nothing for the gate to accept.
     overrides_file, overrides_explicit = overrides_path(params)
     overrides = load_overrides(overrides_file, required=overrides_explicit)
-    clear_report("extract", processed_root)
+    # A dry run writes no rows, so it must not touch the report either: a fresh
+    # one would let the gate pass on writes that never happened.
+    if not ctx.dry_run:
+        clear_report("extract", processed_root)
     override_entries = overrides.for_stage("extract")
     outcome_overridden_slugs = outcome_override_slugs(override_entries)
 
@@ -936,17 +976,12 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
 
     if ctx.db_conn is not None and not ctx.dry_run:
         _attach_outcome_provenance(ctx.db_conn, merged, outcome_entries)
-        counts = ExtractWriteCounts()
-        cache: dict[tuple[str, str], int] = {}
-        for record in merged:
-            # A row that will not go in is a data problem, not a reason to
-            # lose the rest of the run's writes; each battle has a savepoint.
-            write_battle_isolated(ctx.db_conn, record, counts, cache)
-        logger.info("extract_rows_written", **counts.as_dict())
+        _write_battles(ctx.db_conn, merged)
     else:
         logger.info("extract_database_write_skipped", dry_run=ctx.dry_run)
 
-    report.write(processed_root)
+    if not ctx.dry_run:
+        report.write(processed_root)
 
     outcome: StageOutcome | None = None
     deferred = 0

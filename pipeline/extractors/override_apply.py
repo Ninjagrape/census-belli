@@ -10,6 +10,12 @@ runs this on every run, after its own logic, so a re-run never undoes it.
 An entry that cannot be applied is reported unmatched with a reason and
 changes nothing: each entry is checked in full before the first mutation.
 
+Removing a ``side_polity`` or ``battle_date`` entry does not revert the stored
+value when extract itself supplies none for that field: the database write
+COALESCEs polity and ``date_start`` (see ``store.py``), so the old value stays.
+Reverting needs a fresh extract into a clean database or a manual reset. An
+outcome entry is different, because extract owns ``outcome`` and clears it.
+
 This module is not re-exported from ``pipeline.extractors``: ``pipeline.overrides``
 imports ``pipeline.extractors.dates``, so the package importing it back would be
 a cycle.
@@ -29,6 +35,7 @@ from pipeline.overrides import OverrideEntry, OverrideReport
 __all__ = [
     "MANUAL_OUTCOME_METHOD",
     "apply_extract_overrides",
+    "carries_override",
     "outcome_override_slugs",
 ]
 
@@ -40,6 +47,15 @@ MANUAL_OUTCOME_METHOD: Final[str] = "manual"
 _OUTCOME_GAP_FIELDS: Final[frozenset[str]] = frozenset({"outcome", "outcome_level"})
 _DATE_GAP_FIELDS: Final[frozenset[str]] = frozenset({"date_start"})
 _UNPARSED_DATE_STATUS: Final[str] = "unparsed_date"
+# Disagreement.field_name values each override kind settles, so the battle
+# stops being flagged for a conflict the override resolved.
+_OUTCOME_DISAGREEMENT_FIELDS: Final[frozenset[str]] = frozenset(
+    {"victor", "outcome_level", "outcome"}
+)
+_DATE_DISAGREEMENT_FIELDS: Final[frozenset[str]] = frozenset(
+    {"date_start", "date_end", "date_precision"}
+)
+_NOTE_PREFIX: Final[str] = "override "
 _WIN_LEVELS: Final[frozenset[str]] = frozenset({"decisive_victory", "victory", "pyrrhic_victory"})
 
 
@@ -102,6 +118,9 @@ def _apply_outcome(entry: OverrideEntry, battle: BattleExtraction) -> str | None
     # An outcome gap would tell later stages the outcome is missing, and imputation
     # would then overwrite a decided one.
     battle.missing = [m for m in battle.missing if m.field_name not in _OUTCOME_GAP_FIELDS]
+    battle.disagreements = [
+        d for d in battle.disagreements if d.field_name not in _OUTCOME_DISAGREEMENT_FIELDS
+    ]
     return None
 
 
@@ -141,6 +160,9 @@ def _apply_battle_date(entry: OverrideEntry, battle: BattleExtraction) -> str | 
     battle.missing = [m for m in battle.missing if m.field_name not in _DATE_GAP_FIELDS]
     # The infobox date the parser gave up on no longer flags the battle for review.
     battle.failures = [f for f in battle.failures if f.status != _UNPARSED_DATE_STATUS]
+    battle.disagreements = [
+        d for d in battle.disagreements if d.field_name not in _DATE_DISAGREEMENT_FIELDS
+    ]
     return None
 
 
@@ -160,6 +182,19 @@ _APPLIERS: Final[dict[str, Callable[[OverrideEntry, BattleExtraction], str | Non
     "battle_date": _apply_battle_date,
     "side_polity": _apply_side_polity,
 }
+
+
+def carries_override(battle: BattleExtraction) -> bool:
+    """Report whether an override was applied to the battle this run.
+
+    Args:
+        battle: A merged battle after :func:`apply_extract_overrides`.
+
+    Returns:
+        True when an applied-override note is on the record. The note is used
+        rather than a new field so ``battles.jsonl`` keeps its schema.
+    """
+    return any(n.startswith(_NOTE_PREFIX) and " applied (" in n for n in battle.notes)
 
 
 def apply_extract_overrides(
@@ -194,7 +229,7 @@ def apply_extract_overrides(
         if reason is not None:
             report.unmatched(entry, reason)
             continue
-        target.notes.append(f"override {entry.id} applied ({entry.kind})")
+        target.notes.append(f"{_NOTE_PREFIX}{entry.id} applied ({entry.kind})")
         report.applied(entry)
         if entry.kind == "outcome":
             outcome_entries[target.slug] = entry
