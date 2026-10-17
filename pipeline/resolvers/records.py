@@ -260,6 +260,9 @@ class Identity:
     # None for a corpus-local identity: nothing in this corpus dates a person.
     birth_year: int | None = None
     death_year: int | None = None
+    # The linked Wikidata entity in full, which carries the date slacks the
+    # lifespan guard needs when a later group attaches to this identity.
+    candidate: Candidate | None = None
     era: str | None = None
     # True when any group of this identity was kept apart because the LLM
     # answered UNCERTAIN, so a Wikidata namesake of it is a known split.

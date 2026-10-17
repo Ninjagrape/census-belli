@@ -390,3 +390,82 @@ def test_a_coarse_birth_widens_the_half_dated_upper_bound_too() -> None:
 
     assert lifespan_verdict(born_only, [-300 + 100 + 100 + 2]) is True
     assert lifespan_verdict(born_only, [-300 + 100 + 100 + 3]) is False
+
+
+def _hill() -> Candidate:
+    return Candidate(
+        qid="Q358391",
+        label="Ambrose Powell Hill",
+        aliases=("A. P. Hill",),
+        birth_year=1825,
+        death_year=1865,
+    )
+
+
+def _hill_source(candidate: Candidate) -> _Source:
+    class _OnlyGettysburg(_Source):
+        def search(self, group: MentionGroup) -> list[Candidate]:
+            return list(self.candidates) if group.display_name == "Ambrose Powell Hill" else []
+
+    return _OnlyGettysburg([candidate])
+
+
+def _resolve_hill(year: int) -> tuple[list[MentionGroup], dict[str, Decision]]:
+    mentions = [
+        _mention("Ambrose Powell Hill", "Battle of Gettysburg", 1863),
+        _mention("Ambrose P. Hill", "Battle of Somewhere", year),
+    ]
+    groups = group_mentions(mentions)
+    system, template, schema = prompt_parts(load_agent_spec("resolve"))
+    decisions = resolve_groups(
+        groups,
+        _hill_source(_hill()),
+        None,
+        threshold=85.0,
+        margin=6.0,
+        counts=ResolveCounts(),
+        system=system,
+        template=template,
+        schema=schema,
+    )
+    return groups, decisions
+
+
+def test_a_corpus_identity_link_outside_the_lifespan_is_detached() -> None:
+    groups, decisions = _resolve_hill(1812)
+
+    assert _battles_of(groups, decisions, "Q358391") == {"Battle of Gettysburg"}
+    stray = [g for g in groups if any(m.battle_name == "Battle of Somewhere" for m in g.mentions)]
+    assert len(stray) == 1
+    assert decisions[stray[0].key].status == "unresolved"
+    assert decisions[stray[0].key].method == "split_unmatched"
+    assert all(g.mentions for g in groups)
+
+
+def test_a_corpus_identity_link_inside_the_lifespan_is_kept() -> None:
+    groups, decisions = _resolve_hill(1862)
+
+    assert _battles_of(groups, decisions, "Q358391") == {
+        "Battle of Gettysburg",
+        "Battle of Somewhere",
+    }
+    assert not [g for g in groups if g.split_from]
+
+
+def test_a_contradictory_lifespan_neither_rejects_nor_detaches() -> None:
+    muthanna = Candidate(qid="Q1050354", label="Al-Muthanna", birth_year=700, death_year=645)
+
+    assert lifespan_verdict(muthanna, [640]) is None
+    assert lifespan_verdict(muthanna, [650]) is None
+    assert partition_by_lifespan([_mention("Al-Muthanna", "B", 640)], muthanna) == (
+        [_mention("Al-Muthanna", "B", 640)],
+        [],
+    )
+
+
+def test_a_lifespan_contradictory_only_through_its_slack_is_still_trusted() -> None:
+    coarse = Candidate(
+        qid="Q9", label="X", birth_year=100, birth_slack=100, death_year=60, death_slack=50
+    )
+
+    assert lifespan_verdict(coarse, [90]) is True
