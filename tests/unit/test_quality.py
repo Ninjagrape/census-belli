@@ -7,6 +7,7 @@ these assertions would have passed vacuously against it except by accident.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
@@ -927,17 +928,35 @@ def test_model_gate_binding_leaves_the_model_spec_untouched() -> None:
 # ─── overrides_gate method handler ───────────────────────────────────────────
 
 
-def _overrides_report(root: Path, **fields: Any) -> None:
+def _overrides_report(root: Path, count: int = 2, **fields: Any) -> Path:
+    """Write an overrides file with ``count`` extract entries and a matching report."""
+    entries = [
+        {
+            "id": f"ov-{n:04d}",
+            "kind": "side_polity",
+            "target": {"battle": f"b{n}", "side": "s"},
+            "value": "France",
+            "source": "s",
+            "note": "",
+            "reviewed": {"by": "lee", "on": "2026-10-17"},
+        }
+        for n in range(1, count + 1)
+    ]
+    path = root / "overrides.yaml"
+    path.write_text(yaml.safe_dump({"version": 1, "entries": entries}), encoding="utf-8")
     payload = {
         "stage": "extract",
-        "file": "config/overrides.yaml",
-        "entries": 2,
-        "applied": {"outcome": 2, "battle_date": 0, "side_polity": 0},
+        "file": str(path),
+        "file_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "entries": count,
+        "entry_ids": [f"ov-{n:04d}" for n in range(1, count + 1)],
+        "applied": {"outcome": count, "battle_date": 0, "side_polity": 0},
         "unmatched": [],
         "limited": False,
         **fields,
     }
     (root / "overrides_extract.json").write_text(json.dumps(payload), encoding="utf-8")
+    return path
 
 
 def _overrides_check(root: Path) -> dict[str, Any]:
@@ -982,7 +1001,7 @@ def test_overrides_gate_fails_on_unmatched_and_lists_them(tmp_path: Path) -> Non
     unmatched = [
         {"id": f"ov-{n:04d}", "kind": "outcome", "reason": f"gone {n}"} for n in range(1, 8)
     ]
-    _overrides_report(tmp_path, unmatched=unmatched)
+    _overrides_report(tmp_path, count=7, applied={"outcome": 0}, unmatched=unmatched)
 
     result = QualityRunner(None).run_one(_overrides_check(tmp_path))
 
@@ -994,7 +1013,13 @@ def test_overrides_gate_fails_on_unmatched_and_lists_them(tmp_path: Path) -> Non
 
 def test_overrides_gate_passes_unmatched_on_a_limited_run(tmp_path: Path) -> None:
     unmatched = [{"id": "ov-0001", "kind": "outcome", "reason": "not processed"}]
-    _overrides_report(tmp_path, unmatched=unmatched, limited=True)
+    _overrides_report(
+        tmp_path,
+        count=1,
+        applied={"outcome": 0},
+        unmatched=unmatched,
+        limited=True,
+    )
 
     result = QualityRunner(None).run_one(_overrides_check(tmp_path))
 
@@ -1019,3 +1044,136 @@ def test_overrides_gate_root_follows_processed_root(tmp_path: Path) -> None:
     )
 
     assert result.passed is True
+
+
+def _gate(root: Path) -> Any:
+    return QualityRunner(None).run_one(_overrides_check(root))
+
+
+def test_overrides_gate_fails_when_the_file_changed_since_the_run(tmp_path: Path) -> None:
+    path = _overrides_report(tmp_path)
+    path.write_text(path.read_text(encoding="utf-8") + "\n# edited\n", encoding="utf-8")
+
+    result = _gate(tmp_path)
+
+    assert result.passed is False
+    assert "changed since" in result.message
+
+
+def test_overrides_gate_fails_when_the_file_vanished(tmp_path: Path) -> None:
+    _overrides_report(tmp_path).unlink()
+
+    assert _gate(tmp_path).passed is False
+
+
+def test_overrides_gate_fails_when_the_stage_ids_changed(tmp_path: Path) -> None:
+    _overrides_report(tmp_path, entry_ids=["ov-0001", "ov-0009"])
+
+    result = _gate(tmp_path)
+
+    assert result.passed is False
+    assert "entry ids changed" in result.message
+
+
+def test_overrides_gate_fails_when_the_file_is_now_invalid(tmp_path: Path) -> None:
+    path = _overrides_report(tmp_path)
+    path.write_text("version: 2\nentries: []\n", encoding="utf-8")
+    report = json.loads((tmp_path / "overrides_extract.json").read_text(encoding="utf-8"))
+    report["file_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    (tmp_path / "overrides_extract.json").write_text(json.dumps(report), encoding="utf-8")
+
+    result = _gate(tmp_path)
+
+    assert result.passed is False
+    assert "invalid" in result.message
+
+
+def test_overrides_gate_fails_on_a_count_mismatch(tmp_path: Path) -> None:
+    _overrides_report(tmp_path, applied={"outcome": 1, "battle_date": 0, "side_polity": 0})
+
+    result = _gate(tmp_path)
+
+    assert result.passed is False
+    assert "accounts for 1 of 2" in result.message
+
+
+def test_overrides_gate_counts_unmatched_toward_coverage(tmp_path: Path) -> None:
+    unmatched = [{"id": "ov-0002", "kind": "side_polity", "reason": "gone"}]
+    _overrides_report(
+        tmp_path,
+        applied={"outcome": 1, "battle_date": 0, "side_polity": 0},
+        unmatched=unmatched,
+        limited=True,
+    )
+
+    assert _gate(tmp_path).passed is True
+
+
+def test_overrides_gate_limited_run_still_checks_the_hash(tmp_path: Path) -> None:
+    path = _overrides_report(tmp_path, limited=True)
+    path.write_text("version: 1\nentries: []\n", encoding="utf-8")
+
+    assert _gate(tmp_path).passed is False
+
+
+@pytest.mark.parametrize("missing", ["unmatched", "applied", "entry_ids", "file_sha256", "file"])
+def test_overrides_gate_fails_when_a_key_is_missing(tmp_path: Path, missing: str) -> None:
+    _overrides_report(tmp_path)
+    report_path = tmp_path / "overrides_extract.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    del report[missing]
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    assert _gate(tmp_path).passed is False
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"unmatched": "none"},
+        {"applied": ["outcome"]},
+        {"applied": {"outcome": "2"}},
+        {"applied": {"outcome": True, "battle_date": 1}},
+        {"entry_ids": "ov-0001"},
+        {"entry_ids": [1, 2]},
+        {"file_sha256": 7},
+        {"file": 3},
+    ],
+)
+def test_overrides_gate_fails_on_malformed_fields(tmp_path: Path, fields: dict[str, Any]) -> None:
+    _overrides_report(tmp_path, **fields)
+
+    assert _gate(tmp_path).passed is False
+
+
+def test_overrides_gate_fails_when_the_report_is_not_a_dict(tmp_path: Path) -> None:
+    (tmp_path / "overrides_extract.json").write_text("[1, 2]", encoding="utf-8")
+
+    assert _gate(tmp_path).passed is False
+
+
+def test_overrides_gate_passes_for_an_absent_file_with_a_null_hash(tmp_path: Path) -> None:
+    _overrides_report(
+        tmp_path,
+        count=0,
+        file=str(tmp_path / "absent.yaml"),
+        file_sha256=None,
+        applied={"outcome": 0, "battle_date": 0, "side_polity": 0},
+    )
+
+    assert _gate(tmp_path).passed is True
+
+
+def test_a_real_report_round_trips_through_the_gate_and_clear_removes_it(tmp_path: Path) -> None:
+    from pipeline.overrides import OverrideReport, clear_report, load_overrides
+
+    path = _overrides_report(tmp_path)
+    loaded = load_overrides(path)
+    report = OverrideReport("extract", loaded)
+    for entry in loaded.for_stage("extract"):
+        report.applied(entry)
+    report.write(tmp_path)
+
+    assert _gate(tmp_path).passed is True
+    clear_report("extract", tmp_path)
+    assert _gate(tmp_path).passed is False

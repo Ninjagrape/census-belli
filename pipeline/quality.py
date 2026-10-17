@@ -32,6 +32,8 @@ from typing import Any, Final, Protocol, cast
 import structlog
 from sqlalchemy import text
 
+from pipeline.overrides import OverrideError, file_sha256, load_overrides
+
 logger = structlog.get_logger()
 
 
@@ -915,6 +917,29 @@ def _check_evaluation_gate(
 _MAX_UNMATCHED_SHOWN: Final[int] = 5
 
 
+def _overrides_file_problem(stage: str, report: dict[str, Any], entry_ids: list[str]) -> str:
+    """Explain why a report no longer vouches for the current overrides file.
+
+    Returns:
+        A short message, or an empty string when the file still matches.
+    """
+    file = report.get("file")
+    if not isinstance(file, str) or "file_sha256" not in report:
+        return "report does not record the overrides file hash; re-run the stage"
+    recorded = report["file_sha256"]
+    if recorded is not None and not isinstance(recorded, str):
+        return "report file_sha256 is malformed"
+    if file_sha256(Path(file)) != recorded:
+        return f"{file} changed since the {stage} stage ran; re-run it"
+    try:
+        current = sorted(e.id for e in load_overrides(Path(file)).for_stage(stage))
+    except OverrideError as exc:
+        return f"overrides file is invalid: {exc}"
+    if current != sorted(entry_ids):
+        return f"{stage} entry ids changed since the stage ran; re-run it"
+    return ""
+
+
 def _check_overrides_gate(
     name: str,
     check: dict[str, Any],
@@ -964,13 +989,27 @@ def _check_overrides_gate(
         return result(False, f"{path} is not an overrides report for stage {stage!r}.")
 
     unmatched = report.get("unmatched")
-    unmatched = unmatched if isinstance(unmatched, list) else []
+    if not isinstance(unmatched, list):
+        return result(False, "report has no unmatched list")
     applied = report.get("applied")
-    counts = (
-        ", ".join(f"{kind}={count}" for kind, count in applied.items())
-        if isinstance(applied, dict)
-        else "no counts"
-    )
+    if not isinstance(applied, dict) or not all(
+        isinstance(n, int) and not isinstance(n, bool) for n in applied.values()
+    ):
+        return result(False, "report applied counts are missing or not integers")
+    entry_ids = report.get("entry_ids")
+    if not isinstance(entry_ids, list) or not all(isinstance(i, str) for i in entry_ids):
+        return result(False, "report has no entry_ids; re-run the stage")
+    entries = report.get("entries")
+    accounted = sum(applied.values()) + len(unmatched)
+    if accounted != entries or accounted != len(entry_ids):
+        return result(
+            False,
+            f"report accounts for {accounted} of {entries} entries ({len(entry_ids)} ids)",
+        )
+    stale = _overrides_file_problem(stage, report, entry_ids)
+    if stale:
+        return result(False, stale)
+    counts = ", ".join(f"{kind}={count}" for kind, count in applied.items())
     if unmatched and report.get("limited") is not True:
         shown = "; ".join(
             f"{u.get('id')}: {u.get('reason')}"

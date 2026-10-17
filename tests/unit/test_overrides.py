@@ -19,8 +19,11 @@ from pipeline.overrides import (
     OUTCOME_LEVELS,
     OverrideError,
     OverrideReport,
+    clear_report,
+    file_sha256,
     load_overrides,
     overrides_path,
+    target_key,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -130,7 +133,21 @@ def test_empty_file_and_absent_file(tmp_path: Path) -> None:
 
 
 def test_shipped_file_is_valid() -> None:
-    assert len(load_overrides(ROOT / DEFAULT_PATH)) == 0
+    assert len(load_overrides(DEFAULT_PATH)) == 0
+
+
+def test_default_path_is_anchored_to_the_repo_not_the_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert DEFAULT_PATH == ROOT / "config" / "overrides.yaml"
+    assert len(load_overrides()) == 0
+
+
+def test_required_file_must_exist(tmp_path: Path) -> None:
+    with pytest.raises(OverrideError, match="not found"):
+        load_overrides(tmp_path / "missing.yaml", required=True)
 
 
 @pytest.mark.parametrize(
@@ -261,16 +278,20 @@ def test_same_target_in_different_kinds_is_allowed(tmp_path: Path) -> None:
 
 
 def test_overrides_path_prefers_the_spec_param(tmp_path: Path) -> None:
-    assert overrides_path({}) == DEFAULT_PATH
-    assert overrides_path({"overrides_path": None}) == DEFAULT_PATH
-    assert overrides_path({"overrides_path": str(tmp_path / "x.yaml")}) == tmp_path / "x.yaml"
+    assert overrides_path({}) == (DEFAULT_PATH, False)
+    assert overrides_path({"overrides_path": None}) == (DEFAULT_PATH, False)
+    assert overrides_path({"overrides_path": str(tmp_path / "x.yaml")}) == (
+        tmp_path / "x.yaml",
+        True,
+    )
 
 
 def test_report_shape_lists_every_kind_even_at_zero(tmp_path: Path) -> None:
     loaded = load_overrides(_write(tmp_path, _all_kinds()))
     report = OverrideReport("extract", loaded)
-    outcome, _battle_date, side_polity = loaded.for_stage("extract")
+    outcome, battle_date, side_polity = loaded.for_stage("extract")
     report.applied(outcome)
+    report.applied(battle_date)
     report.unmatched(side_polity, "no such side")
 
     path = report.write(tmp_path / "out")
@@ -280,7 +301,9 @@ def test_report_shape_lists_every_kind_even_at_zero(tmp_path: Path) -> None:
     assert payload["stage"] == "extract"
     assert payload["file"] == str(loaded.path)
     assert payload["entries"] == 3
-    assert payload["applied"] == {"outcome": 1, "battle_date": 0, "side_polity": 0}
+    assert payload["applied"] == {"outcome": 1, "battle_date": 1, "side_polity": 0}
+    assert payload["entry_ids"] == ["ov-0001", "ov-0002", "ov-0003"]
+    assert payload["file_sha256"] == file_sha256(loaded.path)
     assert payload["unmatched"] == [
         {"id": "ov-0003", "kind": "side_polity", "reason": "no such side"}
     ]
@@ -306,11 +329,9 @@ def test_orchestrator_rejects_a_bad_overrides_file_before_any_stage(
 ) -> None:
     from pipeline import orchestrator
 
-    (tmp_path / "config").mkdir()
-    (tmp_path / "config" / "overrides.yaml").write_text(
-        "version: 2\nentries: []\n", encoding="utf-8"
-    )
-    monkeypatch.chdir(tmp_path)
+    bad = tmp_path / "overrides.yaml"
+    bad.write_text("version: 2\nentries: []\n", encoding="utf-8")
+    monkeypatch.setattr("pipeline.overrides.DEFAULT_PATH", bad)
     ran: list[str] = []
     monkeypatch.setattr(orchestrator, "run_stage", lambda *a, **k: ran.append("x"))
 
@@ -319,3 +340,191 @@ def test_orchestrator_rejects_a_bad_overrides_file_before_any_stage(
 
     assert raised.value.code == 1
     assert ran == []
+
+
+# ─── Report coverage ─────────────────────────────────────────────────────────
+
+
+def test_write_names_entries_never_reported(tmp_path: Path) -> None:
+    loaded = load_overrides(_write(tmp_path, _all_kinds()))
+    report = OverrideReport("extract", loaded)
+    report.applied(loaded.for_stage("extract")[0])
+
+    with pytest.raises(ValueError, match=r"ov-0002.*ov-0003"):
+        report.write(tmp_path / "out")
+    assert not (tmp_path / "out" / "overrides_extract.json").exists()
+
+
+def test_write_names_entries_reported_twice(tmp_path: Path) -> None:
+    loaded = load_overrides(_write(tmp_path, _all_kinds()))
+    report = OverrideReport("resolve", loaded)
+    commander_link, merge = loaded.for_stage("resolve")
+    report.applied(commander_link)
+    report.applied(commander_link)
+    report.unmatched(merge, "gone")
+
+    with pytest.raises(ValueError, match="more than once.*ov-0004"):
+        report.write(tmp_path)
+
+
+def test_reporting_an_entry_of_another_stage_is_a_value_error(tmp_path: Path) -> None:
+    loaded = load_overrides(_write(tmp_path, _all_kinds()))
+    report = OverrideReport("extract", loaded)
+    foreign = loaded.for_stage("classify")[0]
+
+    with pytest.raises(ValueError, match="ov-0006.*classify"):
+        report.applied(foreign)
+    with pytest.raises(ValueError, match="ov-0006.*classify"):
+        report.unmatched(foreign, "x")
+
+
+def test_report_hash_is_null_for_an_absent_file(tmp_path: Path) -> None:
+    report = OverrideReport("classify", load_overrides(tmp_path / "absent.yaml"))
+
+    payload = json.loads(report.write(tmp_path).read_text(encoding="utf-8"))
+
+    assert payload["file_sha256"] is None
+    assert payload["entry_ids"] == []
+
+
+def test_clear_report_removes_a_stale_report(tmp_path: Path) -> None:
+    report = OverrideReport("classify", load_overrides(tmp_path / "absent.yaml"))
+    path = report.write(tmp_path)
+
+    assert clear_report("classify", tmp_path) is True
+    assert not path.exists()
+    assert clear_report("classify", tmp_path) is False
+
+
+# ─── Validation ──────────────────────────────────────────────────────────────
+
+
+def _attribution(*items: dict[str, Any]) -> dict[str, Any]:
+    return _entry(1, "attribution", {"battle": "b", "side": "s"}, list(items))
+
+
+def _person(name: str, reports_to: str | None = None) -> dict[str, Any]:
+    item: dict[str, Any] = {"general": name, "role": "subordinate", "rank": 1, "weight": 0.1}
+    if reports_to is not None:
+        item["reports_to"] = reports_to
+    return item
+
+
+def test_attribution_rejects_a_two_cycle(tmp_path: Path) -> None:
+    entry = _attribution(_person("A", "B"), _person("B", "A"))
+    _expect_error(tmp_path, [entry], "ov-0001.*cycle")
+
+
+def test_attribution_rejects_a_longer_cycle(tmp_path: Path) -> None:
+    entry = _attribution(_person("A", "B"), _person("B", "C"), _person("C", "A"), _person("D"))
+    _expect_error(tmp_path, [entry], "ov-0001.*cycle")
+
+
+def test_attribution_accepts_a_chain(tmp_path: Path) -> None:
+    entry = _attribution(_person("A"), _person("B", "A"), _person("C", "B"))
+    assert len(load_overrides(_write(tmp_path, [entry]))) == 1
+
+
+def test_attribution_generals_compare_after_strip_and_casefold(tmp_path: Path) -> None:
+    _expect_error(tmp_path, [_attribution(_person("Ney"), _person(" ney "))], "twice")
+    resolved = _attribution(_person("Ney"), _person("Soult", " NEY "))
+    assert len(load_overrides(_write(tmp_path, [resolved]))) == 1
+    _expect_error(tmp_path, [_attribution(_person("q517"), _person("Q517"))], "twice")
+
+
+def test_general_merge_rejects_a_chain(tmp_path: Path) -> None:
+    first = _entry(1, "general_merge", {"general": "Ney"}, "Q131")
+    second = _entry(2, "general_merge", {"general": "Q131"}, "Q517")
+    _expect_error(tmp_path, [first, second], "ov-0001.*itself merged by ov-0002")
+
+
+def test_general_merge_rejects_a_cycle(tmp_path: Path) -> None:
+    first = _entry(1, "general_merge", {"general": "Q1"}, "Q2")
+    second = _entry(2, "general_merge", {"general": "q2"}, "Q1")
+    _expect_error(tmp_path, [first, second], "itself merged")
+
+
+def test_general_merge_self_check_ignores_case_of_the_qid(tmp_path: Path) -> None:
+    _expect_error(
+        tmp_path, [_entry(1, "general_merge", {"general": " q1 "}, "Q1")], "ov-0001.*itself"
+    )
+
+
+def test_general_merge_to_distinct_final_qids_is_allowed(tmp_path: Path) -> None:
+    first = _entry(1, "general_merge", {"general": "Ney"}, "Q131")
+    second = _entry(2, "general_merge", {"general": "Soult"}, "Q131")
+    assert len(load_overrides(_write(tmp_path, [first, second]))) == 2
+
+
+@pytest.mark.parametrize(
+    ("index", "mutate", "match"),
+    [
+        (0, lambda e: e.update(value={"A": [1], "B": "defeat"}), "ov-0001.*outcome_level"),
+        (0, lambda e: e.update(value={"A": "victory", " A ": "defeat"}), "ov-0001.*twice"),
+        (1, lambda e: e["value"].update(precision=["day"]), "ov-0002.*precision"),
+        (5, lambda e: e.update(value=["field"]), "ov-0006.*battle_type"),
+        (6, lambda e: e["value"][0].update(role={"x": 1}), "ov-0007.*command_role"),
+        (1, lambda e: e["value"].update(start="1812-09-08", end="1812-09-07"), "ov-0002.*after"),
+        (1, lambda e: e["value"].update(start="1812-09-31", end="1812-10-01"), "ov-0002.*real"),
+    ],
+)
+def test_more_rule_violations(tmp_path: Path, index: int, mutate: Any, match: str) -> None:
+    _expect_error(tmp_path, _mutated(index, mutate), match)
+
+
+def test_battle_date_rejects_datetimes_and_passes_other_formats(tmp_path: Path) -> None:
+    path = tmp_path / "o.yaml"
+    path.write_text(
+        "version: 1\nentries:\n"
+        "- {id: ov-0001, kind: battle_date, target: {battle: b},"
+        " value: {start: 1812-09-07 10:00:00, end: null, precision: day},"
+        " source: s, note: '', reviewed: {by: lee, on: 2026-10-17}}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(OverrideError, match="ov-0001.*datetime"):
+        load_overrides(path)
+
+    free = _entry(
+        1,
+        "battle_date",
+        {"battle": "b"},
+        {"start": "c. 490 BC", "end": "1812", "precision": "year"},
+    )
+    assert load_overrides(_write(tmp_path, [free])).entries[0].value["start"] == "c. 490 BC"
+    same_day = _entry(
+        2,
+        "battle_date",
+        {"battle": "c"},
+        {"start": "1812-09-07", "end": "1812-09-07", "precision": "day"},
+    )
+    assert len(load_overrides(_write(tmp_path, [same_day]))) == 1
+
+
+def test_reviewed_rejects_both_true_and_on_keys(tmp_path: Path) -> None:
+    path = tmp_path / "o.yaml"
+    path.write_text(
+        "version: 1\nentries:\n"
+        "- {id: ov-0001, kind: battle_type, target: {battle: b}, value: field,"
+        " source: s, note: '', reviewed: {by: lee, 'on': 2026-10-17, true: 2026-10-18}}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(OverrideError, match="ov-0001.*both"):
+        load_overrides(path)
+
+
+def test_target_key_strips_casefolds_and_uppercases_general_qids(tmp_path: Path) -> None:
+    loaded = load_overrides(
+        _write(
+            tmp_path,
+            [
+                _entry(1, "side_polity", {"battle": " Borodino ", "side": "FRENCH"}, "x"),
+                _entry(2, "general_merge", {"general": " q517 "}, "Q1"),
+                _entry(3, "general_merge", {"general": " Ney "}, "Q2"),
+            ],
+        )
+    )
+    side, qid, name = loaded.entries
+
+    assert target_key(side) == ("side_polity", "borodino", "french")
+    assert target_key(qid) == ("general_merge", "Q517")
+    assert target_key(name) == ("general_merge", "ney")

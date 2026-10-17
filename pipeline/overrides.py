@@ -42,12 +42,23 @@ Targets are never database ids. Enum members are read from
 
 Every violation raises :class:`OverrideError` naming the entry id, at load
 time, before any stage writes. Two entries with the same kind and the same
-normalised target (stripped, case-folded) are a duplicate-target error.
+normalised target (see :func:`target_key`) are a duplicate-target error.
+
+Matching rule for appliers: compare a target against stage data with strip +
+casefold on slugs, side labels, mention names and canonical names, and compare
+Q-ids exactly (the loader upper-cases the Q of a Q-id given as a general key,
+so ``q517`` and ``Q517`` are one key). :func:`target_key` is that normalisation
+applied to an entry.
+
+``battle_date`` values: when ``start`` and ``end`` are both plain ``YYYY-MM-DD``
+dates the loader requires ``start <= end``. Any other text (``c. 1812``, a year
+only, BC dates) is passed through for the extract stage to parse.
 
 Public API:
 
 * :func:`load_overrides` -> :class:`OverrideSet` (``for_stage``, ``of_kind``,
-  ``len``). A missing file yields an empty set.
+  ``len``). A missing file yields an empty set unless ``required=True``.
+* :func:`target_key`: the normalised dedup and matching key of an entry.
 * :class:`OverrideEntry`: ``id, kind, stage, target, value, source, note,
   reviewed_by, reviewed_on``. ``target`` is a read-only mapping of str to str;
   ``value`` is the normalised value (for ``attribution`` every item carries
@@ -56,15 +67,21 @@ Public API:
 * :class:`OverrideReport`: per stage run, call ``applied(entry)`` or
   ``unmatched(entry, reason)`` for every entry of the stage, then
   ``write(root)`` to produce ``overrides_<stage>.json`` for the
-  ``overrides_gate`` quality check. Set ``limited=True`` for a ``--limit``
+  ``overrides_gate`` quality check. Every entry of the stage must be reported
+  exactly once or ``write`` raises. Set ``limited=True`` for a ``--limit``
   run, where unmatched entries are expected.
+* :func:`clear_report`: delete a stage's stale report; stages call it at start
+  so a crashed run leaves nothing for the gate to accept.
+* :func:`file_sha256`: the hash the report records and the gate re-checks.
 * :func:`manual_source_id`: the ``sources`` row manual provenance hangs off.
-* :func:`overrides_path`: the file a stage run reads (spec param
-  ``overrides_path`` or :data:`DEFAULT_PATH`).
+* :func:`overrides_path`: ``(path, explicit)`` for a stage run: the spec param
+  ``overrides_path`` (explicit, so pass ``required=True``) or
+  :data:`DEFAULT_PATH`.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Mapping
@@ -87,14 +104,19 @@ __all__ = [
     "OverrideError",
     "OverrideReport",
     "OverrideSet",
+    "clear_report",
+    "file_sha256",
     "load_overrides",
     "manual_source_id",
     "overrides_path",
+    "target_key",
 ]
 
 logger = structlog.get_logger()
 
-DEFAULT_PATH: Final[Path] = Path("config/overrides.yaml")
+# Anchored to the repo like the schema path, so a run from another cwd reads
+# the same file the orchestrator validated.
+DEFAULT_PATH: Final[Path] = Path(__file__).resolve().parents[1] / "config" / "overrides.yaml"
 
 KINDS_BY_STAGE: Final[dict[str, tuple[str, ...]]] = {
     "extract": ("outcome", "battle_date", "side_polity"),
@@ -127,6 +149,8 @@ _ATTRIBUTION_KEYS: Final[frozenset[str]] = frozenset(
 )
 _DATE_VALUE_KEYS: Final[frozenset[str]] = frozenset({"start", "end", "precision"})
 _MIN_OUTCOME_SIDES: Final[int] = 2
+_QID_LOOSE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[Qq][1-9]\d*$")
+_PLAIN_DATE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class OverrideError(ValueError):
@@ -235,6 +259,12 @@ def _general_key(label: str, what: str, raw: Any) -> str:
     return _non_empty_str(label, what, raw)
 
 
+def _norm_general(key: str) -> str:
+    """Comparison form of a general key: Q-ids upper-cased, names case-folded."""
+    stripped = key.strip()
+    return stripped.upper() if _QID_LOOSE_PATTERN.match(stripped) else stripped.casefold()
+
+
 def _qid(label: str, what: str, raw: Any) -> str:
     if not isinstance(raw, str) or not _QID_PATTERN.match(raw):
         raise _fail(label, f"{what} must be a Wikidata Q-id like Q517, got {raw!r}")
@@ -267,23 +297,43 @@ def _validate_outcome(label: str, raw: Any) -> dict[str, str]:
     value: dict[str, str] = {}
     for side, outcome in raw.items():
         side_label = _non_empty_str(label, "value side label", side)
-        if outcome not in OUTCOME_LEVELS:
+        if not isinstance(outcome, str) or outcome not in OUTCOME_LEVELS:
             raise _fail(label, f"outcome {outcome!r} for {side_label!r} is not an outcome_level")
+        if side_label in value:
+            raise _fail(label, f"side label {side_label!r} appears twice after stripping")
         value[side_label] = outcome
     return value
 
 
+def _battle_date_text(label: str, what: str, raw: Any) -> str | None:
+    # datetime subclasses date, so it must be refused before the date branch.
+    if isinstance(raw, datetime):
+        raise _fail(label, f"{what} must be a date, not a datetime")
+    # An unquoted 1812-09-07 arrives as a date; the extract stage wants text.
+    if isinstance(raw, date):
+        return raw.isoformat()
+    if raw is None:
+        return None
+    return _non_empty_str(label, what, raw)
+
+
 def _validate_battle_date(label: str, raw: Any) -> dict[str, str | None]:
     value = _exact_keys(label, "value", raw, _DATE_VALUE_KEYS)
-    # An unquoted 1812-09-07 arrives as a date; the extract stage wants text.
-    start = value["start"].isoformat() if isinstance(value["start"], date) else value["start"]
-    end = value["end"].isoformat() if isinstance(value["end"], date) else value["end"]
-    start = _non_empty_str(label, "value.start", start)
-    if end is not None:
-        end = _non_empty_str(label, "value.end", end)
-    if value["precision"] not in PRECISIONS:
+    start = _battle_date_text(label, "value.start", value["start"])
+    if start is None:
+        raise _fail(label, "value.start must be a non-empty string")
+    end = _battle_date_text(label, "value.end", value["end"])
+    precision = value["precision"]
+    if not isinstance(precision, str) or precision not in PRECISIONS:
         raise _fail(label, f"value.precision must be one of {sorted(PRECISIONS)}")
-    return {"start": start, "end": end, "precision": value["precision"]}
+    if end is not None and _PLAIN_DATE_PATTERN.match(start) and _PLAIN_DATE_PATTERN.match(end):
+        try:
+            ordered = date.fromisoformat(start) <= date.fromisoformat(end)
+        except ValueError as exc:
+            raise _fail(label, f"value.start/end is not a real date: {exc}") from exc
+        if not ordered:
+            raise _fail(label, f"value.start {start} is after value.end {end}")
+    return {"start": start, "end": end, "precision": precision}
 
 
 def _validate_commander_link(label: str, raw: Any) -> str:
@@ -293,7 +343,7 @@ def _validate_commander_link(label: str, raw: Any) -> str:
 
 
 def _validate_enum_value(label: str, raw: Any, members: frozenset[str], what: str) -> str:
-    if raw not in members:
+    if not isinstance(raw, str) or raw not in members:
         raise _fail(label, f"value {raw!r} is not a {what}")
     return str(raw)
 
@@ -306,7 +356,7 @@ def _validate_attribution_item(label: str, index: int, item: Any) -> dict[str, A
     missing = {"general", "role", "rank", "weight"} - set(item)
     if unknown or missing:
         raise _fail(label, f"{where} keys: unknown {sorted(unknown)}, missing {sorted(missing)}")
-    if item["role"] not in COMMAND_ROLES:
+    if not isinstance(item["role"], str) or item["role"] not in COMMAND_ROLES:
         raise _fail(label, f"{where}.role {item['role']!r} is not a command_role")
     rank = item["rank"]
     if isinstance(rank, bool) or not isinstance(rank, int) or rank < 0:
@@ -330,15 +380,28 @@ def _validate_attribution(label: str, raw: Any) -> list[dict[str, Any]]:
     if not isinstance(raw, list) or not raw:
         raise _fail(label, "value must be a non-empty list")
     items = [_validate_attribution_item(label, i, item) for i, item in enumerate(raw)]
-    generals = [item["general"] for item in items]
+    generals = [_norm_general(item["general"]) for item in items]
     if len(set(generals)) != len(generals):
         raise _fail(label, "a general appears twice in value")
+    parent_of: dict[str, str] = {}
     for item in items:
         parent = item["reports_to"]
-        if parent is not None and (parent == item["general"] or parent not in generals):
+        if parent is None:
+            continue
+        child_key, parent_key = _norm_general(item["general"]), _norm_general(parent)
+        if parent_key == child_key or parent_key not in generals:
             raise _fail(
                 label, f"{item['general']!r} reports_to {parent!r}, which is not another general"
             )
+        parent_of[child_key] = parent_key
+    for start in parent_of:
+        seen = {start}
+        node = parent_of.get(start)
+        while node is not None:
+            if node in seen:
+                raise _fail(label, f"reports_to forms a cycle through {node!r}")
+            seen.add(node)
+            node = parent_of.get(node)
     return items
 
 
@@ -353,7 +416,7 @@ def _validate_value(label: str, kind: str, target: dict[str, str], raw: Any) -> 
         return _validate_commander_link(label, raw)
     if kind == "general_merge":
         survivor = _qid(label, "value", raw)
-        if target["general"] == survivor:
+        if _norm_general(target["general"]) == _norm_general(survivor):
             raise _fail(label, "a general cannot be merged into itself")
         return survivor
     if kind == "battle_type":
@@ -365,6 +428,8 @@ def _validate_reviewed(label: str, raw: Any) -> tuple[str, str]:
     # YAML 1.1 reads an unquoted `on` key as boolean True, which is how the
     # documented `reviewed: {by: lee, on: 2026-10-17}` arrives from safe_load.
     if isinstance(raw, dict):
+        if True in raw and "on" in raw:
+            raise _fail(label, "reviewed has both a true key and 'on'")
         raw = {("on" if key is True else key): item for key, item in raw.items()}
     reviewed = _exact_keys(label, "reviewed", raw, frozenset({"by", "on"}))
     by = _non_empty_str(label, "reviewed.by", reviewed["by"])
@@ -412,23 +477,75 @@ def _validate_entry(index: int, raw: Any, seen_ids: set[str]) -> OverrideEntry:
     )
 
 
-def _target_key(entry: OverrideEntry) -> tuple[str, tuple[tuple[str, str], ...]]:
-    return entry.kind, tuple((k, v.casefold()) for k, v in sorted(entry.target.items()))
+def target_key(entry: OverrideEntry) -> tuple[str, ...]:
+    """Return the normalised key that identifies an entry's target.
+
+    It is the dedup key at load time and the form appliers should compare
+    against: strip + casefold on every target field, except that a ``general``
+    Q-id is upper-cased. The first element is the entry's kind.
+
+    Args:
+        entry: A validated override entry.
+
+    Returns:
+        ``(kind, value, ...)`` with values in sorted target-key order.
+    """
+    parts = [
+        _norm_general(value) if key == "general" else value.strip().casefold()
+        for key, value in sorted(entry.target.items())
+    ]
+    return (entry.kind, *parts)
 
 
-def load_overrides(path: Path = DEFAULT_PATH) -> OverrideSet:
+def _check_merge_graph(entries: list[OverrideEntry]) -> None:
+    """Reject merges whose survivor is itself merged away (chains and cycles)."""
+    merges = [e for e in entries if e.kind == "general_merge"]
+    sources = {_norm_general(e.target["general"]): e.id for e in merges}
+    for entry in merges:
+        onward = sources.get(_norm_general(entry.value))
+        if onward is not None:
+            raise _fail(
+                entry.id,
+                f"merge target {entry.value} is itself merged by {onward}; "
+                "point every merge at the final Q-id",
+            )
+
+
+def file_sha256(path: Path) -> str | None:
+    """Hash a file's bytes.
+
+    Args:
+        path: The file to hash.
+
+    Returns:
+        The hex SHA-256, or None when the file is absent.
+    """
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return None
+
+
+def load_overrides(path: Path | None = None, *, required: bool = False) -> OverrideSet:
     """Load and validate the overrides file.
 
     Args:
-        path: The YAML file. A missing file is an empty set.
+        path: The YAML file; None means :data:`DEFAULT_PATH`, looked up at call
+            time.
+        required: Fail on a missing file instead of returning an empty set.
+            Pass True for a path the operator named explicitly.
 
     Returns:
         The validated entries, in file order.
 
     Raises:
-        OverrideError: On any schema violation, naming the entry and problem.
+        OverrideError: On any schema violation, naming the entry and problem,
+            or when ``required`` and the file is missing.
     """
+    path = DEFAULT_PATH if path is None else path
     if not path.exists():
+        if required:
+            raise OverrideError(f"{path}: overrides file not found")
         logger.info("overrides_file_absent", path=str(path))
         return OverrideSet(path=path)
     try:
@@ -444,29 +561,59 @@ def load_overrides(path: Path = DEFAULT_PATH) -> OverrideSet:
     if not isinstance(raw_entries, list):
         raise OverrideError(f"{path}: entries must be a list")
     seen_ids: set[str] = set()
-    seen_targets: dict[tuple[str, tuple[tuple[str, str], ...]], str] = {}
+    seen_targets: dict[tuple[str, ...], str] = {}
     entries: list[OverrideEntry] = []
     for index, raw in enumerate(raw_entries):
         entry = _validate_entry(index, raw, seen_ids)
-        key = _target_key(entry)
+        key = target_key(entry)
         if key in seen_targets:
             raise _fail(entry.id, f"duplicate target, already overridden by {seen_targets[key]}")
         seen_targets[key] = entry.id
         entries.append(entry)
+    _check_merge_graph(entries)
     return OverrideSet(entries=tuple(entries), path=path)
 
 
-def overrides_path(params: dict[str, Any]) -> Path:
+def overrides_path(params: dict[str, Any]) -> tuple[Path, bool]:
     """Return the overrides file a stage run should read.
 
     Args:
         params: The stage spec's params.
 
     Returns:
-        ``params["overrides_path"]`` when set, else :data:`DEFAULT_PATH`.
+        ``(path, explicit)``: ``params["overrides_path"]`` with True when set,
+        else :data:`DEFAULT_PATH` with False. Pass ``explicit`` as ``required``
+        to :func:`load_overrides`, so a typo in the spec cannot silently load
+        nothing.
     """
     configured = params.get("overrides_path")
-    return Path(str(configured)) if configured else DEFAULT_PATH
+    if configured:
+        return Path(str(configured)), True
+    return DEFAULT_PATH, False
+
+
+def _report_file(stage: str, root: Path) -> Path:
+    return root / f"overrides_{stage}.json"
+
+
+def clear_report(stage: str, root: Path) -> bool:
+    """Delete a stage's report from an earlier run.
+
+    Stages call this first, so a run that crashes before ``write`` leaves no
+    report for the ``overrides_gate`` to accept.
+
+    Args:
+        stage: The stage name.
+        root: The directory for processed output.
+
+    Returns:
+        True if a report was deleted.
+    """
+    try:
+        _report_file(stage, root).unlink()
+    except FileNotFoundError:
+        return False
+    return True
 
 
 # ─── Reporting ───────────────────────────────────────────────────────────────
@@ -488,18 +635,34 @@ class OverrideReport:
     limited: bool = False
     _applied: dict[str, int] = field(init=False, repr=False)
     _unmatched: list[dict[str, str]] = field(init=False, repr=False, default_factory=list)
+    _reported: dict[str, int] = field(init=False, repr=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.stage not in KINDS_BY_STAGE:
             raise ValueError(f"unknown stage {self.stage!r}")
         self._applied = dict.fromkeys(KINDS_BY_STAGE[self.stage], 0)
 
+    def _count(self, entry: OverrideEntry) -> None:
+        if entry.stage != self.stage:
+            raise ValueError(f"{entry.id} belongs to stage {entry.stage!r}, not {self.stage!r}")
+        self._reported[entry.id] = self._reported.get(entry.id, 0) + 1
+
     def applied(self, entry: OverrideEntry) -> None:
-        """Record that an entry changed (or confirmed) its target."""
+        """Record that an entry changed (or confirmed) its target.
+
+        Raises:
+            ValueError: If the entry belongs to another stage.
+        """
+        self._count(entry)
         self._applied[entry.kind] += 1
 
     def unmatched(self, entry: OverrideEntry, reason: str) -> None:
-        """Record that an entry found nothing to apply to, and why."""
+        """Record that an entry found nothing to apply to, and why.
+
+        Raises:
+            ValueError: If the entry belongs to another stage.
+        """
+        self._count(entry)
         self._unmatched.append({"id": entry.id, "kind": entry.kind, "reason": reason})
 
     def write(self, root: Path) -> Path:
@@ -510,18 +673,32 @@ class OverrideReport:
 
         Returns:
             The path written.
+
+        Raises:
+            ValueError: If any of the stage's entries was reported zero times
+                or more than once; nothing is written then.
         """
+        ids = sorted(e.id for e in self.overrides.for_stage(self.stage))
+        missing = [i for i in ids if self._reported.get(i, 0) == 0]
+        repeated = [i for i in ids if self._reported.get(i, 0) > 1]
+        if missing or repeated:
+            raise ValueError(
+                f"{self.stage} override report incomplete: "
+                f"never reported {missing}, reported more than once {repeated}"
+            )
         payload = {
             "stage": self.stage,
             "file": str(self.overrides.path),
-            "entries": len(self.overrides.for_stage(self.stage)),
+            "file_sha256": file_sha256(self.overrides.path),
+            "entries": len(ids),
+            "entry_ids": ids,
             "applied": dict(self._applied),
             "unmatched": list(self._unmatched),
             "limited": self.limited,
             "written_at": datetime.now().astimezone().isoformat(),
         }
         root.mkdir(parents=True, exist_ok=True)
-        path = root / f"overrides_{self.stage}.json"
+        path = _report_file(self.stage, root)
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         logger.info(
             "overrides_applied",
