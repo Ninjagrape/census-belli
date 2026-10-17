@@ -675,6 +675,121 @@ def test_prefetched_source_serves_by_surface_form() -> None:
     assert [c.qid for c in source.search(group)] == ["Q48174"]
 
 
+def _dated_row(
+    birth: str, birth_precision: str, death: str, death_precision: str
+) -> dict[str, str]:
+    return {
+        "name": "Decebalus",
+        "person": "http://www.wikidata.org/entity/Q28928",
+        "personLabel": "Decebalus",
+        "birth": birth,
+        "birthPrecision": birth_precision,
+        "death": death,
+        "deathPrecision": death_precision,
+    }
+
+
+def test_a_century_precision_birth_keeps_its_year_and_carries_the_century_as_slack() -> None:
+    from pipeline.resolvers.candidates import _merge_rows
+
+    ((candidate, _),) = _merge_rows(
+        [_dated_row("0100-01-01T00:00:00Z", "7", "0106-01-01T00:00:00Z", "11")]
+    )
+    assert (candidate.birth_year, candidate.birth_slack) == (100, 100)
+    assert (candidate.death_year, candidate.death_slack) == (106, 0)
+
+
+def test_a_decade_is_ten_years_of_slack_and_a_year_is_none() -> None:
+    from pipeline.resolvers.candidates import _merge_rows
+
+    ((candidate, _),) = _merge_rows(
+        [_dated_row("1900-01-01T00:00:00Z", "8", "1990-01-01T00:00:00Z", "9")]
+    )
+    assert (candidate.birth_slack, candidate.death_slack) == (10, 0)
+
+
+def test_a_millennium_precision_date_is_dropped() -> None:
+    from pipeline.resolvers.candidates import _merge_rows
+
+    ((candidate, _),) = _merge_rows(
+        [_dated_row("0001-01-01T00:00:00Z", "6", "0106-01-01T00:00:00Z", "11")]
+    )
+    assert candidate.birth_year is None
+    assert candidate.death_year == 106
+
+
+def test_a_row_without_precision_is_read_as_exact_as_before() -> None:
+    from pipeline.resolvers.candidates import _merge_rows
+
+    row = _dated_row("1758-09-29T00:00:00Z", "", "1805-10-21T00:00:00Z", "")
+    del row["birthPrecision"], row["deathPrecision"]
+    ((candidate, _),) = _merge_rows([row])
+    assert (candidate.birth_year, candidate.birth_slack) == (1758, 0)
+    assert (candidate.death_year, candidate.death_slack) == (1805, 0)
+
+
+def _person_rows(*dates: tuple[str, str, str, str]) -> list[dict[str, str]]:
+    rows = []
+    for birth, birth_precision, death, death_precision in dates:
+        rows.append(_dated_row(birth, birth_precision, death, death_precision))
+    return rows
+
+
+def test_the_fold_of_several_dated_rows_does_not_depend_on_row_order() -> None:
+    from pipeline.resolvers.candidates import _merge_rows
+
+    rows = _person_rows(
+        ("1758-01-01T00:00:00Z", "9", "1805-01-01T00:00:00Z", "7"),
+        ("1750-01-01T00:00:00Z", "8", "1810-01-01T00:00:00Z", "9"),
+        ("1760-01-01T00:00:00Z", "9", "1800-01-01T00:00:00Z", "9"),
+    )
+    ((forward, _),) = _merge_rows(rows)
+    ((backward, _),) = _merge_rows(list(reversed(rows)))
+    assert forward == backward
+    assert (forward.birth_year, forward.birth_slack) == (1750, 10)
+    assert (forward.death_year, forward.death_slack) == (1805, 100)
+
+
+def test_two_births_in_one_year_at_different_precisions_take_the_century_slack() -> None:
+    from pipeline.resolvers.candidates import _merge_rows
+
+    for order in (("9", "7"), ("7", "9")):
+        rows = _person_rows(
+            *(("1758-01-01T00:00:00Z", p, "1805-01-01T00:00:00Z", "9") for p in order)
+        )
+        ((candidate, _),) = _merge_rows(rows)
+        assert (candidate.birth_year, candidate.birth_slack) == (1758, 100)
+
+
+def test_two_exact_births_in_different_years_take_the_earlier() -> None:
+    from pipeline.resolvers.candidates import _merge_rows
+
+    for order in (("1750", "1760"), ("1760", "1750")):
+        rows = _person_rows(
+            *((f"{y}-01-01T00:00:00Z", "9", "1805-01-01T00:00:00Z", "9") for y in order)
+        )
+        ((candidate, _),) = _merge_rows(rows)
+        assert candidate.birth_year == 1750
+
+
+def test_a_row_without_a_year_never_overrides_one_with_a_year() -> None:
+    from pipeline.resolvers.candidates import _merge_rows
+
+    dated = _dated_row("1758-01-01T00:00:00Z", "9", "1805-01-01T00:00:00Z", "9")
+    blank = _dated_row("", "", "", "")
+    for rows in ([dated, blank], [blank, dated]):
+        ((candidate, _),) = _merge_rows(rows)
+        assert (candidate.birth_year, candidate.death_year) == (1758, 1805)
+
+
+def test_the_person_query_asks_for_the_time_precision() -> None:
+    from pipeline.resolvers.candidates import _PERSON_QUERY
+
+    assert "wikibase:timePrecision ?birthPrecision" in _PERSON_QUERY
+    assert "wikibase:timePrecision ?deathPrecision" in _PERSON_QUERY
+    assert "wikibase:BestRank" in _PERSON_QUERY
+
+
 @sync
 async def test_fetch_candidates_folds_rows_into_one_candidate_per_person() -> None:
     # The query GROUPs by (name, person), so occupations arrive pre-joined and

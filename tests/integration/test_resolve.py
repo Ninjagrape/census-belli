@@ -599,16 +599,34 @@ def test_the_resolution_rate_gate_can_actually_fail(conn: Connection) -> None:
     assert not result.passed
 
 
-def _add_local_general(conn: Connection, name: str, lo: int | None, hi: int | None) -> None:
-    """Insert a corpus-local general (no Q-id) with an optional year range."""
+def _link_to_a_battle(conn: Connection, general_id: int) -> None:
+    """Give a general a battle_commanders row, as a live resolve link would."""
+    side = conn.execute(text("SELECT battle_id, MIN(side_id) FROM battle_sides GROUP BY 1")).first()
+    if side is None:
+        _seed_battle(conn, name="Link Battle")
+        side = conn.execute(
+            text("SELECT battle_id, MIN(side_id) FROM battle_sides GROUP BY 1")
+        ).one()
     conn.execute(
+        text("INSERT INTO battle_commanders (battle_id, side_id, general_id) VALUES (:b, :s, :g)"),
+        {"b": side[0], "s": side[1], "g": general_id},
+    )
+
+
+def _add_local_general(
+    conn: Connection, name: str, lo: int | None, hi: int | None, *, linked: bool = True
+) -> None:
+    """Insert a corpus-local general (no Q-id) with an optional year range."""
+    general_id = conn.execute(
         text(
             "INSERT INTO generals (canonical_name, years_active) VALUES "
             "(:n, CASE WHEN CAST(:lo AS INT) IS NULL THEN NULL "
-            "ELSE int4range(CAST(:lo AS INT), CAST(:hi AS INT)) END)"
+            "ELSE int4range(CAST(:lo AS INT), CAST(:hi AS INT)) END) RETURNING general_id"
         ),
         {"n": name, "lo": lo, "hi": hi},
-    )
+    ).scalar_one()
+    if linked:
+        _link_to_a_battle(conn, int(general_id))
 
 
 def test_the_duplicate_generals_gate_catches_a_split_corpus_local_person(
@@ -626,6 +644,18 @@ def test_the_duplicate_generals_gate_catches_a_split_corpus_local_person(
     assert not result.passed
 
 
+def test_the_duplicate_gates_skip_a_general_no_battle_links_any_more(conn: Connection) -> None:
+    # remove_orphan_generals keeps a general old model runs still reference.
+    # Once resolve stops linking them (Prince Henry at Prague, Decebalus) they
+    # have no battle_commanders row and must not count against the replacement.
+    _add_local_general(conn, "Karl von Wrede", 1809, 1815)
+    _add_local_general(conn, "Karl von Wrede", 1809, 1815, linked=False)
+    _add_local_general(conn, "Karl Philipp von Wrede", 1809, 1816, linked=False)
+    gates = _gates(conn)
+    assert gates["no_duplicate_generals"].actual_value == 0
+    assert gates["probable_duplicate_generals"].actual_value == 0
+
+
 def test_the_duplicate_gate_ignores_namesakes_a_century_apart(conn: Connection) -> None:
     _add_local_general(conn, "Scipio", -210, -200)
     _add_local_general(conn, "Scipio", 1805, 1815)
@@ -634,13 +664,7 @@ def test_the_duplicate_gate_ignores_namesakes_a_century_apart(conn: Connection) 
 
 def test_the_duplicate_gate_ignores_two_people_wikidata_told_apart(conn: Connection) -> None:
     for qid, lo in (("Q1", 1805), ("Q2", 1806)):
-        conn.execute(
-            text(
-                "INSERT INTO generals (canonical_name, wikidata_id, years_active) "
-                "VALUES ('Friedrich Kleist', :q, int4range(:lo, :hi))"
-            ),
-            {"q": qid, "lo": lo, "hi": lo + 5},
-        )
+        _add_linked_general(conn, "Friedrich Kleist", qid, lo, lo + 5)
     assert _gates(conn)["no_duplicate_generals"].passed
 
 
@@ -656,14 +680,15 @@ def test_the_probable_duplicate_gate_catches_one_man_in_two_spellings(
 
 
 def _add_linked_general(conn: Connection, name: str, qid: str, lo: int, hi: int) -> None:
-    """Insert a general that carries a Wikidata id."""
-    conn.execute(
+    """Insert a general that carries a Wikidata id and is linked to a battle."""
+    general_id = conn.execute(
         text(
             "INSERT INTO generals (canonical_name, wikidata_id, years_active) "
-            "VALUES (:n, :q, int4range(:lo, :hi))"
+            "VALUES (:n, :q, int4range(:lo, :hi)) RETURNING general_id"
         ),
         {"n": name, "q": qid, "lo": lo, "hi": hi},
-    )
+    ).scalar_one()
+    _link_to_a_battle(conn, int(general_id))
 
 
 def _write_uncertain_split(conn: Connection, name: str, *, uncertain: bool) -> None:
@@ -963,10 +988,12 @@ def test_a_general_in_battle_war_details_survives_the_orphan_sweep(conn: Connect
     assert _exists(conn, general_id)
 
 
-def test_an_orphan_no_longer_trips_the_duplicate_generals_gate(conn: Connection) -> None:
+def test_an_orphan_does_not_trip_the_duplicate_generals_gate(conn: Connection) -> None:
+    # The gate counts only generals a battle_commanders row links, so the orphan
+    # is invisible to it whether or not it has been removed yet.
     _add_linked_general(conn, "Georgy Zakharov", "Q222", 1900, 1950)
     _general_with_alias(conn, "Georgy Zakharov")
-    assert not _gates(conn)["no_duplicate_generals"].passed
+    assert _gates(conn)["no_duplicate_generals"].passed
 
     remove_orphan_generals(conn)
 

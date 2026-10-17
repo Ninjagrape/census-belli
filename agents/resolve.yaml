@@ -186,6 +186,13 @@ quality_checks:
     # namesake on purpose (handover 9.3, prefer a split to a merge). Such a pair
     # is counted by probable_duplicate_generals instead. Two corpus-local rows,
     # or a corpus-local row with no such note, still fail here.
+    #
+    # Only generals with at least one battle_commanders row are counted.
+    # remove_orphan_generals keeps a general that earlier model runs still
+    # reference (general_skill_estimates, battle_war_details) even after resolve
+    # stops linking them, e.g. one the lifespan gate now rejects. That row is
+    # history, not a live duplicate, and counted against its corpus-local
+    # replacement it failed the gate for a split resolve had already made.
     check: >
       SELECT COUNT(*) FROM generals a
       JOIN generals b ON a.general_id < b.general_id
@@ -196,6 +203,8 @@ quality_checks:
              'àáâãäåçèéêëìíîïñòóôõöùúûüýÿšžłø', 'aaaaaaceeeeiiiinooooouuuuyyszlo'),
              '[^a-z0-9]+', '', 'g')
       WHERE (a.wikidata_id IS NULL OR b.wikidata_id IS NULL)
+        AND EXISTS (SELECT 1 FROM battle_commanders bc WHERE bc.general_id = a.general_id)
+        AND EXISTS (SELECT 1 FROM battle_commanders bc WHERE bc.general_id = b.general_id)
         AND (a.years_active IS NULL OR b.years_active IS NULL
              OR a.years_active && b.years_active)
         AND NOT (a.wikidata_id IS NULL AND b.wikidata_id IS NOT NULL
@@ -217,16 +226,20 @@ quality_checks:
     # match" beside a Wikidata row of the same folded name), including
     # one-token names like Xanthippus that the first/last-token rule skips.
     # On the 2026-10 pilot it found five real splits and one non-person pair.
+    # Like no_duplicate_generals it counts only generals that a
+    # battle_commanders row still links: a general kept alive solely by old
+    # model-run references is not a live duplicate.
     check: >
       WITH n AS (
-        SELECT general_id, wikidata_id, years_active,
+        SELECT g.general_id, g.wikidata_id, g.years_active,
                regexp_replace(
-                 regexp_replace(translate(lower(canonical_name),
+                 regexp_replace(translate(lower(g.canonical_name),
                    'àáâãäåçèéêëìíîïñòóôõöùúûüýÿšžłø', 'aaaaaaceeeeiiiinooooouuuuyyszlo'),
                    '[^a-z0-9 ]+', '', 'g'),
                  ' +', ' ', 'g') AS nm,
-               COALESCE(notes, '') LIKE '%kept separate after an uncertain match%' AS uncertain_split
-        FROM generals
+               COALESCE(g.notes, '') LIKE '%kept separate after an uncertain match%' AS uncertain_split
+        FROM generals g
+        WHERE EXISTS (SELECT 1 FROM battle_commanders bc WHERE bc.general_id = g.general_id)
       ), k AS (
         SELECT *, split_part(nm, ' ', 1) AS first_tok,
                (regexp_split_to_array(nm, ' '))[

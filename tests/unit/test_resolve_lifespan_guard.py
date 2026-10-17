@@ -357,3 +357,36 @@ def test_a_detached_part_does_not_lend_its_surface_forms_to_the_kept_general() -
     assert detached.surface_forms == ["Gnaeus Pompeius Junior"]
     assert "Gnaeus Pompeius Junior" not in kept.surface_forms
     assert all("Gnaeus Pompeius Junior" not in identity.aliases for identity in identities)
+
+
+def test_decebalus_with_a_century_precision_birth_is_viable_for_101_and_106() -> None:
+    # Stored as born 100 at century precision; his reign was 87-106. Read as an
+    # exact 100, birth + 15 rejected both battles.
+    decebalus = Candidate(
+        qid="Q28928", label="Decebalus", birth_year=100, birth_slack=100, death_year=106
+    )
+
+    assert lifespan_verdict(decebalus, [101]) is True
+    assert lifespan_verdict(decebalus, [106]) is True
+
+
+def test_the_same_dates_read_as_exact_still_reject_the_early_battle() -> None:
+    exact = Candidate(qid="Q1", label="X", birth_year=100, death_year=106)
+
+    assert lifespan_verdict(exact, [101]) is False
+
+
+def test_a_century_precision_death_does_not_reject_a_later_battle_in_that_century() -> None:
+    azarethes = Candidate(
+        qid="Q2", label="Azarethes", birth_year=50, birth_slack=0, death_year=600, death_slack=100
+    )
+
+    assert lifespan_verdict(azarethes, [680]) is True
+    assert lifespan_verdict(azarethes, [703]) is False
+
+
+def test_a_coarse_birth_widens_the_half_dated_upper_bound_too() -> None:
+    born_only = Candidate(qid="Q3", label="X", birth_year=-300, birth_slack=100)
+
+    assert lifespan_verdict(born_only, [-300 + 100 + 100 + 2]) is True
+    assert lifespan_verdict(born_only, [-300 + 100 + 100 + 3]) is False

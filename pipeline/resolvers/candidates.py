@@ -116,7 +116,8 @@ _SPARQL_ESCAPES: Final[tuple[tuple[str, str], ...]] = (
 # from the label alone, which silently discarded every alias-matched entity:
 # Wellington and Nelson both, until 2026-09-19.
 _PERSON_QUERY: Final[str] = """
-SELECT ?name ?person ?personLabel ?personDescription ?birth ?death ?sitelinks
+SELECT ?name ?person ?personLabel ?personDescription ?birth ?birthPrecision
+       ?death ?deathPrecision ?sitelinks
        (GROUP_CONCAT(DISTINCT ?countryLabel; separator=", ") AS ?countries)
        (GROUP_CONCAT(DISTINCT ?occupationLabel; separator=", ") AS ?occupations)
        (SAMPLE(?articleUrl) AS ?article) WHERE {{
@@ -124,8 +125,18 @@ SELECT ?name ?person ?personLabel ?personDescription ?birth ?death ?sitelinks
   {match}
   ?person wdt:P31 wd:Q5 .
   OPTIONAL {{ ?person wikibase:sitelinks ?sitelinks . }}
-  OPTIONAL {{ ?person wdt:P569 ?birth . }}
-  OPTIONAL {{ ?person wdt:P570 ?death . }}
+  OPTIONAL {{
+    ?person p:P569 ?birthStatement .
+    ?birthStatement a wikibase:BestRank ;
+                    psv:P569 [ wikibase:timeValue ?birth ;
+                             wikibase:timePrecision ?birthPrecision ] .
+  }}
+  OPTIONAL {{
+    ?person p:P570 ?deathStatement .
+    ?deathStatement a wikibase:BestRank ;
+                    psv:P570 [ wikibase:timeValue ?death ;
+                             wikibase:timePrecision ?deathPrecision ] .
+  }}
   OPTIONAL {{
     ?person wdt:P27 ?country .
     ?country rdfs:label ?countryLabel .
@@ -142,7 +153,8 @@ SELECT ?name ?person ?personLabel ?personDescription ?birth ?death ?sitelinks
   }}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{languages}" . }}
 }}
-GROUP BY ?name ?person ?personLabel ?personDescription ?birth ?death ?sitelinks
+GROUP BY ?name ?person ?personLabel ?personDescription ?birth ?birthPrecision
+         ?death ?deathPrecision ?sitelinks
 LIMIT {limit}
 """
 
@@ -366,7 +378,7 @@ def _is_human(entity: dict[str, Any]) -> bool:
     return any(value.get("id") == _Q_HUMAN for value in _claim_values(entity, _P_INSTANCE_OF))
 
 
-def _claim_year(entity: dict[str, Any], prop: str) -> int | None:
+def _claim_year(entity: dict[str, Any], prop: str) -> tuple[int | None, int]:
     """Read a time-valued claim as an astronomical year.
 
     Args:
@@ -374,15 +386,17 @@ def _claim_year(entity: dict[str, Any], prop: str) -> int | None:
         prop: A time-valued property id, e.g. ``"P569"``.
 
     Returns:
-        The astronomical year, or None when the claim is absent or coarser
-        than the mapper will convert.
+        ``(year, slack)``: the astronomical year, or None when the claim is
+        absent or coarser than the mapper will convert, and how many years
+        either way a coarse (decade or century) value may be off.
     """
     for value in _claim_values(entity, prop):
         literal, _ = wikidata_time_to_date(value)
         year = astronomical_year(literal)
         if year is not None:
-            return year
-    return None
+            slack = date_slack(value.get("precision"))
+            return (year, slack) if slack is not None else (None, 0)
+    return None, 0
 
 
 def _preferred_text(block: Any) -> str:
@@ -463,14 +477,18 @@ def person_candidates(payload: dict[str, Any]) -> list[Candidate]:
             if isinstance(enwiki, dict):
                 wikipedia_url = str(enwiki.get("url") or "")
 
+        birth_year, birth_slack = _claim_year(entity, _P_BIRTH)
+        death_year, death_slack = _claim_year(entity, _P_DEATH)
         candidates.append(
             Candidate(
                 qid=qid,
                 label=label,
                 description=_preferred_text(entity.get("descriptions")),
                 aliases=tuple(aliases),
-                birth_year=_claim_year(entity, _P_BIRTH),
-                death_year=_claim_year(entity, _P_DEATH),
+                birth_year=birth_year,
+                death_year=death_year,
+                birth_slack=birth_slack,
+                death_slack=death_slack,
                 wikipedia_url=wikipedia_url,
                 sitelinks=len(sitelinks) if isinstance(sitelinks, dict) else 0,
             )
@@ -595,6 +613,38 @@ def _sparql_literals(value: str) -> tuple[str, ...]:
     return tuple(f'"{escaped}"@{tag}' for tag in _NAME_LANGUAGE_TAGS)
 
 
+# Wikidata time precision codes (Help:Dates). 9 is a whole year; a decade (8)
+# and a century (7) are stored as one year somewhere inside the period, and
+# editors disagree on which: 1801 or 1850 or 1900 all occur for the 19th
+# century, and Decebalus is stored as 100. The stored year is therefore read as
+# "within this many years of it", wide enough to cover either convention.
+# Millennium (6) and coarser says nothing a lifespan gate can use.
+_PRECISION_YEAR: Final[int] = 9
+_PRECISION_SLACK_YEARS: Final[dict[int, int]] = {8: 10, 7: 100}
+
+
+def date_slack(precision: str | int | None) -> int | None:
+    """How far a stored Wikidata year may be from the true one.
+
+    Args:
+        precision: The time precision code, or None/empty when the source did
+            not say (treated as exact, as before precision was fetched).
+
+    Returns:
+        0 for a year or finer, 10 for a decade, 100 for a century, or None
+        when the date is a millennium or coarser and must be dropped.
+    """
+    if precision is None or str(precision).strip() == "":
+        return 0
+    try:
+        code = int(str(precision).strip())
+    except ValueError:
+        return 0
+    if code >= _PRECISION_YEAR:
+        return 0
+    return _PRECISION_SLACK_YEARS.get(code)
+
+
 def _iso_to_literal(value: str) -> str:
     """Convert a SPARQL xsd:dateTime into the mapper's date literal form.
 
@@ -707,7 +757,10 @@ def _merge_rows(
     """Fold SPARQL result rows into one candidate per person.
 
     One person yields a row per country-occupation combination, so the rows
-    have to be folded rather than read one to one.
+    have to be folded rather than read one to one. Several birth or death
+    readings are folded independent of row order, to the widest one: the
+    earliest possible birth (year minus slack) and the latest possible death
+    (year plus slack), so the prompt and the lifespan gate are stable.
 
     Args:
         rows: Flattened bindings from :func:`parse_sparql_bindings`.
@@ -740,8 +793,8 @@ def _merge_rows(
             {
                 "label": row.get("personLabel", "") or qid,
                 "description": row.get("personDescription", ""),
-                "birth": astronomical_year(_iso_to_literal(row.get("birth", ""))),
-                "death": astronomical_year(_iso_to_literal(row.get("death", ""))),
+                "births": [],
+                "deaths": [],
                 "countries": [],
                 "occupations": [],
                 "article": row.get("article", ""),
@@ -749,6 +802,17 @@ def _merge_rows(
                 "names": set(),
             },
         )
+        # A person with several best-rank dates yields several rows in an
+        # endpoint-chosen order, so the readings are collected and chosen
+        # between after the fold rather than first-wins.
+        for key, date_field, precision_field in (
+            ("births", "birth", "birthPrecision"),
+            ("deaths", "death", "deathPrecision"),
+        ):
+            year = astronomical_year(_iso_to_literal(row.get(date_field, "")))
+            slack = date_slack(row.get(precision_field))
+            if year is not None and slack is not None:
+                entry[key].append((year, slack))
         # GROUP_CONCAT already collapsed these, so a row carries the whole
         # set as one comma-joined string. Its element order is the endpoint's
         # and changes between identical queries, so the fold sorts them below:
@@ -778,6 +842,8 @@ def _merge_rows(
         # downstream. Shape-matched rather than compared to this entity's own
         # id, because the point is that it is not a name.
         label = _preferred_name(str(entry["label"]), names, qid)
+        birth = min(entry["births"], key=lambda r: (r[0] - r[1], -r[1], r[0]), default=None)
+        death = max(entry["deaths"], key=lambda r: (r[0] + r[1], r[1], r[0]), default=None)
         results.append(
             (
                 Candidate(
@@ -787,8 +853,10 @@ def _merge_rows(
                     aliases=(
                         tuple(sorted(n for n in names if n != label)) if names_are_aliases else ()
                     ),
-                    birth_year=entry["birth"],
-                    death_year=entry["death"],
+                    birth_year=birth[0] if birth else None,
+                    death_year=death[0] if death else None,
+                    birth_slack=birth[1] if birth else 0,
+                    death_slack=death[1] if death else 0,
                     country=", ".join(sorted(entry["countries"])),
                     occupations=tuple(sorted(entry["occupations"])),
                     wikipedia_url=str(entry["article"]),
