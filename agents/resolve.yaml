@@ -299,6 +299,12 @@ quality_checks:
     severity: warning
     description: "Most generals should have at least one alias entry"
 
+  - name: overrides_applied
+    method: overrides_gate
+    params: {stage: resolve}
+    severity: error
+    description: Every resolve override in config/overrides.yaml matched its target (rot guard).
+
 retry_policy:
   max_stage_retries: 2
   on_failure: pause_and_alert

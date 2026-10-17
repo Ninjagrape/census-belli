@@ -35,7 +35,7 @@ import json
 import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, Final, Protocol
+from typing import Any, Final, Protocol, runtime_checkable
 
 import structlog
 
@@ -54,9 +54,11 @@ __all__ = [
     "LocalCandidateSource",
     "NullCandidateSource",
     "PrefetchedCandidateSource",
+    "QidLookupSource",
     "candidate_keys",
     "collect_query_names",
     "fetch_candidates",
+    "fetch_candidates_by_qid",
     "fetch_non_person_kinds",
     "person_candidates",
     "query_names",
@@ -286,6 +288,27 @@ class CandidateSource(Protocol):
         ...
 
 
+@runtime_checkable
+class QidLookupSource(Protocol):
+    """A candidate source that can also fetch one entity by its Q-id.
+
+    Separate from :class:`CandidateSource` because only manual overrides need
+    it: they name the entity outright, so there is no name to search for.
+    """
+
+    def candidate_by_qid(self, qid: str) -> Candidate | None:
+        """Return the human entity with this Q-id.
+
+        Args:
+            qid: An upper-case item id such as ``"Q517"``.
+
+        Returns:
+            The entity, or None when the source does not hold it or it is not
+            a human with a usable label.
+        """
+        ...
+
+
 class NullCandidateSource:
     """A source that knows nothing, for dry runs and deterministic tests."""
 
@@ -313,6 +336,17 @@ class NullCandidateSource:
 
         Args:
             group: Ignored.
+
+        Returns:
+            None.
+        """
+        return None
+
+    def candidate_by_qid(self, qid: str) -> Candidate | None:
+        """Know no entity.
+
+        Args:
+            qid: Ignored.
 
         Returns:
             None.
@@ -515,6 +549,7 @@ class LocalCandidateSource:
         """
         self.directory = directory
         self._by_key: dict[str, list[Candidate]] = {}
+        self._by_qid: dict[str, Candidate] = {}
         self._load()
 
     def _load(self) -> None:
@@ -534,6 +569,7 @@ class LocalCandidateSource:
                 continue
             for candidate in person_candidates(payload):
                 people += 1
+                self._by_qid.setdefault(candidate.qid.upper(), candidate)
                 for key in candidate_keys(candidate):
                     self._by_key.setdefault(key, []).append(candidate)
 
@@ -578,6 +614,17 @@ class LocalCandidateSource:
             None.
         """
         return None
+
+    def candidate_by_qid(self, qid: str) -> Candidate | None:
+        """Look an entity up by its item id.
+
+        Args:
+            qid: An upper-case item id.
+
+        Returns:
+            The indexed human entity, or None.
+        """
+        return self._by_qid.get(qid.upper())
 
 
 def _escape_sparql(value: str) -> str:
@@ -1057,6 +1104,61 @@ async def fetch_candidates(
     return by_name
 
 
+async def fetch_candidates_by_qid(
+    fetcher: Fetcher,
+    qids: Sequence[str],
+    *,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> dict[str, Candidate]:
+    """Fetch human entities by item id, for manual overrides.
+
+    The same query and row folding as :func:`fetch_candidates`, with the item
+    bound directly instead of matched through a label, so a link an editor
+    named outright gets exactly the entity data a searched one would.
+
+    Args:
+        fetcher: A configured fetcher, supplying rate limiting and retries.
+        qids: Upper-case item ids.
+        batch_size: Ids per query.
+
+    Returns:
+        Each id the endpoint returned a human with a real label for. An id that
+        is absent, not a human, or whose label the service could not resolve
+        is left out, and the caller reports it rather than inventing a person.
+        A failed batch is logged and skipped.
+    """
+    found: dict[str, Candidate] = {}
+    size = max(1, batch_size)
+    wanted = list(dict.fromkeys(q.upper() for q in qids))
+
+    for start in range(0, len(wanted), size):
+        batch = wanted[start : start + size]
+        # ?name is selected by the shared query; an empty literal keeps the
+        # template intact and is dropped by _merge_rows as no matched name.
+        query = _PERSON_QUERY.format(
+            names='""',
+            match="VALUES ?person { " + " ".join(f"wd:{q}" for q in batch) + " }",
+            languages=",".join(_NAME_LANGUAGE_TAGS),
+            limit=_QUERY_ROW_LIMIT,
+        )
+        result = await run_query(fetcher, query)
+        if not result.ok or not result.text:
+            logger.warning(
+                "sparql_qid_batch_failed", ids=len(batch), status=result.status, error=result.error
+            )
+            continue
+        for candidate, _ in _merge_rows(
+            parse_sparql_bindings(result.text), names_are_aliases=False
+        ):
+            if _looks_like_qid(candidate.label):
+                logger.warning("sparql_qid_entity_has_no_label", qid=candidate.qid)
+                continue
+            found[candidate.qid.upper()] = candidate
+
+    logger.info("sparql_qid_prefetch_complete", asked=len(wanted), found=len(found))
+    return found
+
+
 # Wikidata classes that are about the *name*, not about a thing the name denotes.
 _NAME_LIKE_CLASS: Final[re.Pattern[str]] = re.compile(
     r"name|nomen|disambiguation|taxon|asteroid|article|deity|demigod|mytholog|fictional",
@@ -1150,6 +1252,33 @@ class PrefetchedCandidateSource:
         self._by_name = by_name
         self._limit = max(1, max_names_per_group)
         self._non_person = non_person or {}
+        self._by_qid: dict[str, Candidate] = {}
+
+    def add_by_qid(self, found: dict[str, Candidate]) -> None:
+        """Record entities fetched by item id, from :func:`fetch_candidates_by_qid`.
+
+        Args:
+            found: Item id to entity.
+        """
+        self._by_qid.update({qid.upper(): c for qid, c in found.items()})
+
+    def candidate_by_qid(self, qid: str) -> Candidate | None:
+        """Return an entity fetched by item id, or one a name lookup found.
+
+        Args:
+            qid: An upper-case item id.
+
+        Returns:
+            The entity, or None when neither lookup returned it.
+        """
+        known = self._by_qid.get(qid.upper())
+        if known is not None:
+            return known
+        for found in self._by_name.values():
+            for candidate in found:
+                if candidate.qid.upper() == qid.upper():
+                    return candidate
+        return None
 
     def extend(self, extra: dict[str, list[Candidate]]) -> None:
         """Add candidates from a second lookup, keeping the first one's order.
