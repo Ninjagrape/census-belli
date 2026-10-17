@@ -25,6 +25,7 @@ from pipeline.resolvers import (
     group_mentions,
     lifespan_verdict,
     partition_by_lifespan,
+    reset_contradictory_log,
 )
 from pipeline.resolvers.disambiguate import prompt_parts
 from pipeline.resolvers.records import BattleContext
@@ -452,15 +453,69 @@ def test_a_corpus_identity_link_inside_the_lifespan_is_kept() -> None:
     assert not [g for g in groups if g.split_from]
 
 
-def test_a_contradictory_lifespan_neither_rejects_nor_detaches() -> None:
+@pytest.fixture(autouse=True)
+def _fresh_contradictory_log() -> None:
+    reset_contradictory_log()
+
+
+def test_a_contradictory_lifespan_rejects_and_detaches_dated_mentions() -> None:
     muthanna = Candidate(qid="Q1050354", label="Al-Muthanna", birth_year=700, death_year=645)
 
-    assert lifespan_verdict(muthanna, [640]) is None
-    assert lifespan_verdict(muthanna, [650]) is None
-    assert partition_by_lifespan([_mention("Al-Muthanna", "B", 640)], muthanna) == (
-        [_mention("Al-Muthanna", "B", 640)],
-        [],
+    assert lifespan_verdict(muthanna, [640]) is False
+    assert lifespan_verdict(muthanna, [650]) is False
+    assert lifespan_verdict(muthanna, []) is None
+    kept, detached = partition_by_lifespan(
+        [_mention("Al-Muthanna", "B", 640), _mention("Al-Muthanna", "C", None)], muthanna
     )
+    assert [m.battle_name for m in detached] == ["B"]
+    assert [m.battle_name for m in kept] == ["C"]
+
+
+def test_a_contradictory_stub_that_is_the_only_exact_candidate_is_not_linked() -> None:
+    stub = Candidate(qid="Q1050354", label="Al-Muthanna", birth_year=700, death_year=645)
+
+    groups, decisions = _resolve([_mention("Al-Muthanna", "Battle of the Bridge", 634)], [stub])
+
+    decision = decisions[groups[0].key]
+    assert decision.method != "exact_wikidata"
+    assert decision.qid is None
+    assert decision.status in ("new", "unresolved")
+
+
+def test_a_contradictory_stub_beside_a_dateless_namesake_leaves_the_namesake_linked() -> None:
+    stub = Candidate(qid="Q1050354", label="Al-Muthanna", birth_year=700, death_year=645)
+    namesake = Candidate(qid="Q2", label="Al-Muthanna")
+
+    groups, decisions = _resolve(
+        [_mention("Al-Muthanna", "Battle of the Bridge", 634)], [stub, namesake]
+    )
+
+    decision = decisions[groups[0].key]
+    assert decision.status == "linked"
+    assert decision.method == "exact_wikidata"
+    assert decision.qid == "Q2"
+
+
+def test_a_mention_linked_to_a_contradictory_identity_is_detached() -> None:
+    # The corpus-identity route links without a viability check and relies on
+    # the guard alone, so the guard is exercised on a linked decision directly.
+    stub = Candidate(qid="Q358391", label="Ambrose Powell Hill", birth_year=1865, death_year=1825)
+    groups = group_mentions([_mention("Ambrose P. Hill", "Battle of Somewhere", 1862)])
+    resolver = _GroupResolver(groups, _Source([]), threshold=85.0, margin=6.0)
+    resolver.decisions[groups[0].key] = Decision(
+        status="linked",
+        canonical_name="Ambrose Powell Hill",
+        method="corpus_identity",
+        qid=stub.qid,
+        confidence=0.8,
+        candidate=stub,
+    )
+
+    resolver.guard(0)
+
+    assert not groups[0].mentions
+    detached = [g for g in groups if g.split_from]
+    assert [m.battle_name for g in detached for m in g.mentions] == ["Battle of Somewhere"]
 
 
 def test_a_lifespan_contradictory_only_through_its_slack_is_still_trusted() -> None:

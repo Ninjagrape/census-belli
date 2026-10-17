@@ -49,6 +49,7 @@ from pipeline.resolvers.matcher import (
     match_group,
     partition_by_lifespan,
     rank_for_prompt,
+    reset_contradictory_log,
     viable_candidates,
 )
 from pipeline.resolvers.mentions import (
@@ -123,6 +124,7 @@ __all__ = [
     "is_placeholder",
     "is_title_free",
     "lifespan_verdict",
+    "reset_contradictory_log",
     "load_battle_contexts",
     "load_battle_index",
     "load_mentions",
