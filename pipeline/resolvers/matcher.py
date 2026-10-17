@@ -147,13 +147,19 @@ def command_window(candidate: Candidate) -> tuple[int, int] | None:
     if birth is None and death is None:
         return None
 
+    # A decade- or century-precision date is read at its widest: the earliest
+    # possible birth opens the window and the latest possible death closes it,
+    # so a coarse date can never make a candidate look too young or already dead.
     if birth is not None:
-        low = birth + MIN_COMMAND_AGE_YEARS
-        high = death if death is not None else birth + MAX_PLAUSIBLE_AGE_YEARS
+        low = birth - candidate.birth_slack + MIN_COMMAND_AGE_YEARS
+        if death is not None:
+            high = death + candidate.death_slack
+        else:
+            high = birth + candidate.birth_slack + MAX_PLAUSIBLE_AGE_YEARS
     else:
         assert death is not None
-        low = death - MAX_PLAUSIBLE_AGE_YEARS
-        high = death
+        low = death - candidate.death_slack - MAX_PLAUSIBLE_AGE_YEARS
+        high = death + candidate.death_slack
     return low - LIFESPAN_SLACK_YEARS, high + LIFESPAN_SLACK_YEARS
 
 

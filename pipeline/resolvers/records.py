@@ -68,6 +68,9 @@ class Candidate:
         aliases: Other names the entity is known by.
         birth_year: Astronomical year of birth, or None when unknown.
         death_year: Astronomical year of death, or None when unknown.
+        birth_slack: Years either way the birth year may be off, nonzero for a
+            Wikidata date of decade or century precision.
+        death_slack: The same for the death year.
         country: A country or polity label, used as a tiebreak only.
         occupations: Occupation labels, used to prefer military candidates.
         wikipedia_url: English Wikipedia URL, when the entity has one.
@@ -81,6 +84,8 @@ class Candidate:
     aliases: tuple[str, ...] = ()
     birth_year: int | None = None
     death_year: int | None = None
+    birth_slack: int = 0
+    death_slack: int = 0
     country: str = ""
     occupations: tuple[str, ...] = ()
     wikipedia_url: str = ""
