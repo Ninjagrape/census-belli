@@ -255,6 +255,12 @@ quality_checks:
     severity: warning
     description: "Share of battles with no date and no sides; the pilot corpus measured 0.0065"
 
+  - name: overrides_applied
+    method: overrides_gate
+    params: {stage: extract}
+    severity: error
+    description: Every extract override in config/overrides.yaml matched its target (rot guard; a renamed slug or label must not silently drop a correction).
+
 retry_policy:
   max_stage_retries: 3
   on_failure: continue_with_logging    # don't block the whole pipeline on one article

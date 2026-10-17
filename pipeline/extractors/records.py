@@ -261,6 +261,9 @@ class SideExtraction:
     aliases: list[str] = field(default_factory=list)
     polity: str | None = None
     outcome: str | None = None
+    # ``sources`` row of the manual citation behind ``outcome``; None for an
+    # outcome extract decided itself. Set by the stage when an override applies.
+    outcome_source_id: int | None = None
     commanders: list[CommanderMention] = field(default_factory=list)
     troop_reports: list[TroopReport] = field(default_factory=list)
     casualty_reports: list[CasualtyReport] = field(default_factory=list)
