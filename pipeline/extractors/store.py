@@ -98,7 +98,10 @@ _UPDATE_BATTLE = text(
         wikidata_id = COALESCE(:wikidata_id, wikidata_id),
         wikipedia_url = COALESCE(:wikipedia_url, wikipedia_url),
         date_start = COALESCE(CAST(:date_start AS DATE), date_start),
-        date_end = COALESCE(CAST(:date_end AS DATE), date_end),
+        -- like circa below, the end belongs to the start it arrived with: a
+        -- single-day date must not keep an earlier run's end.
+        date_end = CASE WHEN CAST(:date_start AS DATE) IS NULL THEN date_end
+                        ELSE CAST(:date_end AS DATE) END,
         date_precision = COALESCE(:date_precision, date_precision),
         -- circa describes the date_start it arrived with, so it moves with it.
         date_circa = CASE WHEN CAST(:date_start AS DATE) IS NULL THEN date_circa
@@ -142,19 +145,24 @@ _FIND_SIDE = text(
     "SELECT side_id FROM battle_sides WHERE battle_id = :battle_id AND side_label = :side_label"
 )
 _INSERT_SIDE = text(
-    "INSERT INTO battle_sides (battle_id, side_label, polity, outcome) "
-    "VALUES (:battle_id, :side_label, :polity, CAST(:outcome AS outcome_level)) "
+    "INSERT INTO battle_sides (battle_id, side_label, polity, outcome, outcome_source) "
+    "VALUES (:battle_id, :side_label, :polity, CAST(:outcome AS outcome_level), "
+    "CAST(:outcome_source AS INT)) "
     "RETURNING side_id"
 )
-# Extract owns outcome, so a run that finds none must clear an earlier value.
+# Extract owns outcome and its provenance, so a run that finds none must clear
+# an earlier value, and a removed override must not leave its citation behind.
 _UPDATE_SIDE = text(
     "UPDATE battle_sides SET polity = COALESCE(:polity, polity), "
-    "outcome = CAST(:outcome AS outcome_level) WHERE side_id = :side_id"
+    "outcome = CAST(:outcome AS outcome_level), outcome_source = CAST(:outcome_source AS INT) "
+    "WHERE side_id = :side_id"
 )
 # A battle reached by a second record in the same run keeps what the first set.
 _UPDATE_SIDE_KEEP_OUTCOME = text(
     "UPDATE battle_sides SET polity = COALESCE(:polity, polity), "
-    "outcome = COALESCE(CAST(:outcome AS outcome_level), outcome) WHERE side_id = :side_id"
+    "outcome = COALESCE(CAST(:outcome AS outcome_level), outcome), "
+    "outcome_source = CASE WHEN CAST(:outcome AS outcome_level) IS NULL THEN outcome_source "
+    "ELSE CAST(:outcome_source AS INT) END WHERE side_id = :side_id"
 )
 
 _CLEAR_TROOPS = text(
@@ -492,6 +500,7 @@ def _upsert_side(
         "side_label": side.label,
         "polity": side.polity,
         "outcome": side.outcome,
+        "outcome_source": side.outcome_source_id if side.outcome is not None else None,
     }
     existing = conn.execute(
         _FIND_SIDE, {"battle_id": battle_id, "side_label": side.label}

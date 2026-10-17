@@ -70,8 +70,17 @@ from pipeline.extractors.outcome import (
     needs_outcome_request,
     resolve_outcome,
 )
+from pipeline.extractors.override_apply import apply_extract_overrides, outcome_override_slugs
 from pipeline.extractors.store import reserve_battle_id
 from pipeline.llm import LLMService
+from pipeline.overrides import (
+    OverrideEntry,
+    OverrideReport,
+    clear_report,
+    load_overrides,
+    manual_source_id,
+    overrides_path,
+)
 from pipeline.stages.base import StageContext, StageOutcome
 
 __all__ = ["RawBattle", "discover_battles", "extract_battle", "run"]
@@ -526,6 +535,7 @@ def extract_battle(
     max_passage_chars: int = DEFAULT_MAX_PASSAGE_CHARS,
     battle_id: int | None = None,
     outcome_pass: OutcomePass | None = None,
+    outcome_overridden: bool = False,
 ) -> BattleExtraction:
     """Extract and merge every source for one battle.
 
@@ -540,6 +550,9 @@ def extract_battle(
         battle_id: Database id to record on the LLM requests, when known.
         outcome_pass: The targeted outcome request, or None to leave a battle
             the deterministic merge could not decide without an outcome.
+        outcome_overridden: A manual override decides this battle's outcome, so
+            the outcome request is skipped: it would defer and halt the
+            pipeline for a battle that is already decided.
 
     Returns:
         The merged record, carrying any extraction failures so that the
@@ -614,7 +627,7 @@ def extract_battle(
 
     merged = merge_battle(battle.slug, sources, failures=failures, fallback_name=battle.name)
 
-    if outcome_pass is not None and needs_outcome_request(merged):
+    if outcome_pass is not None and not outcome_overridden and needs_outcome_request(merged):
         status = resolve_outcome(
             merged,
             outcome_pass,
@@ -791,6 +804,29 @@ def _build_outcome_pass(spec: dict[str, Any], context: StageContext) -> OutcomeP
     )
 
 
+def _attach_outcome_provenance(
+    conn: Any, merged: list[BattleExtraction], outcome_entries: dict[str, OverrideEntry]
+) -> None:
+    """Point the sides of overridden battles at their manual citation.
+
+    Sides extract decided itself keep ``outcome_source_id`` None, which the
+    write turns into a NULL ``outcome_source``, so a removed override leaves
+    no stale provenance.
+
+    Args:
+        conn: An open database connection.
+        merged: This run's battles, after the overrides were applied.
+        outcome_entries: The applied outcome entries by battle slug.
+    """
+    for battle in merged:
+        entry = outcome_entries.get(battle.slug)
+        if entry is None:
+            continue
+        source = manual_source_id(conn, entry)
+        for side in battle.sides:
+            side.outcome_source_id = source
+
+
 def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutcome | None:
     """Run the extract stage.
 
@@ -819,6 +855,14 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
     max_passage_chars = int(params.get("max_passage_chars", DEFAULT_MAX_PASSAGE_CHARS))
 
     system, template, schema = _prompt_parts(spec)
+
+    # Loaded before any work so a malformed file fails the run up front; the
+    # stale report goes first so a crash leaves nothing for the gate to accept.
+    overrides_file, overrides_explicit = overrides_path(params)
+    overrides = load_overrides(overrides_file, required=overrides_explicit)
+    clear_report("extract", processed_root)
+    override_entries = overrides.for_stage("extract")
+    outcome_overridden_slugs = outcome_override_slugs(override_entries)
 
     discovered = discover_battles(raw_root)
     output_suffix = ""
@@ -871,6 +915,8 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
                         max_passage_chars=max_passage_chars,
                         battle_id=battle_id,
                         outcome_pass=outcome_pass,
+                        outcome_overridden=battle.slug.strip().casefold()
+                        in outcome_overridden_slugs,
                     )
                 )
             except Exception as exc:
@@ -883,9 +929,13 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
                     error_type=type(exc).__name__,
                 )
 
+    report = OverrideReport("extract", overrides, limited=ctx.limit is not None)
+    outcome_entries = apply_extract_overrides(merged, override_entries, report)
+
     _write_outputs(merged, processed_root, suffix=output_suffix)
 
     if ctx.db_conn is not None and not ctx.dry_run:
+        _attach_outcome_provenance(ctx.db_conn, merged, outcome_entries)
         counts = ExtractWriteCounts()
         cache: dict[tuple[str, str], int] = {}
         for record in merged:
@@ -895,6 +945,8 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
         logger.info("extract_rows_written", **counts.as_dict())
     else:
         logger.info("extract_database_write_skipped", dry_run=ctx.dry_run)
+
+    report.write(processed_root)
 
     outcome: StageOutcome | None = None
     deferred = 0
