@@ -74,7 +74,7 @@ _LOAD_SIDE_GROUPS = text(
     """
     SELECT
         bc.bc_id, bc.battle_id, bc.side_id, bc.general_id,
-        g.canonical_name, bc.command_role, COALESCE(bc.role_evidence, ''),
+        g.canonical_name, g.wikidata_id, bc.command_role, COALESCE(bc.role_evidence, ''),
         bs.side_label, b.name, b.year_astronomical,
         COALESCE(bc.attribution_method, 'equal'),
         bc.infobox_order,
@@ -130,6 +130,7 @@ def load_side_groups(conn: Any) -> list[SideGroup]:
         side_id,
         general_id,
         name,
+        wikidata_id,
         command_role,
         role_evidence,
         side_label,
@@ -162,6 +163,7 @@ def load_side_groups(conn: Any) -> list[SideGroup]:
                 side_id=side_id,
                 general_id=int(general_id),
                 name=str(name),
+                wikidata_id=str(wikidata_id) if wikidata_id else None,
                 command_role=str(command_role),
                 role_evidence=str(role_evidence or ""),
                 apparent_role="unclear",
@@ -194,7 +196,8 @@ _LOAD_BATTLE_SLUGS = text("SELECT battle_id, source_slug FROM battles")
 # Unknown battles, plus battles an earlier classify run typed by rule
 # (battle_type_source = 'classify'), campaigns included. The second group is
 # re-evaluated every run: the campaign rule may demote a type, and a campaign
-# whose rule no longer fires is re-typed. Nothing extract set is ever selected. The
+# whose rule no longer fires is re-typed. Nothing extract set is ever selected, and
+# neither is a hand-set ('manual') type, even a manual 'unknown'. The
 # source is a column, not a missing_data_log note, because extract deletes those
 # notes on every re-run. date_end - date_start is computed here because a BC date
 # cannot be held by datetime.date, and is trusted only at day precision.
@@ -206,8 +209,8 @@ _LOAD_BATTLES_NEEDING_TYPE = text(
                 THEN b.date_end - b.date_start END AS span_days,
            b.date_precision
     FROM battles b
-    WHERE b.battle_type = 'unknown'
-       OR b.battle_type_source = 'classify'
+    WHERE (b.battle_type = 'unknown' OR b.battle_type_source = 'classify')
+      AND b.battle_type_source IS DISTINCT FROM 'manual'
     ORDER BY b.battle_id
     """
 )

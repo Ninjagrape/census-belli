@@ -355,6 +355,12 @@ quality_checks:
     severity: error
     description: "Every missing troop total must have a missing_data_log entry"
 
+  - name: overrides_applied
+    method: overrides_gate
+    params: {stage: classify}
+    severity: error
+    description: Every classify override in config/overrides.yaml matched its target and passed the attribution rules (rot guard).
+
 retry_policy:
   max_stage_retries: 2
   on_failure: continue_with_logging

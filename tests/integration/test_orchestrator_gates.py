@@ -14,11 +14,13 @@ from __future__ import annotations
 import sys
 import types
 from contextlib import AbstractContextManager, nullcontext
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from pipeline import orchestrator
+from pipeline.overrides import KINDS_BY_STAGE, OverrideReport, load_overrides
 from pipeline.quality import Severity
 
 # The classify spec's ERROR-severity gate, used as the representative case.
@@ -70,12 +72,29 @@ class ScriptedConnection:
 
 
 @pytest.fixture
-def stub_stage(monkeypatch: pytest.MonkeyPatch):
+def stub_stage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Install an importable no-op stage module so run_stage reaches the gate."""
+    # Reports go to tmp_path, not the real data/processed.
+    real_load = orchestrator.load_agent_spec
+
+    def _load(stage: str) -> dict[str, Any]:
+        spec = real_load(stage)
+        spec.setdefault("params", {})["processed_root"] = str(tmp_path)
+        return spec
+
+    monkeypatch.setattr(orchestrator, "load_agent_spec", _load)
 
     def _install(stage: str) -> types.ModuleType:
         module = types.ModuleType(f"pipeline.stages.{stage}")
-        module.run = lambda spec: None  # type: ignore[attr-defined]
+
+        def _run(spec: dict[str, Any]) -> None:
+            # A stage that owns override kinds leaves a report for its
+            # overrides_gate; the real stage writes the same file.
+            if stage in KINDS_BY_STAGE:
+                root = Path((spec.get("params") or {}).get("processed_root", "data/processed"))
+                OverrideReport(stage, load_overrides(required=False)).write(root)
+
+        module.run = _run  # type: ignore[attr-defined]
         monkeypatch.setitem(sys.modules, f"pipeline.stages.{stage}", module)
         return module
 
@@ -137,7 +156,9 @@ def test_no_connection_fails_rather_than_passes(stub_stage) -> None:
     result = orchestrator.run_stage("classify", db_conn=None)
 
     assert result.success is False
-    assert all(not c.passed for c in result.quality_checks)
+    # overrides_applied reads a report file, not the database, so it can pass.
+    sql_checks = [c for c in result.quality_checks if c.name != "overrides_applied"]
+    assert sql_checks and all(not c.passed for c in sql_checks)
 
 
 # ─── Retry behaviour ─────────────────────────────────────────────────────────

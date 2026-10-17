@@ -143,6 +143,8 @@ class CommanderRow:
             in the infobox commander list, or None when the row did not come
             from an infobox or predates the column. Shown to the role prompt
             only where known; ``listing_order`` is the fallback sort key.
+        wikidata_id: The commander's ``generals.wikidata_id``, or None; lets a
+            manual override name a general by Q-id.
         attribution_method: How the row's current weight was decided. A side
             whose rows all say ``llm`` is left alone on a re-run: its roles
             look internally consistent, and without this the fixed weight
@@ -160,6 +162,7 @@ class CommanderRow:
     listing_order: int = 0
     attribution_method: str = "equal"
     infobox_order: int | None = None
+    wikidata_id: str | None = None
 
     def __post_init__(self) -> None:
         _check_enum(self.command_role, COMMAND_ROLES, "command_role")
@@ -353,6 +356,8 @@ class ClassifyCounts:
         self.battle_type_guerrilla = 0
         self.terrain_set = 0
         self.battle_type_unknown = 0
+        self.manual_battle_types = 0
+        self.manual_attributions = 0
         self.troop_gaps_logged = 0
         self.defenders_set = 0
         self.missing_fields_seen = 0
@@ -384,6 +389,8 @@ class ClassifyCounts:
             "battle_type_guerrilla": self.battle_type_guerrilla,
             "terrain_set": self.terrain_set,
             "battle_type_unknown": self.battle_type_unknown,
+            "manual_battle_types": self.manual_battle_types,
+            "manual_attributions": self.manual_attributions,
             "troop_gaps_logged": self.troop_gaps_logged,
             "defenders_set": self.defenders_set,
             "missing_fields_seen": self.missing_fields_seen,
