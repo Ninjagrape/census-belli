@@ -1,0 +1,5 @@
+# Hand-curated corrections that stages apply after their own logic, on every run.
+# Design and entry kinds: docs/handover/07-phase2-overrides-design.md
+# Every entry needs a citation (source) and a reviewer (reviewed.by / reviewed.on).
+version: 1
+entries: []

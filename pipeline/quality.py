@@ -912,6 +912,85 @@ def _check_evaluation_gate(
     )
 
 
+_MAX_UNMATCHED_SHOWN: Final[int] = 5
+
+
+def _check_overrides_gate(
+    name: str,
+    check: dict[str, Any],
+    severity: Severity,
+    conn: Connection | None,
+) -> QualityCheckResult:
+    """Fail when a stage could not apply every manual override.
+
+    Reads ``overrides_<stage>.json``, written by the stage run. An unmatched
+    entry means a hand-curated correction silently did nothing, so it fails
+    unless the run was ``--limit``-ed, where most entries target battles that
+    were never processed.
+
+    Args:
+        name: The check's name, as declared in the agent spec.
+        check: The raw check dict; ``params.stage`` is required and
+            ``params.root`` defaults to ``data/processed``.
+        severity: The severity to report the result at.
+        conn: Unused; the verdict comes from the report file alone.
+
+    Returns:
+        The check's result. Never raises.
+    """
+    raw_params = check.get("params")
+    params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
+    threshold = str(check.get("threshold", ""))
+
+    def result(passed: bool, message: str, actual: Any = None) -> QualityCheckResult:
+        return QualityCheckResult(
+            name=name,
+            passed=passed,
+            severity=severity,
+            actual_value=actual,
+            threshold=threshold,
+            message=message,
+        )
+
+    stage = params.get("stage")
+    if not isinstance(stage, str) or not stage:
+        return result(False, "overrides_gate needs params.stage")
+    path = Path(str(params.get("root", "data/processed"))) / f"overrides_{stage}.json"
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return result(False, f"cannot read {path} ({exc}); run the {stage} stage first.")
+    if not isinstance(report, dict) or report.get("stage") != stage:
+        return result(False, f"{path} is not an overrides report for stage {stage!r}.")
+
+    unmatched = report.get("unmatched")
+    unmatched = unmatched if isinstance(unmatched, list) else []
+    applied = report.get("applied")
+    counts = (
+        ", ".join(f"{kind}={count}" for kind, count in applied.items())
+        if isinstance(applied, dict)
+        else "no counts"
+    )
+    if unmatched and report.get("limited") is not True:
+        shown = "; ".join(
+            f"{u.get('id')}: {u.get('reason')}"
+            for u in unmatched[:_MAX_UNMATCHED_SHOWN]
+            if isinstance(u, dict)
+        )
+        extra = len(unmatched) - _MAX_UNMATCHED_SHOWN
+        suffix = f" (+{extra} more)" if extra > 0 else ""
+        return result(
+            False, f"{len(unmatched)} unmatched overrides: {shown}{suffix}", len(unmatched)
+        )
+    if unmatched:
+        return result(
+            True,
+            f"run was limited; {len(unmatched)} unmatched overrides expected. Applied: {counts}",
+            len(unmatched),
+        )
+    return result(True, f"all overrides applied. Applied: {counts}", 0)
+
+
 MethodHandler = Callable[[str, dict[str, Any], Severity, "Connection | None"], QualityCheckResult]
 
 # A `method:` listed here is executed by its handler. Anything else falls
@@ -921,6 +1000,7 @@ METHOD_HANDLERS: dict[str, MethodHandler] = {
     "imputation_gate": _check_imputation_gate,
     "model_gate": _check_model_gate,
     "evaluation_gate": _check_evaluation_gate,
+    "overrides_gate": _check_overrides_gate,
 }
 
 # Handler param -> stage spec param it must follow. A method listed here reads
@@ -929,6 +1009,7 @@ _SPEC_PARAM_BINDINGS: dict[str, dict[str, str]] = {
     "imputation_gate": {"scale": "scale", "root": "imputed_root"},
     "evaluation_gate": {"report": "report_path"},
     "model_gate": {"root": "diagnostics_root"},
+    "overrides_gate": {"root": "processed_root"},
 }
 
 # Why each `method:` without a handler cannot run yet. Every method named in
@@ -950,6 +1031,7 @@ UNIMPLEMENTED_METHODS: dict[str, str] = {
         "Requires data/processed/model_diagnostics/run{N}/gate_report.json from the model stage"
     ),
     "evaluation_gate": ("Requires data/processed/evaluation_report.json from the evaluate stage"),
+    "overrides_gate": "Requires data/processed/overrides_{stage}.json from the stage run",
 }
 
 

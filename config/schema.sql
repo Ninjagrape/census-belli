@@ -250,7 +250,9 @@ CREATE TABLE battles (
     -- Who set battle_type. NULL while it is 'unknown', and on rows that predate
     -- the column. Classify rewrites only 'classify' types (the campaign rule);
     -- missing_data_log cannot hold this because extract rewrites it every run.
-    battle_type_source TEXT CHECK (battle_type_source IN ('extract', 'classify')),
+    -- 'manual' is set by classify when a battle_type override from
+    -- config/overrides.yaml applied; classify's rule pass leaves such rows alone.
+    battle_type_source TEXT CHECK (battle_type_source IN ('extract', 'classify', 'manual')),
     terrain         TEXT[],                -- e.g. {'mountainous', 'forested'}
     fortified       BOOLEAN,              -- was a fortification involved
     weather         TEXT,                  -- extracted from article if available

@@ -922,3 +922,100 @@ def test_model_gate_binding_leaves_the_model_spec_untouched() -> None:
     spec = yaml.safe_load((AGENTS_DIR / "model.yaml").read_text(encoding="utf-8"))
 
     assert "diagnostics_root" not in (spec.get("params") or {})
+
+
+# ─── overrides_gate method handler ───────────────────────────────────────────
+
+
+def _overrides_report(root: Path, **fields: Any) -> None:
+    payload = {
+        "stage": "extract",
+        "file": "config/overrides.yaml",
+        "entries": 2,
+        "applied": {"outcome": 2, "battle_date": 0, "side_polity": 0},
+        "unmatched": [],
+        "limited": False,
+        **fields,
+    }
+    (root / "overrides_extract.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _overrides_check(root: Path) -> dict[str, Any]:
+    return {
+        "name": "overrides_applied",
+        "method": "overrides_gate",
+        "params": {"stage": "extract", "root": str(root)},
+        "severity": "error",
+    }
+
+
+def test_overrides_gate_fails_when_the_report_is_missing(tmp_path: Path) -> None:
+    result = QualityRunner(None).run_one(_overrides_check(tmp_path))
+
+    assert result.passed is False
+    assert "run the extract stage first" in result.message
+
+
+def test_overrides_gate_fails_on_unreadable_report(tmp_path: Path) -> None:
+    (tmp_path / "overrides_extract.json").write_text("{not json", encoding="utf-8")
+
+    assert QualityRunner(None).run_one(_overrides_check(tmp_path)).passed is False
+
+
+def test_overrides_gate_fails_when_the_report_is_for_another_stage(tmp_path: Path) -> None:
+    _overrides_report(tmp_path, stage="resolve")
+
+    result = QualityRunner(None).run_one(_overrides_check(tmp_path))
+
+    assert result.passed is False
+    assert "extract" in result.message
+
+
+def test_overrides_gate_fails_without_a_stage_param(tmp_path: Path) -> None:
+    check = _overrides_check(tmp_path)
+    del check["params"]["stage"]
+
+    assert QualityRunner(None).run_one(check).passed is False
+
+
+def test_overrides_gate_fails_on_unmatched_and_lists_them(tmp_path: Path) -> None:
+    unmatched = [
+        {"id": f"ov-{n:04d}", "kind": "outcome", "reason": f"gone {n}"} for n in range(1, 8)
+    ]
+    _overrides_report(tmp_path, unmatched=unmatched)
+
+    result = QualityRunner(None).run_one(_overrides_check(tmp_path))
+
+    assert result.passed is False
+    assert "ov-0001: gone 1" in result.message
+    assert "ov-0007" not in result.message
+    assert "+2 more" in result.message
+
+
+def test_overrides_gate_passes_unmatched_on_a_limited_run(tmp_path: Path) -> None:
+    unmatched = [{"id": "ov-0001", "kind": "outcome", "reason": "not processed"}]
+    _overrides_report(tmp_path, unmatched=unmatched, limited=True)
+
+    result = QualityRunner(None).run_one(_overrides_check(tmp_path))
+
+    assert result.passed is True
+    assert "limited" in result.message
+
+
+def test_overrides_gate_passes_a_clean_report_with_counts(tmp_path: Path) -> None:
+    _overrides_report(tmp_path)
+
+    result = QualityRunner(None).run_one(_overrides_check(tmp_path))
+
+    assert result.passed is True
+    assert "outcome=2" in result.message
+
+
+def test_overrides_gate_root_follows_processed_root(tmp_path: Path) -> None:
+    _overrides_report(tmp_path)
+
+    result = QualityRunner(None, {"processed_root": str(tmp_path)}).run_one(
+        _overrides_check(tmp_path / "elsewhere")
+    )
+
+    assert result.passed is True
