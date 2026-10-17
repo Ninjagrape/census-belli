@@ -7,7 +7,7 @@ First slice built (handover-log §20.3, §21). Rules to keep:
   LLM-classified side.
 
 - [x] done 2026-10-15 (offline path; not yet answered on the corpus): LLM missingness classification for rows the heuristics leave unclassified
-- [ ] Run the pending multi-commander sides through /process-llm-batch
+- [x] done 2026-10-16..17: every pending side answered; classify runs on the corpus with 0 deferred and passes all gates
 - [x] done 2026-10-15: the role LLM answers is_defender per side: Per-side defender flag beyond sieges: `classifiers/defender.py` sets `is_defender`
       only for "Siege of X" (handover-log §20.5)
 - [x] done 2026-10-15: battle_commanders.infobox_order, in the prompt with unresolved counts: Infobox commander order is lost (the reference file is alphabetical, bc_id is

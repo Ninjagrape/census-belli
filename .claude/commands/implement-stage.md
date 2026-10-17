@@ -11,7 +11,7 @@ Follow this process exactly:
 4. Implement pipeline/stages/$ARGUMENTS.py:
    - Import and conform to the stage runner protocol
    - Use pipeline/db.py for all database operations (SQLAlchemy Core, parameterised queries, never string interpolation)
-   - Use the pipeline.llm package (`LLMService.from_spec`) for any LLM calls; see handover.md §3.1
+   - Use the pipeline.llm package (`LLMService.from_spec`) for any LLM calls; see docs/handover/03-read-before-writing-code.md §3.1
    - Use pipeline/config.py to load the agent spec
    - Use structlog for all logging, never bare print()
    - Type hints on all function signatures

@@ -14,9 +14,9 @@ Built and verified against live Wikidata and Postgres. Decisions to keep:
       answered by `/process-llm-batch` (Haiku workers, 15 requests per chunk)
       on the Claude subscription's weekly limits. The command is resumable
       (`split --skip-answered`), so a corpus spreads over several sessions.
-      - [ ] ~50-battle pilot through the offline path: measure requests per
-            session before a weekly limit binds, and spot-check answers for
-            outside knowledge
+      - [x] done 2026-10-16..17 for resolve, classify and extract_outcome on
+            the 211-battle corpus (~550 requests, spot-checked); extract's
+            14,705 passage requests remain the user's call (02-extract.md)
       - [ ] Run the ~20-call `/extraction-eval` on `claude-haiku-5-5` before
             trusting it on the corpus: it cannot take temperature 0, so
             determinism rests on the structured-output constraint alone
@@ -40,4 +40,6 @@ Built and verified against live Wikidata and Postgres. Decisions to keep:
       candidates carry birth and death years
 - [x] fixed 2026-10-12: (gap review) `no_duplicate_generals` is vacuous (wikidata_id is UNIQUE); it cannot
       see duplicates among corpus-local generals
-- [ ] Confirm the title/particle and search-fallback fixes live (Schwarzenberg, MacDonald, Grouchy, Platov, Amr ibn al-As, Blücher): fixture-tested only
+- [x] confirmed live 2026-10-17: Schwarzenberg Q163755, Macdonald Q298784, Grouchy Q333821, Platov Q963749, Amr ibn al-As Q314781, Blücher Q153522 all link on the corpus. Still unlinked or split: Moreau, Bülow, Wŏn Kyun, Lefebvre (one row of two), Bernadotte (mislinked to his brother Q15968159; Phase 2)
+- [ ] The corpus-identity match path (`match_against_identities`) is not date-gated, and a lifespan with birth after death is trusted: A. P. Hill at Borodino, the younger Zieten at Hochkirch, Saxe-Weissenfels at Arcole (R2d, in progress 2026-10-17)
+- [ ] A death-only or century-precision lifespan leaves the window ~100 years wide: Philippikos Bardanes (emperor 711-713) linked at Ajnadayn 634. Decide after R2d whether to tighten MAX_PLAUSIBLE_AGE_YEARS for death-only reckoning or leave such cases to overrides

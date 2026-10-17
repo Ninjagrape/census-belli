@@ -231,10 +231,12 @@ data/            Crawl and pipeline output. Not committed.
 docs/            Design notes
 ```
 
-`CLAUDE.md` is the design document and the conventions. `handover.md` is the
-current state of the work, its standing decisions and known traps, and the
-most useful thing to read before changing anything. `docs/handover-log.md` is
-the full history, including every bug found so far and what it cost to find.
+`CLAUDE.md` is the design document and the conventions. `handover.md` is a
+short index to the current state of the work; its standing decisions and known
+traps are one file per topic under `docs/handover/`, and it is the most useful
+thing to read before changing anything. `docs/handover-log/` is the full
+history, one file per session, including every bug found so far and what it
+cost to find.
 
 ## Licence
 

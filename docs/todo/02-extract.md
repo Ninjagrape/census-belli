@@ -18,8 +18,9 @@ Built; every SQL write verified against Postgres. Decisions to keep:
       (`splitlines()` split on NEL/LS/PS inside JSON); each re-run rewrote an identical
       204 MB batch file (identical hash sets are now reused). 22,591 requests for 211
       battles is the bill, not a bug
-- [ ] LLM extraction never run against a live key; fixture-tested only.
-      Blocked on the free-tier quota (handover-log §15.7, 03-resolve.md).
+- [ ] Passage extraction never answered on the corpus: 14,705 offline Haiku
+      requests deferred (user's call, with the web_secondary item below). The
+      outcome pass (`extract_outcome`, Sonnet) is answered and in use.
 - [x] fixed 2026-10-12: (gap review A2) `no_empty_extractions` reads crawl_log.extraction_method /
       fields_extracted, which nothing writes, so it can never fail. Rewrite it
 - [x] fixed 2026-10-12: (gap review A4) battles are looked up by name with LIMIT 1 here and in resolve's

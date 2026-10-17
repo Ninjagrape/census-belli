@@ -34,3 +34,6 @@ Thumbs.db
 # model artifacts
 *.nc          # arviz InferenceData
 *.pkl
+
+# agent worktrees (local, each holds a copy of data/processed)
+.claude/worktrees/

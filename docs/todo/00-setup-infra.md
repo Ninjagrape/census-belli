@@ -26,8 +26,8 @@ Standing rules worth knowing before changing these:
       truncation branches). Harness: tests/integration/test_llm_live.py, gated on
       GENERAL_WAR_LIVE_LLM=1, never run. Either branch mistaken for success
       writes wrong data with an ok status. Optional while every stage is offline.
-- [ ] Quality gates have only run against an empty database: SQL proven valid,
-      thresholds not
+- [ ] Gate thresholds are proven only on fixtures and the one 211-battle corpus
+      (every stage's gates ran against it 2026-10-12..17); untested beyond it
 - [ ] tests/fixtures/gold/: 20 hand-labelled battles for /extraction-eval
       (also unblocks /test-stage extract and classify)
 - [x] done 2026-10-15: evaluation_gate covers them; posterior_check removed: Implement evaluate's non-SQL quality check methods (brier_score,

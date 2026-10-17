@@ -2,7 +2,7 @@
 
 ## Start here, every session
 
-**Read `handover.md` before doing anything else, including answering a question about this repo.** It records what is actually built, what is verified against a real database versus merely written, the bugs already found and fixed, and the footguns that have cost time. It is maintained to be current; `TODO.md` is the index to the task list in `docs/todo/` (read only the file for the stage at hand), this file is the design, `handover.md` is the state.
+**Read `handover.md` before doing anything else, including answering a question about this repo.** It records what is actually built, what is verified against a real database versus merely written, the bugs already found and fixed, and the footguns that have cost time. It is maintained to be current; `TODO.md` is the index to the task list in `docs/todo/` (read only the file for the stage at hand), this file is the design, `handover.md` is the state. `handover.md` is a short index: read it, then open only the one file under `docs/handover/` (or `docs/handover-log/`) the task needs, never all of them.
 
 Then:
 
@@ -12,7 +12,7 @@ Then:
 Two rules that override the momentum to just keep building:
 
 1. **Verify before trusting.** Run the verification commands in `handover.md` §1 and confirm the state matches before building on it. Files change between sessions, sometimes from other agents working in parallel.
-2. **Never report a stage green on unit tests alone.** Most verification gates in this project need a live Postgres. Say explicitly what you verified and what you could not. A passing fixture suite has already hidden a systematic bug that would have corrupted the published ranking (see `handover.md` §4).
+2. **Never report a stage green on unit tests alone.** Most verification gates in this project need a live Postgres. Say explicitly what you verified and what you could not. A passing fixture suite has already hidden a systematic bug that would have corrupted the published ranking (see `docs/handover/04-the-lesson.md`).
 
 Before you finish a session, update `handover.md` so the next one starts where you stopped.
 
@@ -40,7 +40,7 @@ The team works like an engineering team: Opus is the manager and architect, Sonn
 **Routing between Haiku and Sonnet.** Haiku 5.5 costs about a twentieth of Sonnet 5.5 per token and returns faster, so it is the default worker and Sonnet is the step up.
 
 - Start a task on Haiku when its acceptance criteria are mechanical (a command exits zero, a grep returns nothing, a named set of tests passes) and the brief leaves no design choice open.
-- Go straight to Sonnet when the task means choosing between approaches, when the change touches `pipeline/stages/reconcile.py`, `impute.py`, `model.py`, `pipeline/reconcilers/` or `pipeline/imputers/`, or when a wrong answer could still pass the tests (attribution, missingness classification, anything like the bugs in `handover.md` §4).
+- Go straight to Sonnet when the task means choosing between approaches, when the change touches `pipeline/stages/reconcile.py`, `impute.py`, `model.py`, `pipeline/reconcilers/` or `pipeline/imputers/`, or when a wrong answer could still pass the tests (attribution, missingness classification, anything like the bugs in `docs/handover/04-the-lesson.md`).
 - Escalate once. If a Haiku result fails its acceptance check or review, give the task and the failure output to Sonnet rather than re-briefing Haiku. Judge cost per finished task, not per call.
 - Split read-only work finer than you would for Sonnet: one Haiku agent per stage, file group or log, run in parallel, with Opus reading the combined raw output. The one-agent-on-`DATABASE_URL` rule below still applies.
 - Run Haiku at `effort: "low"` for searches, summaries and running commands. Leave the default effort for edits.
@@ -52,7 +52,7 @@ The team works like an engineering team: Opus is the manager and architect, Sonn
 - Run the project reviewers as gates: `bayesian-model-reviewer` after any change to reconcile, impute, model, or WAR pooling code; `historiography-reviewer` after running extract, resolve, reconcile, or classify on real data.
 - Agents never commit or push (see Git below).
 
-- Only one agent at a time may run the integration suite against `DATABASE_URL`: every module fixture rebuilds the schema (`handover.md` §5). Tell every other agent not to touch the database.
+- Only one agent at a time may run the integration suite against `DATABASE_URL`: every module fixture rebuilds the schema (`docs/handover/05-footguns.md`). Tell every other agent not to touch the database.
 
 **Do it inline instead** only when delegating costs more than it saves: answering a question, reading code to make a design decision, or editing documentation such as this file, `handover.md`, `TODO.md` and agent specs. Code changes, however small, go to a worker.
 
