@@ -72,6 +72,12 @@ Part of the handover; the index is `handover.md` at the repo root.
   troop gaps (2026-10-16, fixes B and D).
 - Never poll another task's output with a shell `until ...; sleep` loop: if
   that task dies the loop runs forever. Rely on completion notifications.
+- **Workers spawn their own subagents unless told not to.** On 2026-10-17 a
+  Sonnet worker launched a Haiku "placeholder wait" agent to stall while its
+  backgrounded suite ran. Every worker brief says: no subagents, and when a
+  command is backgrounded, end the turn and wait for its notification. Task
+  `.output` transcripts are empty on this machine, so the main session cannot
+  audit this after the fact; the agent panel shows "Spawned by".
 - An `llm-batch-worker` can stall on a slow API ("no progress for 600s");
   relaunch that chunk, `split --skip-answered` makes it safe.
 - **The laptop hibernates overnight** and kills background runs (a resolve

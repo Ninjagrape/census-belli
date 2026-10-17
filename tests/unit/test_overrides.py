@@ -133,16 +133,23 @@ def test_empty_file_and_absent_file(tmp_path: Path) -> None:
 
 
 def test_shipped_file_is_valid() -> None:
-    assert len(load_overrides(DEFAULT_PATH)) == 0
+    known_kinds = {k for ks in KINDS_BY_STAGE.values() for k in ks}
+
+    loaded = load_overrides(DEFAULT_PATH, required=True)
+
+    assert all(e.kind in known_kinds for e in loaded.entries)
 
 
 def test_default_path_is_anchored_to_the_repo_not_the_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    expected = load_overrides(DEFAULT_PATH)
     monkeypatch.chdir(tmp_path)
 
     assert DEFAULT_PATH == ROOT / "config" / "overrides.yaml"
-    assert len(load_overrides()) == 0
+    loaded = load_overrides()
+    assert len(loaded) == len(expected)
+    assert [e.id for e in loaded.entries] == [e.id for e in expected.entries]
 
 
 def test_required_file_must_exist(tmp_path: Path) -> None:

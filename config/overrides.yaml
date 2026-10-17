@@ -1,5 +1,481 @@
 # Hand-curated corrections that stages apply after their own logic, on every run.
 # Design and entry kinds: docs/handover/07-phase2-overrides-design.md
 # Every entry needs a citation (source) and a reviewer (reviewed.by / reviewed.on).
+# Entries drafted by historiography-reviewer against general_war_corpus2 and
+# approved by the user 2026-10-17/18. BC dates are written as PostgreSQL renders
+# them ("0480-09-01 BC"). "on" is quoted: YAML 1.1 reads a bare on as true.
 version: 1
-entries: []
+entries:
+  # --- outcome ------------------------------------------------------------------
+  - id: ov-0001
+    kind: outcome
+    target: {battle: Battle_of_Asculum-e156b37d06}
+    value:
+      Epirotes: pyrrhic_victory
+      Roman Republic: defeat
+    source: "Plutarch, Pyrrhus 21.8-10; Wikipedia, 'Battle of Asculum', lead and section 'Aftermath'"
+    note: "The infobox reads 'Greek victory', so extract coded a plain victory. Asculum is the battle that gave 'Pyrrhic victory' its name (Pyrrhus' remark in Plutarch); the model scores pyrrhic as a win, so this changes the record, not the fit."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0002
+    kind: outcome
+    target: {battle: Battle_of_Belmont-e439b08aca}
+    value:
+      United States (Union): indecisive
+      CSA (Confederacy): indecisive
+    source: "American Battlefield Trust, 'Belmont' battle page (Result: Inconclusive); Wikipedia, 'Battle of Belmont', section 'Aftermath'"
+    note: "No outcome was extracted (infobox 'See aftermath'). Grant overran the Confederate camp, then was driven back to his boats; losses were near equal (607 vs 641) and the CWSAC/ABT summary codes it inconclusive. Confederate victory is the minority reading."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0003
+    kind: outcome
+    target: {battle: Battle_of_Bir_Hakeim-cde68737ef}
+    value:
+      Free France: defeat
+      Nazi Germany: victory
+    source: "Wikipedia, 'Battle of Bir Hakeim', section 'Aftermath' (subsection 'Analysis', citing Playfair, The Mediterranean and Middle East vol. III)"
+    note: "No outcome was extracted (infobox 'See Aftermath section'). On the tactical standard the corpus uses, the Axis took the position and the garrison broke out and abandoned it; the delay imposed on Rommel is a strategic gain for the Allies that the outcome scale does not carry."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0004
+    kind: outcome
+    target: {battle: Battle_of_Borodino-8c0686ddbc}
+    value:
+      First French Empire: pyrrhic_victory
+      Russian Empire: defeat
+    source: "Wikipedia, 'Battle of Borodino', section 'Aftermath', subsection 'An indecisive victory'"
+    note: "No outcome was extracted (infobox 'See § Aftermath'). Napoleon held the field and Kutuzov withdrew next day, so tactically a French win at ruinous cost; the article reports most scholars call it a draw or a Pyrrhic French victory. Pyrrhic (scored as a win) rather than indecisive because the corpus grades on tactical result."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0005
+    kind: outcome
+    target: {battle: Battle_of_Kasserine_Pass-72c07c66a7}
+    value:
+      United States: defeat
+      Nazi Germany: victory
+    source: "Martin Blumenson, Rommel's Last Victory: The Battle of Kasserine Pass (1967); Wikipedia, 'Battle of Kasserine Pass', section 'Aftermath'"
+    note: "No outcome was extracted (infobox 'See Aftermath'). The Axis broke through and inflicted a heavy defeat on US II Corps before withdrawing for lack of fuel and reserves; the Allied reoccupation of the pass on 24-25 February followed an Axis withdrawal, not a defeat in battle."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0006
+    kind: outcome
+    target: {battle: Battle_of_Lobositz-b8d54b4229}
+    value:
+      Prussia: victory
+      Austria: defeat
+    source: "Christopher Duffy, Frederick the Great: A Military Life (1985), pp. 101-105, as cited in Wikipedia, 'Battle of Lobositz', section 'Aftermath'"
+    note: "The outcome LLM followed the article's strategic framing and credited Austria. Frederick held the field, Browne withdrew overnight to Budin, and Browne's relief of the Saxons at Pirna failed (they surrendered by 14 October): a narrow Prussian tactical victory at near-equal cost."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0007
+    kind: outcome
+    target: {battle: Battle_of_Maloyaroslavets-c0876852e8}
+    value:
+      French Empire: victory
+      Russian Empire: defeat
+    source: "Wikipedia, 'Battle of Maloyaroslavets', section 'Aftermath'"
+    note: "No outcome was extracted (infobox 'See § Aftermath'). Eugène's corps held the town after it changed hands repeatedly and Kutuzov withdrew south before dawn; the Russian gain (Napoleon turned back onto the devastated Smolensk road) is strategic, which the corpus does not score."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0008
+    kind: outcome
+    target: {battle: Battle_of_Reims_1814-eb6bc9a73a}
+    value:
+      France: victory
+      Russia: defeat
+    source: "David G. Chandler, The Campaigns of Napoleon (1966), p. 993, as cited in Wikipedia, 'Battle of Reims (1814)'; infobox 'French victory - 13th'"
+    note: "The infobox splits the result by day (Coalition 12 March, French 13 March) and the outcome request answered 'unclear'. This record is the 13 March battle (date_start 1814-03-13, Napoleon commanding), which Napoleon won decisively, routing Saint-Priest's Russo-Prussian corps and retaking the city."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  # --- battle_date --------------------------------------------------------------
+  - id: ov-0009
+    kind: battle_date
+    target: {battle: Battle_of_Kasserine_Pass-72c07c66a7}
+    value: {start: "1943-02-19", end: "1943-02-24", precision: day}
+    source: "Wikipedia, 'Battle of Kasserine Pass', infobox (Date: February 19-24, 1943)"
+    note: "Stored as 1943-01-01 to 1943-02-25 at year precision, a default rather than a date. The battle was fought 19-24 February 1943. Not on the review list; found during the outcome check."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0010
+    kind: battle_date
+    target: {battle: Battle_of_Salamis-c460cc3385}
+    value: {start: "0480-09-01 BC", end: null, precision: month}
+    source: "Wikipedia, 'Battle of Salamis', infobox (Date: 26 or 27 September 480 BC) and section 'Prelude' (timeline uncertain, citing Lazenby pp. 164-167)"
+    note: "Stored as 29 Sep to 27 Sep 480 BC, ending before it starts. Salamis was a single day whose exact date is disputed, so month precision is the honest grade."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0011
+    kind: battle_date
+    target: {battle: Battle_of_Ulm-b2885e33c4}
+    value: {start: "1805-10-16", end: "1805-10-20", precision: day}
+    source: "Wikipedia, 'Battle of Ulm', infobox (Date: 16-20 October 1805) and lead"
+    note: "Stored as 20 Oct to 19 Oct 1805, ending before it starts. Napoleon had Mack encircled by 16 October and Mack surrendered on 20 October."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0012
+    kind: battle_date
+    target: {battle: Siege_of_El_Arish-e8da3ea098}
+    value: {start: "1799-02-08", end: "1799-02-20", precision: day}
+    source: "Wikipedia, 'Siege of El Arish', infobox (Date: 8-20 February 1799) and body ('The fortress finally fell to the French on 20 February 1799')"
+    note: "Stored as 20 Feb to 19 Feb 1799, ending before it starts. The body dates the formal siege from 12 February; the infobox span, used here, includes Reynier's opening action."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0013
+    kind: battle_date
+    target: {battle: Suez_Crisis-5eb9e95e18}
+    value: {start: "1956-10-29", end: "1956-11-07", precision: day}
+    source: "Wikipedia, 'Suez Crisis', infobox (Date: 29 October - 7 November 1956)"
+    note: "Stored as March 1957 to 7 Nov 1956, ending before it starts; the start came from the Israeli withdrawal in March 1957. Typed campaign, so out of the model, but corrected so era assignment and date gates stay clean."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  # --- side_polity --------------------------------------------------------------
+  - id: ov-0014
+    kind: side_polity
+    target: {battle: Battle_of_Alam_el_Halfa-6811762d66, side: Nazi Germany}
+    value: Axis
+    source: "Wikipedia, 'Battle of Alam el Halfa', infobox (Belligerents: Germany, Italy; Commanders: Erwin Rommel, Fritz Bayerlein, Giuseppe De Stefanis, Federico Ferrari Orsi)"
+    note: "Not on the review list; added so Panzerarmee Afrika carries one polity level across Gazala, Bir Hakeim, Alam el Halfa and both El Alameins. A German-Italian army under Rommel, labelled Germany."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0015
+    kind: side_polity
+    target: {battle: Battle_of_Austerlitz-36474a0291, side: Russian Empire}
+    value: Third Coalition
+    source: "Wikipedia, 'Battle of Austerlitz', infobox (Belligerents: Russian Empire, Austrian Empire; Commanders include Alexander I, Kutuzov, Francis I, Weyrother, Kienmayer, Kollowrat, Liechtenstein); Wikipedia, 'War of the Third Coalition'"
+    note: "The Russo-Austrian army carried the label of its first-listed member. The side holds five Austrians (Francis I, Weyrother, Kienmayer, Kollowrat, Liechtenstein) and Weyrother wrote the plan. Labelled by coalition, as Leipzig is."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0016
+    kind: side_polity
+    target: {battle: Battle_of_Bautzen_1813-49d36886e7, side: Russian Empire}
+    value: Sixth Coalition
+    source: "Wikipedia, 'Battle of Bautzen (1813)', infobox (Belligerents: Russia, Prussia; Prussian commanders: Blucher, Frederick William III, Yorck, Kleist); Wikipedia, 'War of the Sixth Coalition'"
+    note: "The Russo-Prussian army carried the label of its first-listed member. The side holds Blucher, Yorck, Kleist and Frederick William III with the Russians. The same coalition string as Leipzig (also 1813), so the two share a level. The shell row Battle_of_Bautzen_1813-2b48653344 has no sides and is not targeted."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0017
+    kind: side_polity
+    target: {battle: Battle_of_Bir_Hakeim-cde68737ef, side: Nazi Germany}
+    value: Axis
+    source: "Wikipedia, 'Battle of Bir Hakeim', infobox (Belligerents: Germany, Italy)"
+    note: "Not on the review list; added for the same consistency. Italian and German divisions both attacked the position."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0018
+    kind: side_polity
+    target: {battle: Battle_of_Gazala-31b0a03912, side: Kingdom of Italy}
+    value: Axis
+    source: "Wikipedia, 'Battle of Gazala', infobox (Belligerents: Italy, Germany; Commanders: Ettore Bastico, Erwin Rommel; Strength: 90,000 men (60,000 Italian, 30,000 German))"
+    note: "Rommel's side was labelled Italy. By headcount Italy is not wrong (two thirds Italian), but the army was a German-commanded coalition, and the corpus labels the same army Germany elsewhere. 'Axis' names the coalition, as 'Allies' and 'Sixth Coalition' do."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0019
+    kind: side_polity
+    target: {battle: Battle_of_Leipzig-d1490afa75, side: Russian Empire}
+    value: Sixth Coalition
+    source: "Wikipedia, 'Battle of Leipzig', infobox (Belligerents: Russia, Prussia, Austria, Sweden); Wikipedia, 'War of the Sixth Coalition'"
+    note: "The coalition side (Schwarzenberg, Blücher, Bernadotte, Bennigsen) carried the label of its first-listed member. A new string, deliberately not 'Allies', which here is the 1944 SHAEF force; the polity effect is not nested in era."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0020
+    kind: side_polity
+    target: {battle: Battle_of_Waterloo-059b45c1f1, side: United Kingdom of Great Britain and Ireland}
+    value: Seventh Coalition
+    source: "Wikipedia, 'Battle of Waterloo', infobox (Belligerents: United Kingdom, Prussia, Netherlands, Hanover, Nassau, Brunswick) and body (of Wellington's army '27,985 (38%) were British, with another 7,686 (10%) from the King's German Legion'); Wikipedia, 'War of the Seventh Coalition'"
+    note: "The corpus has two sides at Waterloo, French and this one, and this side holds Wellington's Anglo-allied army and Blucher's Prussian army (Blucher, Gneisenau, Zieten, Pirch, Bulow). Prussia is not a separate side, so the label 'United Kingdom' is wrong for the side as recorded. Wellington's own army was 38% British by the article's count."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0021
+    kind: side_polity
+    target: {battle: Battle_of_the_Bulge-35837b5379, side: United States}
+    value: Allies
+    source: "Wikipedia, 'Battle of the Bulge', infobox (Allied commanders listed under SHAEF, 21st Army Group, 12th Army Group and Allied Air Forces; First Army under 21st Army Group 20 December - 16 January)"
+    note: "The side includes Montgomery's 21st Army Group, Coningham's RAF command and Horrocks's XXX Corps under SHAEF. 'Allies' is the string this corpus already uses for the same SHAEF force at Operation Overlord."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0022
+    kind: side_polity
+    target: {battle: First_Battle_of_El_Alamein-38ff104478, side: Kingdom of Italy}
+    value: Axis
+    source: "Wikipedia, 'First Battle of El Alamein', infobox (Belligerents: Italy, Germany; Commanders: Ettore Bastico, Erwin Rommel; Strength: 96,000 troops (56,000 Italian, 40,000 German))"
+    note: "The same army with the same mislabel as Gazala, given the same label."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0023
+    kind: side_polity
+    target: {battle: Second_Battle_of_El_Alamein-73b239ff9d, side: Kingdom of Italy}
+    value: Axis
+    source: "Wikipedia, 'Second Battle of El Alamein', infobox (Belligerents: Italy, Germany; Commanders: Curio Barbasetti, Erwin Rommel)"
+    note: "The same army with the same mislabel as Gazala, given the same label."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  # --- commander_link -----------------------------------------------------------
+  - id: ov-0024
+    kind: commander_link
+    target: {battle: Battle_of_Ajnadayn-e13a817c51, side: Byzantine Empire, mention: Vardan}
+    value: none
+    source: "Wikipedia, 'Battle of Ajnadayn', infobox and Byzantine command discussion ('Wardan' in al-Azdi, possibly a corruption of the Armenian name Vardan)"
+    note: "'Vardan' was exact-matched to Philippikos Bardanes (Q44560), emperor 711-713, born about 680. The Ajnadayn commander is an otherwise unidentified 'Wardan' with no Wikidata item, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0025
+    kind: commander_link
+    target: {battle: Battle_of_Cannae-db8daba8fd, side: Roman Republic, mention: Servilius Geminus}
+    value: Q554632
+    source: "Wikipedia, 'Battle of Cannae', section 'Tactical deployment' (centre commanded by Geminus Servilius); Wikidata Q554632 (Gnaeus Servilius Geminus, consul 217 BC, died 2 August 216 BC)"
+    note: "Left corpus-local although the person is on Wikidata. Linked so the Cannae attribution entry (ov-0050) can name him by Q-id. Not on the review list."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0026
+    kind: commander_link
+    target: {battle: Battle_of_Chotusitz-acad9d761a, side: Austria, mention: Charles of Lorraine}
+    value: Q158232
+    source: "Wikipedia, 'Battle of Chotusitz', infobox; Wikidata Q158232 (Prince Charles Alexander of Lorraine, 1712-1780)"
+    note: "Linked to Q3659993, Charles de Lorraine, Count of Armagnac (1684-1751), a namesake who never commanded an Austrian army. Charles Alexander commanded the Austrians at Chotusitz."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0027
+    kind: commander_link
+    target: {battle: Battle_of_Chotusitz-acad9d761a, side: Austria, mention: Von Daun}
+    value: Q93365
+    source: "Wikipedia, 'Leopold Joseph von Daun', section 'War of the Austrian Succession' ('he was present at Chotusitz and Prague')"
+    note: "A corpus-local duplicate of Daun (no candidate survived the date gate for the bare surname). Linked per battle rather than merging the name 'Von Daun', which also fits his father Wirich Philipp (d. 1741)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0028
+    kind: commander_link
+    target: {battle: Battle_of_Ilipa-5061e0673a, side: Roman Republic, mention: Publius Cornelius Scipio}
+    value: Q2253
+    source: "Polybius 11.20-24; Livy 28.12-16; Wikipedia, 'Battle of Ilipa', infobox and lead (Scipio Africanus against Hasdrubal Gisco and Mago, 206 BC); Wikidata Q2253"
+    note: "206 BC. The father died in 211 BC, so this can only be Africanus. Corpus-local general_id 817 ('Publius Cornelius Scipio', the bare name shared by father and son) holds this battle, splitting Africanus from his Q2253 row (Baecula). Replaces the draft general_merge, which would also catch the father (Q3293507) in any future crawl."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0029
+    kind: commander_link
+    target: {battle: Battle_of_Jena_Auerstedt-7e1600f782, side: French Empire, mention: "Jena:"}
+    value: none
+    source: "Wikipedia, 'Battle of Jena-Auerstedt', infobox (commander lists headed 'Jena:' and 'Auerstedt:')"
+    note: "'Jena:' is the infobox sub-heading for the Jena half of the battle and became a corpus-local general named 'Jena'. Unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0030
+    kind: commander_link
+    target: {battle: Battle_of_Jena_Auerstedt-7e1600f782, side: Prussia, mention: "Jena:"}
+    value: none
+    source: "Wikipedia, 'Battle of Jena-Auerstedt', infobox (commander lists headed 'Jena:' and 'Auerstedt:')"
+    note: "The same sub-heading on the Prussian side. Unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0031
+    kind: commander_link
+    target: {battle: Battle_of_Leipzig-d1490afa75, side: Russian Empire, mention: Charles John}
+    value: Q52927
+    source: "Wikipedia, 'Battle of Leipzig', infobox (Charles John, Crown Prince of Sweden, Army of the North); Wikidata Q52927 (Charles XIV John, 1763-1844)"
+    note: "Bernadotte as Crown Prince was left as a corpus-local 'Charles John', separate from his own Q52927 row (Austerlitz, Friedland), which split his career in two."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0032
+    kind: commander_link
+    target: {battle: Battle_of_Leuthen-8c2aaf1f10, side: Austria, mention: Joseph von Daun}
+    value: Q93365
+    source: "Wikipedia, 'Leopold Joseph von Daun', section 'Seven Years War' (present at Leuthen)"
+    note: "A corpus-local duplicate of Daun ('no candidate returned' for this surface form); his Hochkirch, Torgau and Burkersdorf rows are already on Q93365."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0033
+    kind: commander_link
+    target: {battle: Battle_of_Munda-43480b9c61, side: Caesarians, mention: Gaius Caninius Rebilus}
+    value: Q1345437
+    source: "Wikipedia, 'Gaius Caninius Rebilus (consul 45 BC)' (Caesar's legate in Spain, fought at Munda; citing Broughton p. 311 and Holmes vol. III p. 309); Wikidata Q1345437"
+    note: "Left corpus-local because three Wikidata items share the name; the resolver's best guess, Q1216113, is the consul of 12 BC. The Munda legate is the consul of 45 BC, Q1345437."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0034
+    kind: commander_link
+    target: {battle: Battle_of_New_Carthage-ce22844355, side: Rome, mention: Publius Cornelius Scipio}
+    value: Q2253
+    source: "Polybius 10.9-17; Livy 26.42-46; Wikipedia, 'Battle of Cartagena (209 BC)', infobox and lead; Wikidata Q2253"
+    note: "209 BC. Africanus took the city in his first Spanish campaign; the father had died in 211 BC. Corpus-local general_id 817 ('Publius Cornelius Scipio', the bare name shared by father and son) holds this battle, splitting Africanus from his Q2253 row (Baecula). Replaces the draft general_merge, which would also catch the father (Q3293507) in any future crawl."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0035
+    kind: commander_link
+    target: {battle: Battle_of_Noryang-552de750a7, side: Japan, mention: "Main:"}
+    value: none
+    source: "Wikipedia, 'Battle of Noryang', infobox (Japanese commanders listed under 'Main:' and 'Reinforcement:')"
+    note: "'Main:' is an infobox sub-heading and became a corpus-local general named 'Main'. Unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0036
+    kind: commander_link
+    target: {battle: Battle_of_Noryang-552de750a7, side: Joseon, mention: Yi Yeong-nam}
+    value: Q12612045
+    source: "Wikipedia, 'Battle of Noryang', infobox (Yi Yeong-nam, killed in action); Korean Wikipedia article on Yi Yeong-nam (1563-1598, killed at Noryang); Wikidata Q12612045"
+    note: "Fuzzy-matched to Yi Okki (Q482906), who was killed at Chilcheollyang in 1597, a year before Noryang. Yi Yeong-nam has his own Wikidata item (military personnel, Joseon, born 1563)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0037
+    kind: commander_link
+    target: {battle: Battle_of_Soor-06843782d2, side: Austria, mention: Charles of Lorraine}
+    value: Q158232
+    source: "Wikipedia, 'Battle of Soor', infobox; Wikidata Q158232 (Prince Charles Alexander of Lorraine, 1712-1780)"
+    note: "The same namesake error as Chotusitz: linked to the Count of Armagnac (Q3659993)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0038
+    kind: commander_link
+    target: {battle: Battle_of_Ticinus-fcf8bf3f9b, side: Rome, mention: Publius Scipio}
+    value: Q3293507
+    source: "Polybius 3.64-65; Wikipedia, 'Battle of Ticinus', infobox; Wikidata Q3293507 (Publius Cornelius Scipio, consul 218 BC, died 211 BC)"
+    note: "'Publius Scipio' was fuzzy-matched to Publius Sempronius Tuditanus (Q935520), of a different gens. The Roman commander at Ticinus was the consul P. Cornelius Scipio, father of Africanus."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0039
+    kind: commander_link
+    target: {battle: Battle_of_Wagram-95e4e4e5f2, side: First French Empire, mention: Jean Bernadotte}
+    value: Q52927
+    source: "Wikipedia, 'Battle of Wagram', infobox and order of battle (Bernadotte, IX (Saxon) Corps); Wikidata Q52927"
+    note: "Exact-matched to his elder brother Jean-Evangeliste Bernadotte (Q15968159, 1754-1813, 1st Baron Bernadotte). The marshal commanded IX Corps at Wagram."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0040
+    kind: commander_link
+    target: {battle: Battle_of_Waterloo-059b45c1f1, side: United Kingdom of Great Britain and Ireland, mention: Rowland Hill}
+    value: Q336485
+    source: "Wikipedia, 'Battle of Waterloo', infobox; Wikidata Q336485 (Rowland Hill, 1st Viscount Hill, British Army general, 1772-1842)"
+    note: "Left corpus-local (llm_uncertain): the candidates returned were the postal reformer, a preacher and a bare peerage record. Hill commanded II Corps of the Anglo-allied army."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0041
+    kind: commander_link
+    target: {battle: Battle_of_Zama-d41896ac60, side: Rome, mention: Publius Cornelius Scipio}
+    value: Q2253
+    source: "Polybius 15.9-16; Livy 30.29-35; Wikipedia, 'Battle of Zama', infobox and lead; Wikidata Q2253"
+    note: "202 BC, Africanus against Hannibal; the battle that earned the cognomen. Corpus-local general_id 817 ('Publius Cornelius Scipio', the bare name shared by father and son) holds this battle, splitting Africanus from his Q2253 row (Baecula). Replaces the draft general_merge, which would also catch the father (Q3293507) in any future crawl."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0042
+    kind: commander_link
+    target: {battle: Battle_of_Zumail-b492f1d7a2, side: Arab Christians, mention: "Rabi'a ibn Bujair"}
+    value: none
+    source: "Wikipedia, 'Battle of Zumail', infobox (Arab Christian commander: Rabi'a ibn Bujair)"
+    note: "Fuzzy-matched to Al-Qa'qa ibn Amr (Q4703043), who is also, correctly, on the Muslim side of this battle, so the losing side credited a winning general at 1.0. Rabi'a has no Wikidata item; unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0043
+    kind: commander_link
+    target: {battle: Battle_of_t_rboholy-802739c6af, side: Austria, mention: Charles of Lorraine}
+    value: Q158232
+    source: "Wikipedia, 'Battle of Prague (1757)', infobox; Wikidata Q158232"
+    note: "R2 rightly detached the Count of Armagnac (d. 1751) here but left the mention unresolved, so the Austrian side at Prague credits Browne alone at 1.0. Charles Alexander was the Austrian commander-in-chief."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0044
+    kind: commander_link
+    target: {battle: Battle_of_t_rboholy-802739c6af, side: Prussia, mention: Prince Henry of Prussia}
+    value: Q50993
+    source: "Wikipedia, 'Prince Henry of Prussia (1726-1802)' (distinguished himself at the Battle of Prague); Wikidata Q50993"
+    note: "The date gate rightly rejected the 1747-1767 namesake (Q457386) and the mention became corpus-local. Linked to Frederick the Great's brother."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0045
+    kind: commander_link
+    target: {battle: Battle_of_the_Great_Plains-97967833c3, side: Rome, mention: Publius Cornelius Scipio}
+    value: Q2253
+    source: "Polybius 14.7-8; Livy 30.8; Wikipedia, 'Battle of the Great Plains', infobox and lead; Wikidata Q2253"
+    note: "203 BC, Africanus with Laelius and Masinissa against Hasdrubal Gisco and Syphax. Corpus-local general_id 817 ('Publius Cornelius Scipio', the bare name shared by father and son) holds this battle, splitting Africanus from his Q2253 row (Baecula). Replaces the draft general_merge, which would also catch the father (Q3293507) in any future crawl."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0046
+    kind: commander_link
+    target: {battle: Battle_of_the_Trebia-9d56448781, side: Rome, mention: Sempronius Longus}
+    value: Q382276
+    source: "Polybius 3.68-74; Wikipedia, 'Battle of the Trebia', infobox; Wikidata Q382276 (Tiberius Sempronius Longus, consul 218 BC, died 210 BC)"
+    note: "Left corpus-local ('no candidate returned' for the short form). The consul of 218 BC is Q382276; Q1275151, already in the corpus at Grumentum, is his son, the consul of 194 BC."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0053
+    kind: commander_link
+    target: {battle: Battle_of_Kasserine_Pass-72c07c66a7, side: United States, mention: Kenneth Anderson}
+    value: Q259769
+    source: "Wikipedia, 'Battle of Kasserine Pass', infobox; Wikidata Q259769 (Kenneth Arthur Noel Anderson, British Army general, 1891-1959)"
+    note: "Left corpus-local. The British First Army commander is Q259769; linking him lets ov-0051 key him by Q-id. Numbered out of order because it was added after the user's review."
+    reviewed: {by: lee, "on": 2026-10-17}
+
+  - id: ov-0054
+    kind: commander_link
+    target: {battle: Operation_Torch-047bfa5615, side: United States, mention: Kenneth Anderson}
+    value: Q259769
+    source: "Wikipedia, 'Operation Torch', infobox and section 'Eastern Task Force'; Wikidata Q259769 (Kenneth Arthur Noel Anderson, British Army general, 1891-1959)"
+    note: "Companion to ov-0053. Anderson commanded the Eastern Task Force and then British First Army in Torch. Without this link his Torch mention stays a corpus-local 'Kenneth Anderson' and becomes a twin of Q259769 on the second resolve run (fails no_duplicate_generals). Added after DB review, 2026-10-18."
+    reviewed: {by: lee, "on": 2026-10-18}
+
+  # --- battle_type --------------------------------------------------------------
+  - id: ov-0047
+    kind: battle_type
+    target: {battle: Battle_of_Fort_Donelson-895333a0cf}
+    value: siege_offensive
+    source: "Wikipedia, 'Battle of Fort Donelson' (investment of the fort, the repulsed gunboat attack of 14 February, the breakout attempt of 15 February, the surrender)"
+    note: "Typed naval (an extract value with NULL battle_type_source, which classify never revisits). Grant's army invested and took a land fort; Foote's gunboat attack was repulsed. The corpus types Vicksburg siege_offensive."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0048
+    kind: battle_type
+    target: {battle: Battle_of_Marathon-82f0071471}
+    value: field
+    source: "Herodotus 6.102-117; Wikipedia, 'Battle of Marathon', section 'Battle'"
+    note: "Typed naval, probably because the Persian fleet appears in the infobox. Marathon was a pitched infantry battle on the plain."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  # --- attribution --------------------------------------------------------------
+  - id: ov-0049
+    kind: attribution
+    target: {battle: Battle_of_Actium-639679a575, side: "Octavian's forces"}
+    value:
+      - {general: Q48174, role: field_commander, rank: 0, weight: 0.70}
+      - {general: Q1405, role: supreme_commander, rank: 1, weight: 0.10}
+      - {general: Q727792, role: subordinate, rank: 1, weight: 0.10, reports_to: Q48174}
+      - {general: Q1558039, role: subordinate, rank: 1, weight: 0.10, reports_to: Q48174}
+    source: "Plutarch, Antony 65-66; Velleius Paterculus 2.85; Wikipedia, 'Battle of Actium', section 'Order of battle'"
+    note: "The LLM gave Agrippa 0.60 and Octavian 0.20, failing the expert check (above 0.7). Agrippa commanded the fleet from the left wing with Arruntius in the centre and Lurius on the right; Octavian was the political principal, so supreme_commander at 0.10."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0050
+    kind: attribution
+    target: {battle: Battle_of_Cannae-db8daba8fd, side: Roman Republic}
+    value:
+      - {general: Q315274, role: field_commander, rank: 0, weight: 0.50}
+      - {general: Q432244, role: subordinate, rank: 1, weight: 0.25, reports_to: Q315274}
+      - {general: Q554632, role: subordinate, rank: 1, weight: 0.15, reports_to: Q315274}
+      - {general: Q935520, role: subordinate, rank: 1, weight: 0.05, reports_to: Q315274}
+      - {general: Gaius Octavius, role: subordinate, rank: 1, weight: 0.05, reports_to: Q315274}
+    source: "Polybius 3.110, 3.113-114; Livy 22.45-46; Wikipedia, 'Battle of Cannae', sections 'Roman command' and 'Tactical deployment'"
+    note: "The LLM split Varro and Paullus 0.4/0.4 as co-field commanders. The traditional account puts Varro in command on the day, Paullus on the right wing and Servilius in the centre, and classify's own rule favours the consul who held command on the day. Samuels and Daly doubt the tradition (see notes)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0051
+    kind: attribution
+    target: {battle: Battle_of_Kasserine_Pass-72c07c66a7, side: United States}
+    value:
+      - {general: Q2707601, role: field_commander, rank: 0, weight: 0.82}
+      - {general: Q259769, role: theatre_commander, rank: 1, weight: 0.10}
+      - {general: Q381244, role: subordinate, rank: 2, weight: 0.08, reports_to: Q259769}
+    source: "Martin Blumenson, Kasserine Pass (1967) and 'Kasserine Pass, 30 January-22 February 1943' in America's First Battles (1986); Wikipedia, 'Battle of Kasserine Pass', lead ('The Allied forces were from the U.S. II Corps (Major General Lloyd Fredendall)') and section 'Aftermath', subsection 'Eisenhower'"
+    note: "The LLM made Anderson (British First Army) the rank-0 theatre_commander at 0.45 with Fredendall his subordinate at 0.45. II Corps fought the battle and Fredendall directed it, so he is the field commander. Anderson commanded the front above him and shares blame for dispersing 1st Armored Division, so theatre_commander rank 1 with no reports_to, at the classify table's 0.10. Juin commanded the French forces in Tunisia (XIX Corps), which Anderson's front command included; marginal to the battle, subordinate at the table's 0.08."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  - id: ov-0052
+    kind: attribution
+    target: {battle: Battle_of_the_Bulge-35837b5379, side: United States}
+    value:
+      - {general: Q207955, role: field_commander, rank: 0, weight: 0.25}
+      - {general: Q152025, role: field_commander, rank: 0, weight: 0.22}
+      - {general: Q9916, role: supreme_commander, rank: 1, weight: 0.05}
+      - {general: Q186492, role: subordinate, rank: 1, weight: 0.20, reports_to: Q207955}
+      - {general: Q44400, role: subordinate, rank: 1, weight: 0.18, reports_to: Q152025}
+      - {general: Q434110, role: subordinate, rank: 1, weight: 0.02, reports_to: Q152025}
+      - {general: Q579115, role: subordinate, rank: 1, weight: 0.05}
+      - {general: Q2739491, role: subordinate, rank: 1, weight: 0.03}
+    source: "Wikipedia, 'Battle of the Bulge', infobox (First Army under 21st Army Group 20 December - 16 January) and section 'Strategy and leadership' (subsections 'Allied high-command controversy' and 'Montgomery's actions')"
+    note: "The LLM made Eisenhower the rank-0 theatre_commander at 0.28; as SHAEF commander he is supreme_commander at 0.05. The battle was fought by Bradley's 12th Army Group and, north of the salient from 20 December, Montgomery's 21st Army Group with US First Army under it (so Hodges reports to Montgomery); Patton's Third Army relieved Bastogne."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
