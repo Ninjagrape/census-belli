@@ -39,7 +39,7 @@ from typing import Final
 import structlog
 
 from pipeline.overrides import OverrideEntry, OverrideReport, target_key
-from pipeline.resolvers.candidates import QidLookupSource
+from pipeline.resolvers.candidates import QidLookupSource, is_unlabelled
 from pipeline.resolvers.matcher import partition_by_lifespan
 from pipeline.resolvers.names import clean_surface, name_keys
 from pipeline.resolvers.records import Candidate, Decision, Mention, MentionGroup
@@ -134,6 +134,20 @@ def _candidate_for(source: object, qid: str) -> Candidate | None:
     return source.candidate_by_qid(qid)
 
 
+def _named(candidate: Candidate, name: str) -> Candidate:
+    """Give an unlabelled entity the editor's name for it.
+
+    Args:
+        candidate: A fetched entity.
+        name: The name the override supplies.
+
+    Returns:
+        The candidate with ``name`` as its label when it had no English label,
+        otherwise the candidate unchanged.
+    """
+    return replace(candidate, label=name) if is_unlabelled(candidate) else candidate
+
+
 class ResolveOverrides:
     """The resolve-stage overrides of one run, and what became of each.
 
@@ -225,6 +239,16 @@ class ResolveOverrides:
                         "the mention keeps its automatic resolution",
                     )
                     continue
+                if is_unlabelled(candidate):
+                    # The editor named the person; the label service had no English
+                    # label to give, and a Q-id must never become a canonical name.
+                    candidate = _named(candidate, group.display_name)
+                    logger.info(
+                        "resolve_manual_link_unlabelled",
+                        id=entry.id,
+                        qid=qid,
+                        name=candidate.label,
+                    )
                 decision = _linked_decision(
                     entry, candidate, f"commander_link {entry.id}: linked to {qid} by override"
                 )
@@ -275,9 +299,17 @@ class ResolveOverrides:
                 continue
             for group in matched:
                 previous = decisions[group.key]
+                named = _named(candidate, previous.canonical_name)
+                if named is not candidate:
+                    logger.info(
+                        "resolve_manual_link_unlabelled",
+                        id=entry.id,
+                        qid=target_qid,
+                        name=named.label,
+                    )
                 decisions[group.key] = _linked_decision(
                     entry,
-                    candidate,
+                    named,
                     f"general_merge {entry.id}: {previous.canonical_name!r} "
                     f"({previous.qid or 'corpus-local'}) merged into {target_qid}",
                 )

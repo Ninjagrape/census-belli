@@ -60,6 +60,7 @@ __all__ = [
     "fetch_candidates",
     "fetch_candidates_by_qid",
     "fetch_non_person_kinds",
+    "is_unlabelled",
     "person_candidates",
     "query_names",
 ]
@@ -465,11 +466,16 @@ def _preferred_text(block: Any) -> str:
     return ""
 
 
-def person_candidates(payload: dict[str, Any]) -> list[Candidate]:
+def person_candidates(
+    payload: dict[str, Any], *, include_unlabelled: bool = False
+) -> list[Candidate]:
     """Build candidates from one crawled Wikidata payload.
 
     Args:
         payload: A ``wbgetentities`` response or a bare entity.
+        include_unlabelled: Keep a human with no English label, giving it its
+            Q-id as the label as the SPARQL path does. Off for name matching,
+            where such an entity has nothing to match on.
 
     Returns:
         One candidate per human entity in the payload. Non-human entities
@@ -488,8 +494,9 @@ def person_candidates(payload: dict[str, Any]) -> list[Candidate]:
 
         qid = str(entity.get("id") or "")
         label = _preferred_text(entity.get("labels"))
-        if not qid or not label:
+        if not qid or not (label or include_unlabelled):
             continue
+        label = label or qid
 
         # Aliases from every language asked about, because the bare form a
         # commander is usually called by is as likely to sit under "mul" as
@@ -567,9 +574,12 @@ class LocalCandidateSource:
                 continue
             if not isinstance(payload, dict):
                 continue
-            for candidate in person_candidates(payload):
-                people += 1
+            for candidate in person_candidates(payload, include_unlabelled=True):
                 self._by_qid.setdefault(candidate.qid.upper(), candidate)
+                # An unlabelled entity is reachable by Q-id only, for a manual link.
+                if is_unlabelled(candidate):
+                    continue
+                people += 1
                 for key in candidate_keys(candidate):
                     self._by_key.setdefault(key, []).append(candidate)
 
@@ -746,6 +756,19 @@ def _looks_like_qid(value: str) -> bool:
         it is not a name, not which entity it happens to name.
     """
     return _QID_SHAPE.fullmatch(value.strip()) is not None
+
+
+def is_unlabelled(candidate: Candidate) -> bool:
+    """Whether a candidate has no English label, only the bare Q-id standing in.
+
+    Args:
+        candidate: The entity.
+
+    Returns:
+        True when the label is a Q-id, as the label service returns for an
+        entity with no label in any requested language.
+    """
+    return _looks_like_qid(candidate.label)
 
 
 def _preferred_name(label: str, names: set[str], qid: str) -> str:
@@ -1122,10 +1145,12 @@ async def fetch_candidates_by_qid(
         batch_size: Ids per query.
 
     Returns:
-        Each id the endpoint returned a human with a real label for. An id that
-        is absent, not a human, or whose label the service could not resolve
-        is left out, and the caller reports it rather than inventing a person.
-        A failed batch is logged and skipped.
+        Each id the endpoint returned a human for. A human with no English
+        label comes back with its Q-id as the label (see :func:`is_unlabelled`)
+        and the manual override layer names it; this lookup is used only for
+        manual links, never for automatic matching. An id that is absent or
+        not a human is left out, and the caller reports it rather than
+        inventing a person. A failed batch is logged and skipped.
     """
     found: dict[str, Candidate] = {}
     size = max(1, batch_size)
@@ -1151,8 +1176,7 @@ async def fetch_candidates_by_qid(
             parse_sparql_bindings(result.text), names_are_aliases=False
         ):
             if _looks_like_qid(candidate.label):
-                logger.warning("sparql_qid_entity_has_no_label", qid=candidate.qid)
-                continue
+                logger.info("sparql_qid_entity_has_no_label", qid=candidate.qid)
             found[candidate.qid.upper()] = candidate
 
     logger.info("sparql_qid_prefetch_complete", asked=len(wanted), found=len(found))
