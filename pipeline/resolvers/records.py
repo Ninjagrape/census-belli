@@ -45,6 +45,10 @@ METHODS: Final[tuple[str, ...]] = (
     "non_person",  # the mention names an organisation, formation or place, not a person
     "llm_failed",  # the disambiguation call did not return usable data
     "llm_deferred",  # the disambiguation request awaits offline processing
+    # A hand-curated override from config/overrides.yaml decided it. Such a decision
+    # bypasses the lifespan guard and the gap split on purpose: that is what a
+    # correction is for.
+    "manual",
 )
 
 # Written to ``generals.notes`` for a corpus-local person created because the LLM
@@ -223,6 +227,8 @@ class Decision:
         reasoning: Why, in one line. From the LLM when it decided.
         candidates_considered: How many candidates survived the context gate.
         candidate: The matched entity in full, when linked.
+        override_id: The ``config/overrides.yaml`` entry that made the decision,
+            empty for every decision the stage reached on its own.
     """
 
     status: DecisionStatus
@@ -235,6 +241,7 @@ class Decision:
     reasoning: str = ""
     candidates_considered: int = 0
     candidate: Candidate | None = None
+    override_id: str = ""
 
 
 @dataclass

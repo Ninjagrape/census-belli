@@ -571,6 +571,7 @@ def test_every_resolve_gate_executes_against_the_real_schema(conn: Connection) -
         "wikidata_link_rate",
         "commanders_per_battle",
         "alias_coverage",
+        "overrides_applied",
     }
     for name, result in results.items():
         assert "does not exist" not in (result.message or ""), f"{name}: {result.message}"

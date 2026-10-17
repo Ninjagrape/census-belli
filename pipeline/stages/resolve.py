@@ -30,7 +30,7 @@ from __future__ import annotations
 import asyncio
 import json
 import statistics
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Final
@@ -41,6 +41,7 @@ import structlog
 from pipeline.crawlers.fetcher import Fetcher, RateLimiter
 from pipeline.imputers.priors import DEFAULT_PRIORS_PATH, era_of_year, load_priors
 from pipeline.llm import LLMService
+from pipeline.overrides import OverrideReport, clear_report, load_overrides, overrides_path
 from pipeline.resolvers import (
     AMBIGUITY_MARGIN,
     Candidate,
@@ -83,8 +84,10 @@ from pipeline.resolvers.candidates import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_MAX_NAMES_PER_GROUP,
     candidate_keys,
+    fetch_candidates_by_qid,
 )
 from pipeline.resolvers.names import clean_surface, name_keys
+from pipeline.resolvers.overrides import ResolveOverrides
 from pipeline.stages.base import StageContext, StageOutcome
 
 __all__ = ["LazyService", "resolve_groups", "run"]
@@ -600,6 +603,7 @@ def resolve_groups(
     system: str = "",
     template: str = "",
     schema: dict[str, Any] | None = None,
+    overrides: ResolveOverrides | None = None,
 ) -> dict[str, Decision]:
     """Decide what every group refers to.
 
@@ -620,22 +624,35 @@ def resolve_groups(
         system: ``prompt.system`` from the spec.
         template: ``prompt.user_template`` from the spec.
         schema: ``prompt.output_schema`` from the spec.
+        overrides: The run's manual overrides. ``commander_link`` mentions are
+            taken out of their groups first and resolved as fixed decisions
+            that skip the guards, the matcher and the LLM; ``general_merge``
+            relinks the final decisions at the end.
 
     Returns:
         A final decision per group, keyed by group key.
     """
+    manual_groups: list[MentionGroup] = []
+    fixed: dict[str, Decision] = {}
+    if overrides is not None:
+        manual_groups, fixed = overrides.take_links(groups, source)
     groups[:] = _split_lifetimes(groups)
+    groups.extend(manual_groups)
     resolver = _GroupResolver(groups, source, threshold=threshold, margin=margin)
+    # _decide leaves a group that already has a decision alone, which is what
+    # keeps a manual link away from the lifespan guard and the matcher.
+    resolver.decisions.update(fixed)
     resolver.decide_from(0)
     decisions = resolver.decisions
 
     # Step 2, second half: a bare surname Wikidata did not answer for often
     # belongs to somebody this corpus has already pinned to an entity. Only
     # Wikidata-anchored identities are offered as targets, so corpus matches
-    # cannot chain off each other.
+    # cannot chain off each other. A manual link is not an anchor: a correction
+    # for one mention must not pull other mentions in by name.
     anchors = _build_identities(
         groups,
-        {key: d for key, d in decisions.items() if d.status == "linked"},
+        {key: d for key, d in decisions.items() if d.status == "linked" and d.method != "manual"},
     )
     if anchors:
         position = 0
@@ -688,6 +705,9 @@ def resolve_groups(
         decisions.pop(group.key, None)
     groups[:] = [g for g in groups if g.mentions]
 
+    if overrides is not None:
+        overrides.apply_merges(groups, decisions, source)
+
     for group in groups:
         decision = decisions[group.key]
         group.confidence = decision.confidence
@@ -718,6 +738,7 @@ def _log_row(group: MentionGroup, decision: Decision, general_id: int | None) ->
         if group.split_from or group.split_reason
         else {}
     )
+    manual = {"override_id": decision.override_id} if decision.override_id else {}
     return {
         "group_key": group.key,
         "display_name": group.display_name,
@@ -736,6 +757,7 @@ def _log_row(group: MentionGroup, decision: Decision, general_id: int | None) ->
         "reasoning": decision.reasoning,
         "general_id": general_id,
         **split,
+        **manual,
     }
 
 
@@ -832,6 +854,7 @@ async def _gather_sparql_candidates(
     search_batch_size: int,
     threshold: float,
     margin: float,
+    qids: Sequence[str] = (),
 ) -> PrefetchedCandidateSource:
     """Open one client and ask the query service about every group.
 
@@ -856,6 +879,7 @@ async def _gather_sparql_candidates(
         search_batch_size: Names per search query; searches cost more each.
         threshold: The spec's ``fuzzy_threshold``.
         margin: The spec's ``ambiguity_margin``.
+        qids: Entities manual overrides name outright, fetched by item id.
 
     Returns:
         A source holding the candidates and non-person verdicts found.
@@ -893,6 +917,8 @@ async def _gather_sparql_candidates(
             source.set_non_person(
                 await fetch_non_person_kinds(fetcher, kind_names, batch_size=batch_size)
             )
+        if qids:
+            source.add_by_qid(await fetch_candidates_by_qid(fetcher, qids, batch_size=batch_size))
         return source
 
 
@@ -905,6 +931,7 @@ def _build_candidate_source(
     *,
     threshold: float,
     margin: float,
+    qids: Sequence[str] = (),
 ) -> CandidateSource:
     """Construct the candidate source the spec asks for.
 
@@ -917,6 +944,8 @@ def _build_candidate_source(
         threshold: The spec's ``fuzzy_threshold``, for deciding which groups
             the search fallback should try.
         margin: The spec's ``ambiguity_margin``.
+        qids: Q-ids manual overrides name, which the SPARQL source fetches
+            directly; the local source indexes them from disk.
 
     Returns:
         A source. A dry run always gets the null source, because the point of
@@ -957,6 +986,7 @@ def _build_candidate_source(
             search_batch_size=int(params.get("search_batch_size", _DEFAULT_SEARCH_BATCH_SIZE)),
             threshold=threshold,
             margin=margin,
+            qids=qids,
         )
     )
 
@@ -1255,6 +1285,12 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
     # stage spends a single query.
     system, template, schema = prompt_parts(spec)
 
+    path, explicit = overrides_path(params)
+    overrides = load_overrides(path, required=explicit)
+    clear_report("resolve", processed_root)
+    report = OverrideReport("resolve", overrides, limited=ctx.limit is not None)
+    resolve_overrides = ResolveOverrides(overrides.for_stage("resolve"), report)
+
     mentions = load_mentions(
         processed_root / _COMMANDERS_FILE,
         processed_root / _BATTLES_FILE,
@@ -1276,7 +1312,14 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
     counts.groups = len(groups)
 
     source = _build_candidate_source(
-        source_kind, groups, params, raw_root, ctx, threshold=threshold, margin=margin
+        source_kind,
+        groups,
+        params,
+        raw_root,
+        ctx,
+        threshold=threshold,
+        margin=margin,
+        qids=resolve_overrides.required_qids(groups),
     )
     source.prefetch(groups)
 
@@ -1294,6 +1337,7 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
         system=system,
         template=template,
         schema=schema,
+        overrides=resolve_overrides,
     )
 
     counts.groups = len(groups)
@@ -1309,6 +1353,7 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
     else:
         logger.info("resolve_database_write_skipped", dry_run=ctx.dry_run)
 
+    report.write(processed_root)
     _write_resolution_log(processed_root / _RESOLUTION_LOG, groups, decisions, identities)
     _write_jsonl(processed_root / _DUPLICATE_BATTLES, [pair.as_dict() for pair in duplicates])
     _write_jsonl(processed_root / _UNPLACED_MENTIONS, [_unplaced_row(m) for m in homeless])
