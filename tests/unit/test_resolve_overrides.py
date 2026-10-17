@@ -374,7 +374,7 @@ def _qid_body(*rows: tuple[str, str]) -> str:
     )
 
 
-def test_the_sparql_fetch_by_qid_binds_the_item_and_drops_unlabelled_ones() -> None:
+def test_the_sparql_fetch_by_qid_binds_the_item_and_keeps_unlabelled_ones() -> None:
     from pipeline.resolvers.candidates import fetch_candidates_by_qid
     from tests.unit.test_resolve import _StubFetcher
 
@@ -383,7 +383,8 @@ def test_the_sparql_fetch_by_qid_binds_the_item_and_drops_unlabelled_ones() -> N
         fetch_candidates_by_qid(fetcher, ["q517", "Q9", "Q517"])  # type: ignore[arg-type]
     )
 
-    assert set(found) == {"Q517"}
+    assert set(found) == {"Q517", "Q9"}
+    assert found["Q9"].label == "Q9"
     assert found["Q517"].birth_year == 1769
     assert len(fetcher.queries) == 1
     assert "VALUES ?person { wd:Q517 wd:Q9 }" in fetcher.queries[0]
@@ -395,3 +396,62 @@ def test_a_failed_qid_batch_yields_nothing_rather_than_raising() -> None:
 
     found = asyncio.run(fetch_candidates_by_qid(_StubFetcher(None), ["Q517"]))  # type: ignore[arg-type]
     assert found == {}
+
+
+UNLABELLED = Candidate(qid="Q12612045", label="Q12612045", birth_year=1563)
+
+
+def test_a_manual_link_names_an_unlabelled_human_from_the_mention(tmp_path: Path) -> None:
+    mentions = [_mention("Yi Yeong-nam", "Battle of Noryang", 1598, "Joseon")]
+    entry = _entry(
+        1,
+        "commander_link",
+        {"battle": "Battle_of_Noryang", "side": "Joseon", "mention": "Yi Yeong-nam"},
+        "Q12612045",
+    )
+    run = _Run([entry], mentions, _Source([], [UNLABELLED]), tmp_path)
+
+    decision = run.decision_of("Yi Yeong-nam")
+    assert (decision.status, decision.qid, decision.canonical_name) == (
+        "linked",
+        "Q12612045",
+        "Yi Yeong-nam",
+    )
+    assert decision.candidate is not None
+    assert decision.candidate.label == "Yi Yeong-nam"
+    assert decision.candidate.birth_year == 1563 and decision.candidate.death_year is None
+    events = [e for e in run.logs if e["event"] == "resolve_manual_link_unlabelled"]
+    assert [(e["id"], e["qid"], e["name"]) for e in events] == [
+        ("ov-0001", "Q12612045", "Yi Yeong-nam")
+    ]
+
+
+def test_a_merge_names_an_unlabelled_target_from_the_source_general(tmp_path: Path) -> None:
+    run = _Run(
+        [_merge(1, "Mago", "Q12612045")],
+        [_mention("Mago")],
+        _Source([], [UNLABELLED]),
+        tmp_path,
+    )
+    decision = run.decision_of("Mago")
+    assert (decision.qid, decision.canonical_name) == ("Q12612045", "Mago")
+    assert any(e["event"] == "resolve_manual_link_unlabelled" for e in run.logs)
+
+
+def test_a_labelled_manual_link_logs_no_unlabelled_event(tmp_path: Path) -> None:
+    run = _Run(
+        [_link(1, "Hannibal", "Q1")], [_mention("Hannibal")], _Source([], [HANNIBAL]), tmp_path
+    )
+    assert not any(e["event"] == "resolve_manual_link_unlabelled" for e in run.logs)
+
+
+def test_the_local_source_serves_an_unlabelled_human_by_qid_only(tmp_path: Path) -> None:
+    payload = _entity("Q12612045", "x", language="ko")
+    (tmp_path / "Q12612045.json").write_text(json.dumps(payload), encoding="utf-8")
+    source = LocalCandidateSource(tmp_path)
+
+    found = source.candidate_by_qid("Q12612045")
+    assert found is not None and found.label == "Q12612045"
+    group = group_mentions([_mention("x")])[0]
+    assert source.search(group) == []
+    assert source.search(group_mentions([_mention("Q12612045")])[0]) == []

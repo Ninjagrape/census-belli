@@ -301,3 +301,23 @@ def test_the_gate_fails_before_the_stage_has_run(conn: Connection, tmp_path: Pat
     corpus = _Corpus(conn, tmp_path)
     corpus.write_overrides(GOOD)
     assert not corpus.gate().passed
+
+
+def test_a_manual_link_to_an_unlabelled_human_is_named_from_the_mention(
+    conn: Connection, tmp_path: Path
+) -> None:
+    corpus = _Corpus(conn, tmp_path)
+    payload = _person("Q12612", "x", 300, 250)
+    entity = payload["entities"]["Q12612"]
+    entity["labels"] = {"ko": {"value": "scipio-ko"}}
+    (corpus.raw / "wikidata" / "Q12612.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    corpus.write_overrides([_link(1, "Rome", "Scipio", "Q12612")])
+    corpus.run()
+
+    names = {
+        (str(r[0]), str(r[1]))
+        for r in conn.execute(text("SELECT wikidata_id, canonical_name FROM generals"))
+    }
+    assert ("Q12612", "Scipio") in names
+    assert not any(name == "Q12612" for _, name in names)
