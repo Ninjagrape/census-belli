@@ -89,6 +89,15 @@ from pipeline.classifiers import (
     write_role_decisions,
     write_terrain,
 )
+from pipeline.classifiers.overrides import (
+    ManualBattleType,
+    ManualSide,
+    match_attribution,
+    match_battle_types,
+    overridden_side_ids,
+    write_manual_battle_types,
+    write_manual_role_evidence,
+)
 from pipeline.db import get_connection
 from pipeline.extractors.article import clean_article_text
 from pipeline.llm import LLMService
@@ -96,6 +105,13 @@ from pipeline.llm.base import LLMConfigError, LLMRequest, request_hash
 from pipeline.llm.call_log import find_completed_call
 from pipeline.llm.factory import llm_params
 from pipeline.llm.offline import OfflineProvider
+from pipeline.overrides import (
+    OverrideEntry,
+    OverrideReport,
+    clear_report,
+    load_overrides,
+    overrides_path,
+)
 from pipeline.stages.base import StageContext, StageOutcome
 
 __all__ = [
@@ -159,6 +175,40 @@ class LazyService:
         if self._service is None:
             self._service = self._factory()
         return self._service
+
+
+def _spec_entries(spec: dict[str, Any]) -> list[OverrideEntry]:
+    """Load the classify overrides the spec's params point at.
+
+    Args:
+        spec: The loaded ``agents/classify.yaml``.
+
+    Returns:
+        The classify-owned entries, in file order.
+    """
+    path, explicit = overrides_path(spec.get("params") or {})
+    return load_overrides(path, required=explicit).for_stage("classify")
+
+
+def _manual_type_decisions(matches: list[ManualBattleType]) -> list[BattleTypeDecision]:
+    """Express manual battle types as decisions, for counting and missingness exclusion.
+
+    Args:
+        matches: Matched ``battle_type`` overrides.
+
+    Returns:
+        One decision per match. They are never passed to the writer: the
+        manual writer owns those rows.
+    """
+    return [
+        BattleTypeDecision(
+            battle_id=m.battle_id,
+            battle_type=m.battle_type,
+            evidence=f"manual override {m.entry.id}",
+            confidence=1.0,
+        )
+        for m in matches
+    ]
 
 
 def _deterministic_roles(
@@ -304,18 +354,16 @@ def build_pending_role_requests(
     """
     groups = load_side_groups(conn)
     _decisions, pending = _deterministic_roles(groups)
+    slugs = load_battle_source_slugs(conn)
+    # A side a manual attribution overrides is never read by the LLM, so it
+    # must not be exported for one either.
+    manual_ids = overridden_side_ids(_spec_entries(spec), groups, slugs)
+    pending = [side for side in pending if side.side_id not in manual_ids]
     if not pending:
         return []
 
     battle_urls = load_battle_wikipedia_urls(conn)
-    return _build_request_pairs(
-        pending,
-        battle_urls,
-        raw_root,
-        spec,
-        excerpt_max_chars,
-        load_battle_source_slugs(conn),
-    )
+    return _build_request_pairs(pending, battle_urls, raw_root, spec, excerpt_max_chars, slugs)
 
 
 def _tally_role_method(decision: RoleDecision, counts: ClassifyCounts) -> None:
@@ -325,7 +373,9 @@ def _tally_role_method(decision: RoleDecision, counts: ClassifyCounts) -> None:
         decision: A final role decision, deterministic or LLM-derived.
         counts: The run's counters.
     """
-    if decision.attribution_method == "rule_single":
+    if decision.attribution_method == "manual":
+        counts.manual_attributions += 1
+    elif decision.attribution_method == "rule_single":
         counts.single_commander += 1
     elif decision.attribution_method == "rule_roles":
         counts.rule_roles += 1
@@ -519,6 +569,7 @@ def _infer_battle_types(
     conn: Any,
     raw_root: Path,
     counts: ClassifyCounts,
+    skip_battle_ids: frozenset[int] = frozenset(),
 ) -> list[BattleTypeDecision]:
     """Infer a type for every battle still 'unknown', and spot campaigns.
 
@@ -526,6 +577,9 @@ def _infer_battle_types(
         conn: An open database connection.
         raw_root: The ``data/raw`` directory, or a test fixture root.
         counts: The run's counters.
+        skip_battle_ids: Battles a manual override types this run. The query
+            already leaves 'manual' rows alone; this covers a dry run and an
+            override that is not in the database yet.
 
     Returns:
         One decision per battle read. A battle an earlier run typed by rule is
@@ -538,6 +592,8 @@ def _infer_battle_types(
     decisions: list[BattleTypeDecision] = []
     for battle in load_battles_needing_type(conn):
         battle_id = battle["battle_id"]
+        if battle_id in skip_battle_ids:
+            continue
         if battle["current_type"] == "campaign":
             if infer_campaign(
                 battle_id,
@@ -718,9 +774,17 @@ def build_pending_missingness_requests(
     Returns:
         ``(context, request)`` pairs in ``log_id`` order.
     """
+    manual_types = [
+        m
+        for _entry, m in match_battle_types(_spec_entries(spec), load_battle_source_slugs(conn))
+        if isinstance(m, ManualBattleType)
+    ]
     exclude = _missingness_exclusions(
         conn,
-        _infer_battle_types(conn, raw_root, ClassifyCounts()),
+        _infer_battle_types(
+            conn, raw_root, ClassifyCounts(), frozenset(m.battle_id for m in manual_types)
+        )
+        + _manual_type_decisions(manual_types),
         _infer_terrain(conn, raw_root),
     )
     undecided = [
@@ -791,6 +855,78 @@ def _resolve_pending_missingness(
     return decisions
 
 
+def _apply_attribution_overrides(
+    entries: list[OverrideEntry],
+    groups: list[SideGroup],
+    slugs: dict[int, str | None],
+    report: OverrideReport,
+) -> list[ManualSide]:
+    """Match every attribution entry to its side and report the outcome.
+
+    Args:
+        entries: The classify-owned entries.
+        groups: The sides this run processes.
+        slugs: Battle id to ``source_slug``.
+        report: The run's override report.
+
+    Returns:
+        The entries that matched and validated; nothing is written here.
+    """
+    applied: list[ManualSide] = []
+    for entry in entries:
+        if entry.kind != "attribution":
+            continue
+        match = match_attribution(entry, groups, slugs)
+        if isinstance(match, ManualSide):
+            applied.append(match)
+            report.applied(entry)
+            logger.info(
+                "classify_attribution_override_applied",
+                override_id=entry.id,
+                battle=entry.target["battle"],
+                side=entry.target["side"],
+                commanders=len(match.decisions),
+            )
+        else:
+            report.unmatched(entry, match)
+            logger.warning(
+                "classify_attribution_override_unmatched", override_id=entry.id, reason=match
+            )
+    return applied
+
+
+def _apply_battle_type_overrides(
+    entries: list[OverrideEntry], slugs: dict[int, str | None], report: OverrideReport
+) -> list[ManualBattleType]:
+    """Match every battle_type entry to its battle and report the outcome.
+
+    Args:
+        entries: The classify-owned entries.
+        slugs: Battle id to ``source_slug``.
+        report: The run's override report.
+
+    Returns:
+        The entries whose battle was found; nothing is written here.
+    """
+    matched: list[ManualBattleType] = []
+    for entry, match in match_battle_types(entries, slugs):
+        if isinstance(match, ManualBattleType):
+            matched.append(match)
+            report.applied(entry)
+            logger.info(
+                "classify_battle_type_override_applied",
+                override_id=entry.id,
+                battle=entry.target["battle"],
+                battle_type=match.battle_type,
+            )
+        else:
+            report.unmatched(entry, match)
+            logger.warning(
+                "classify_battle_type_override_unmatched", override_id=entry.id, reason=match
+            )
+    return matched
+
+
 def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | None:
     """Run the stage against an already-open connection.
 
@@ -822,22 +958,34 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
 
     counts = ClassifyCounts()
 
+    overrides_file, explicit = overrides_path(params)
+    overrides = load_overrides(overrides_file, required=explicit)
+    processed_root = Path(str(params.get("processed_root", PROCESSED_ROOT)))
+    # A dry run leaves the previous real run's report alone: it writes nothing
+    # else, so the report must keep describing what the database holds.
+    if not ctx.dry_run:
+        clear_report("classify", processed_root)
+    report = OverrideReport("classify", overrides, limited=ctx.limit is not None)
+    entries = overrides.for_stage("classify")
+
     groups = load_side_groups(conn)
     if ctx.limit is not None:
         groups = groups[: ctx.limit]
     counts.sides_processed = len(groups)
+    slugs = load_battle_source_slugs(conn)
 
     decisions_by_side, pending = _deterministic_roles(groups)
 
+    # After the rule pass, so the override has the last word, and before the
+    # request pairs are built, so an overridden side never costs an LLM call.
+    manual_sides = _apply_attribution_overrides(entries, groups, slugs, report)
+    for manual in manual_sides:
+        decisions_by_side[manual.side.side_id] = manual.decisions
+    manual_side_ids = {m.side.side_id for m in manual_sides}
+    pending = [side for side in pending if side.side_id not in manual_side_ids]
+
     battle_urls = load_battle_wikipedia_urls(conn)
-    pairs = _build_request_pairs(
-        pending,
-        battle_urls,
-        raw_root,
-        spec,
-        excerpt_max_chars,
-        load_battle_source_slugs(conn),
-    )
+    pairs = _build_request_pairs(pending, battle_urls, raw_root, spec, excerpt_max_chars, slugs)
 
     service = LazyService(
         None
@@ -865,9 +1013,22 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
     for decision in all_role_decisions:
         _tally_role_method(decision, counts)
 
-    battle_type_decisions = _infer_battle_types(conn, raw_root, counts)
+    manual_types = _apply_battle_type_overrides(entries, slugs, report)
+    if not ctx.dry_run:
+        # Before the rule pass reads the battles, so everything downstream
+        # sees the final type; the pass itself never selects a 'manual' row.
+        write_manual_battle_types(conn, manual_types)
+    manual_decisions = _manual_type_decisions(manual_types)
+    for manual_decision in manual_decisions:
+        _tally_battle_type(manual_decision, counts)
+    counts.manual_battle_types = len(manual_decisions)
+    battle_type_decisions = _infer_battle_types(
+        conn, raw_root, counts, frozenset(m.battle_id for m in manual_types)
+    )
     terrain_by_battle = _infer_terrain(conn, raw_root)
-    exclude_log_ids = _missingness_exclusions(conn, battle_type_decisions, terrain_by_battle)
+    exclude_log_ids = _missingness_exclusions(
+        conn, battle_type_decisions + manual_decisions, terrain_by_battle
+    )
     if not ctx.dry_run:
         # Before the missingness read, so a newly logged gap is classified in
         # this same run rather than waiting for the next.
@@ -894,6 +1055,7 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
         return None
 
     write_role_decisions(conn, all_role_decisions)
+    write_manual_role_evidence(conn, manual_sides)
     write_battle_type_decisions(conn, battle_type_decisions)
     counts.terrain_set = write_terrain(conn, terrain_by_battle)
     mark_populated_fields_observed(conn)
@@ -904,6 +1066,8 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
     counts.defenders_set += write_defender_flags(
         conn, _usable_llm_defender_flags(llm_defenders, pairs)
     )
+
+    report.write(processed_root)
 
     if service.built is not None:
         service.built.log_summary()

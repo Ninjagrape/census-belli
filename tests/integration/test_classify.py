@@ -158,6 +158,8 @@ def _load_spec(raw_root: Path) -> dict[str, Any]:
     spec = yaml.safe_load((AGENTS / "classify.yaml").read_text(encoding="utf-8"))
     spec["params"]["raw_root"] = str(raw_root)
     spec["params"]["llm_mode"] = "offline"
+    # Keeps the overrides report out of the real data/processed.
+    spec["params"]["processed_root"] = str(raw_root.parent / "processed")
     return spec
 
 
@@ -718,9 +720,7 @@ def test_running_classify_twice_writes_identical_rows(conn: Connection, tmp_path
     assert llm_rows >= 2, "the cached Actium answer should survive a re-run as 'llm'"
 
 
-def test_all_three_classify_gates_execute_with_no_sql_error(
-    conn: Connection, tmp_path: Path
-) -> None:
+def test_all_classify_gates_execute_with_no_sql_error(conn: Connection, tmp_path: Path) -> None:
     seed = _seed_corpus(conn, tmp_path)
     spec = _load_spec(seed["raw_root"])
     _seed_actium_llm_call(conn, spec, seed["raw_root"])
@@ -734,6 +734,7 @@ def test_all_three_classify_gates_execute_with_no_sql_error(
         "attribution_weights_sum",
         "battle_type_unknown_share",
         "missing_data_all_logged",
+        "overrides_applied",
     }
     for name, result in results.items():
         assert "does not exist" not in (result.message or ""), f"{name}: {result.message}"
