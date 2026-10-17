@@ -73,6 +73,15 @@ warning is expected (pytest-asyncio declared, not installed, on purpose).
    prior_predictive warning and on shrinkage.
 4. Open questions, decisions and the full Phase 1 record: `07-record.md`.
 
+User decisions, 2026-10-17: build the overrides design **as written**; a
+death-only or century-precision lifespan window stays generous and its
+namesake cases (Philippikos Bardanes at Ajnadayn) go in the overrides file,
+not a code change; **do not push** `main` until the refit is reviewed. This
+session's worktrees, `wip/*` branches and scratch databases are removed;
+older scratch databases from earlier sessions remain (`general_war_wt_{orch,
+crawl,extract,resolve,classify,reconcile,model,infra}`, `general_war_p1`,
+`_p23`, `_p4`, `_ci_repro`, `general_war_corpus`): ask before dropping.
+
 Say explicitly what was and was not verified against a database.
 
 ## 10. Honest status
