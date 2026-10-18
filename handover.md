@@ -11,7 +11,7 @@ would otherwise get it wrong. Session narratives go in
 Code comments cite "handover §9.3" (a file in `docs/handover/`) and
 "handover-log §16" (a file in `docs/handover-log/`).
 
-Last updated: 2026-10-18 (late morning).
+Last updated: 2026-10-18 (afternoon).
 
 ## 1. Current state
 
@@ -31,9 +31,13 @@ Last updated: 2026-10-18 (late morning).
   are always skipped), resolve (25/25, every gate passes, warning
   probable_duplicate_generals 6), reconcile run 84 (converged; same three
   warnings), classify (6/6, every gate passes; 18 batch answers imported).
-  **Impute run 85 did not converge** (min ESS 302 < 400, rhat 1.009, 0
-  divergences; run 83 had ESS 1038), so nothing was written and the pipeline
-  halted. Model, evaluate, report not run: there is no valid ranking.
+  Impute run 85 failed ESS (302, tau_p ridge with the Soviet Union offset);
+  `mcmc_samples` doubled to 4000 (user decision) and run 86 passes every gate
+  (rhat 1.006, ESS 685). Model run 108 (rounds 87-106, rhat 1.003, ESS 2038),
+  evaluate 5/5 gates (held-out 0.751, Brier 0.176), report written (89
+  headline, 643 under-determined). Warnings: PPC category, FMI (Zhukov),
+  circularity gap 0.224, 41 of top 50 outside the largest component. Both
+  reviewers: no blocker, internal reading only (see §7).
 - Backups: `data/backups/general_war_corpus2_20261018_pre_phase2.dump` (before
   this refit), `..._20261017_pre_phase1.dump`.
 
@@ -60,22 +64,32 @@ warning is expected (pytest-asyncio declared, not installed, on purpose).
 
 ## 7. Next steps, in order
 
-1. **Impute non-convergence (run 85)**: find the low-ESS parameter (a
-   diagnosis fit was running at handoff), decide the fix, and gate it with
-   `bayesian-model-reviewer` (any impute change). Suspect: the Phase 2 polity
-   relabels added small levels (Axis 6 sides, Allies 2, Sixth Coalition 2,
-   Seventh and Third Coalition 1 each) and tau_p fell 0.50 to 0.37. Polity
-   keys on the `polity` string (no side has a polity Wikidata id), so the
-   relabels do reach impute and the model.
-2. **Finish the refit**: impute, model, evaluate, report (classify and
-   everything before it are done on current data). Then `historiography-reviewer`
-   before reading the ranking, including the Phase 2 entries and the classify
-   calls flagged needs_review (Prague 1757: Schwerin at rank 0 over
-   Frederick; Wagram's eight low-confidence weights; Waterloo co-command;
-   Suez equal split), and `bayesian-model-reviewer` on reconcile's
-   prior_predictive warning and on shrinkage.
-3. Open questions, decisions and the Phase 1 and 2 records: `07-record.md`,
-   `07-phase2-overrides-design.md`.
+The Phase 2 refit is done and reviewed (handover-log §29 historiography,
+§30 Bayesian): no blocker, readable internally with caveats, **not
+publishable**. The user has not yet chosen what comes next; the candidates,
+from the two reviews:
+1. **Headline cut** (§30 MAJOR 1): ranks 16-89 are prior-dominated
+   subordinates carrying their leader's WAR. Gate the headline on
+   `effective_battles` or skill contraction, and/or a per-commander WAR
+   counterfactual. Model-meaning change: user decision plus the model gate.
+2. **Troop numbers** (§29 M1, §30 MAJOR 2): extract tags labelled modern
+   estimates as branch "other" and reconcile drops them, so inflated ancient
+   figures survive (Khalid #4 and Pyrrhus #14 rest on them); reconcile
+   compresses ratios toward 1 in every era; Eastern Front sides are mostly
+   imputed from the Soviet Union polity offset. Reviewer's top pick.
+3. **Phase 2b overrides**: 34 cited entries drafted in §29 (ov-0055..ov-0088:
+   ~20 wrong-person links, Won Kyun and Francis I, polity mislabels, Prague
+   1757 roles), for the user to read.
+4. **Polity canonicalisation map** (§29 M5: the Confederacy is 4 levels,
+   Napoleonic France 7) and a 1914-1945 era bin (§30 MAJOR 2).
+5. **Report disclosures** (§29 M2): rule_single, components, unanswered
+   passage pass, corpus shape, fame bias; rank numbering over 732 rows.
+6. Smaller: resolver age-window heuristic; PPC pooled over rounds; record the
+   worst impute parameter and tail ESS; `.claude/agents/bayesian-model-reviewer.md`
+   was not registered as an agent type in the 2026-10-18 session (run it
+   through a general-purpose agent told to follow that file).
+Open questions and the Phase 1 and 2 records: `07-record.md`,
+`07-phase2-overrides-design.md`.
 
 User decisions, 2026-10-17: build the overrides design **as written**; a
 death-only or century-precision lifespan window stays generous and its
@@ -91,16 +105,19 @@ Say explicitly what was and was not verified against a database.
 ## 10. Honest status
 
 Built and verified against a real Postgres: every stage, through the CLI on the
-real corpus, crawl to impute (2026-10-17 on current `main`), LLM batches
+real corpus, extract to report (2026-10-18 on `main` 5a0d27a, with the 54
+Phase 2 overrides applied and every override gate passing), LLM batches
 answered offline and served from the cache. Recovery suites pass on synthetic
-data.
+data (not re-run this session).
 
-The corpus data, not the model, is the binding constraint. Phase 1 fixed the
-root causes a domain review found (missing outcomes, namesake links outside
-lifetimes, stale links, BC years one late, coarse dates read as exact, wars
-typed as battles); about 25 row-level errors remain for the overrides file.
-Until Phase 2 lands and a refit is reviewed there is no valid ranking; the
-2026-10-14 and run-79 numbers must not be cited.
+Model run 108 is the first reviewed ranking. Both reviewers found no blocker
+but it is **internal only**: ranks 1-15 rest on their own data; ranks 16-89
+are mostly subordinates whose WAR is their leader's side performance; Khalid
+(#4) and Pyrrhus (#14) rest on inflated ancient troop figures that extract
+let survive; cross-era placement is assumed (41 of the top 50 outside the
+largest component); report.md lacks the required disclosures. The corpus data
+and the headline rule are the binding constraints. The 2026-10-14 and run-79
+numbers must not be cited.
 
 Not proven: a publishable ranking from any corpus, any billed API call, CI on
 the current `main` (`origin` exists; never checked), gate thresholds beyond

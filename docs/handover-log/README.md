@@ -45,3 +45,5 @@ Last updated: 2026-10-10. §21 to §23 are committed (`a9abeba`, `401e1c7`, `3c6
 | §26 | Sweep of pilot and gap-review findings, 2026-10-12 (was handover §12) | [26-sweep-of-pilot-and-gap-review-findings-2026-10-1.md](26-sweep-of-pilot-and-gap-review-findings-2026-10-1.md) |
 | §27 | "Fix all outstanding items", 2026-10-14 to 2026-10-16 (was handover §0) | [27-fix-all-outstanding-items-2026-10-14-to-2026-10-.md](27-fix-all-outstanding-items-2026-10-14-to-2026-10-.md) |
 | §28 | Corpus repair and classify batch, 2026-10-16 (afternoon and evening) | [28-corpus-repair-and-classify-batch-2026-10-16-afte.md](28-corpus-repair-and-classify-batch-2026-10-16-afte.md) |
+| §29 | Historiography review of the Phase 2 refit, with 34 drafted Phase 2b entries (ov-0055..ov-0088), 2026-10-18 | [29-phase2-refit-historiography-review-2026-10-18.md](29-phase2-refit-historiography-review-2026-10-18.md) |
+| §30 | Bayesian review of the Phase 2 refit (runs 84, 86, 108), 2026-10-18 | [30-phase2-refit-bayesian-review-2026-10-18.md](30-phase2-refit-bayesian-review-2026-10-18.md) |
