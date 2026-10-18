@@ -121,7 +121,11 @@ params:
   model_type: imputation
 
   # sampling
-  mcmc_samples: 2000
+  # 4000, not 2000: on general_war_corpus2 after Phase 2 the polity sd tau_p
+  # mixes slowly along a ridge with the one strongly offset, thinly observed
+  # polity (Soviet Union, 3 sides; corr 0.88), giving ESS 302 at 2000 draws
+  # (run 85, 0 divergences). Same model; user decision 2026-10-18.
+  mcmc_samples: 4000
   mcmc_chains: 4
   mcmc_tune: 1500
   mcmc_target_accept: 0.9
