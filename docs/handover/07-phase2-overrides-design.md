@@ -2,7 +2,31 @@
 
 Part of the handover; the index is `handover.md` at the repo root.
 
-**Design (lead, 2026-10-17; build not started).**
+**Built 2026-10-17/18** (merges 945ddcb loader, 0688491 resolve, b3cae8a
+extract, 4f11350 classify, 74068f8 unlabelled-entity fix; entries 2e31821).
+What a future session would otherwise get wrong:
+- The gate re-hashes the overrides file and compares entry ids, so a stale or
+  partial report fails; a dry run writes no report. `OverrideReport.write`
+  raises unless every entry of the stage was reported exactly once.
+- Removing an entry does not always revert: `side_polity` and `battle_date`
+  stay when extract supplies nothing for the field (COALESCE in
+  `pipeline/extractors/store.py`); a removed `battle_type` keeps
+  `battle_type_source = 'manual'` until extract re-types the battle.
+- A `commander_link` on one mention of a name group leaves the group's other
+  mentions on automatic resolution. If those stay corpus-local, the second
+  resolve run creates a twin of the linked Q-id (`no_duplicate_generals`
+  fails). Link every mention of that person (ov-0053/ov-0054, Anderson).
+- A manual link to a human with no English label (Yi Yeong-nam, Q12612045,
+  Korean label only) takes the mention's name; automatic matching still
+  rejects unlabelled entities.
+- A `commander_link` to Q-old plus a `general_merge` Q-old to Q-new leaves the
+  linked mention on Q-old (merges skip manual groups). The file has no merges.
+- Any changed commander set resets that side's attribution, so classify
+  issues fresh role requests for it (18 on the 2026-10-18 refit).
+- Extract writes records carrying an override last, so a second record for
+  the same battle cannot overwrite it.
+
+**Design (lead, 2026-10-17).**
 - One file, `config/overrides.yaml`, `version:` at the top, one list of
   entries. Every entry: `id` (stable, e.g. `ov-0001`), `kind`, the target
   keys for that kind, `value`, `source` (citation: a standard work with
