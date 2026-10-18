@@ -40,7 +40,8 @@ Standing rules worth knowing before changing these:
 - [x] fixed 2026-10-12: (gap review A13) `--stages all` halts at evaluate (module missing; the
       complete_with_warnings policy does not prevent the halt). Skip unbuilt
       stages loudly or leave them out of `all` until built
-- [ ] (gap review) no end-to-end integration test chains crawl through model
+- [ ] (gap review) no end-to-end integration test chains crawl through model. **Planned** (next-sessions plan D): one fixture battle set through `run_pipeline`, asserting each stage's gates, including `overrides_applied` with a fixture overrides file
+- [ ] `.claude/agents/bayesian-model-reviewer.md` was not registered as an agent type in the 2026-10-18 session (historiography-reviewer and llm-batch-worker were). Check its frontmatter; until fixed, run it through a general-purpose agent told to follow the file
 - [x] done 2026-10-15: cmdstanpy, SPARQLWrapper, polars, click, tqdm removed; numpy declared; lock regenerated: (gap review A18) unused deps (cmdstanpy, polars, click, tqdm,
       SPARQLWrapper; matplotlib is used by evaluate and report); numpy undeclared; llm_fallback_* and
       log_all_llm_calls are read by nothing

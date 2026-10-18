@@ -27,3 +27,6 @@
 - [x] Explorer polish: empty space under the overlap chart; low-contrast chart text in dark mode
 - [x] done 2026-10-15: evaluate writes severity: Evaluate's report omits gate severity; report reads it from agents/evaluate.yaml. Cleaner:
       evaluate writes `severity` into each gate entry
+- [ ] **Planned, workstream C** (handover §7 next-sessions plan): report.md lacks disclosures the ranking must carry (handover-log §29 M2): rule_single (138 sides at 1.0, McClellan absent at Glendale and Gaines's Mill), components (41 of the top 50 outside the largest), the unanswered passage pass, WAR as side performance shared by weight (user's 2026-10-18 call), corpus shape (no battles 700-1199, 1300-1499, the 1600s) and fame bias (73.6% vs 30.7%), troop provenance by era. Compute each from the database at report time
+- [ ] **Planned, workstream C**: a "Data coverage and caveats" figure set (six panels: corpus timeline, comparison components, credit source, information vs rank, troop provenance, fame bias) in `figures.py` and an explorer tab; designed in the next-sessions plan
+- [ ] **Planned, workstream C**: rank numbering runs over all 732 generals, so the 86th headline row reads "rank 723"; number headline rows 1..N among the headline

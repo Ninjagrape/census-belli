@@ -13,5 +13,8 @@
 - [x] Evaluation report generator (JSON + CSVs)
 - [x] Diagnostic plots (rank stability, CI widths, skill vs n_battles, calibration)
 - [x] config/expert_rankings.yaml
-- [ ] Decide whether the calibration gate should sit on the joint arm (handover §9.10)
+- [ ] Decide whether the calibration gate should sit on the joint arm (handover §9.10) (user call, unchanged)
+- [ ] **Planned** (next-sessions plan D): the posterior predictive category check runs on one round (`len(rounds)//2`, `pipeline/modelers/model.py:179`, whose beta_force is 0.38 against the pooled 0.83) with an orientation-dependent statistic; on run 108 victory 0.718 is above its 0.710 bound. Pool over rounds and use an orientation-free statistic (favourite's win rate, indecisive share). The five-category Bonferroni overstates the degrees of freedom: no decisive_* outcome exists (handover-log §30 items 3, 8)
+- [ ] **Planned**: the circularity gate compares the beta_force gap (0.224 on run 108) with half the joint fit's sd; compare it with the combined sd instead (§30 item 6)
+- [ ] **Planned**: the named check `agrippa_above_augustus` is no longer independent evidence, because Actium's weights are hand-set (ov-0043). Replace it with a check on a battle no override touches (§30 item 9)
 - [x] Fix the EvaluateParams docstring (ESS floor is min of model and eval) (3f01939)

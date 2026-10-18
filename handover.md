@@ -66,28 +66,28 @@ warning is expected (pytest-asyncio declared, not installed, on purpose).
 
 The Phase 2 refit is done and reviewed (handover-log §29 historiography,
 §30 Bayesian): no blocker, readable internally with caveats, **not
-publishable**. The user has not yet chosen what comes next; the candidates,
-from the two reviews:
-1. **Headline cut** (§30 MAJOR 1): ranks 16-89 are prior-dominated
-   subordinates carrying their leader's WAR. Gate the headline on
-   `effective_battles` or skill contraction, and/or a per-commander WAR
-   counterfactual. Model-meaning change: user decision plus the model gate.
-2. **Troop numbers** (§29 M1, §30 MAJOR 2): extract tags labelled modern
-   estimates as branch "other" and reconcile drops them, so inflated ancient
-   figures survive (Khalid #4 and Pyrrhus #14 rest on them); reconcile
-   compresses ratios toward 1 in every era; Eastern Front sides are mostly
-   imputed from the Soviet Union polity offset. Reviewer's top pick.
-3. **Phase 2b overrides**: 34 cited entries drafted in §29 (ov-0055..ov-0088:
-   ~20 wrong-person links, Won Kyun and Francis I, polity mislabels, Prague
-   1757 roles), for the user to read.
-4. **Polity canonicalisation map** (§29 M5: the Confederacy is 4 levels,
-   Napoleonic France 7) and a 1914-1945 era bin (§30 MAJOR 2).
-5. **Report disclosures** (§29 M2): rule_single, components, unanswered
-   passage pass, corpus shape, fame bias; rank numbering over 732 rows.
-6. Smaller: resolver age-window heuristic; PPC pooled over rounds; record the
-   worst impute parameter and tail ESS; `.claude/agents/bayesian-model-reviewer.md`
-   was not registered as an agent type in the 2026-10-18 session (run it
-   through a general-purpose agent told to follow that file).
+publishable**. **The plan is `docs/handover/07-next-sessions-plan.md`; read
+it before starting.** Nothing in it has been started. In order:
+1. **A. Troop numbers** (next session; its prompt is in the plan): keep
+   labelled modern estimates in extract, read scope wording, then have the
+   model reviewer diagnose reconcile's ratio compression and impute's
+   weak-side rule before any change; Jena-Auerstedt is a user design call.
+2. **B. Phase 2b overrides**: the user reads the 34 drafts (handover-log §29
+   section 4; the plan has a review table with the calls to make); build in
+   only what is signed off, after a twin check. Fold into A's refit.
+3. **C. Report disclosures and a data-coverage figure set** (designed in the
+   plan; report stage only, can run beside A).
+4. **D.** The planned TODO fixes (polity map, era bin, resolver age window,
+   PPC pooling, end-to-end test, named check), listed in the plan and filed in
+   `docs/todo/`.
+
+User decisions, 2026-10-18: keep the headline rule (`min_battles: 3`) and
+disclose that WAR is side performance shared by weight; impute
+`mcmc_samples` 4000; the 54 entries as drafted, with Borodino a French
+pyrrhic win, per-battle Scipio links instead of the merge, Waterloo,
+Austerlitz and Bautzen relabelled as coalitions, Kasserine attribution, and
+Anderson linked (plus the Torch link added after review). The README now
+carries the methodology and the provisional findings; keep it in step.
 Open questions and the Phase 1 and 2 records: `07-record.md`,
 `07-phase2-overrides-design.md`.
 
@@ -116,8 +116,9 @@ are mostly subordinates whose WAR is their leader's side performance; Khalid
 (#4) and Pyrrhus (#14) rest on inflated ancient troop figures that extract
 let survive; cross-era placement is assumed (41 of the top 50 outside the
 largest component); report.md lacks the required disclosures. The corpus data
-and the headline rule are the binding constraints. The 2026-10-14 and run-79
-numbers must not be cited.
+(troop figures, coverage) is the binding constraint; the headline rule stays by
+the user's call and is disclosed. The 2026-10-14 and run-79 numbers must not
+be cited.
 
 Not proven: a publishable ranking from any corpus, any billed API call, CI on
 the current `main` (`origin` exists; never checked), gate thresholds beyond
@@ -132,6 +133,7 @@ fixtures and this corpus. The gold sets are agent-built and unreviewed.
 | Classes of past bugs (read before trusting a green suite) | `04-the-lesson.md` |
 | Footguns (worktrees, DB use, Windows, hibernation, stage order) | `05-footguns.md` |
 | Fixes A-E, Phase 1 record, review findings, open decisions | `07-record.md` |
-| Phase 2 overrides design | `07-phase2-overrides-design.md` |
+| Phase 2 overrides design and build record | `07-phase2-overrides-design.md` |
+| **Plan for the next sessions** (A troop numbers with its prompt, B Phase 2b review, C report disclosures and figures, D TODO fixes) | `07-next-sessions-plan.md` |
 | Reviewer agents, slash commands, inspector | `08-project-tooling.md` |
 | Standing design per stage: crawl, extract, resolve, LLM routing, Arsht set, reconcile, classify, impute, model, evaluate, report | `9.1-crawl.md` ... `9.11-report.md` |

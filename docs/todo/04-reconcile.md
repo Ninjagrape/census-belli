@@ -37,4 +37,5 @@ see handover-log §19-§21. Estimates are written only after convergence.
 - [x] fixed 2026-10-13: (corpus run 2026-10-12) over-shrinkage: caused by range pairs (above);
       corpus run 7 spread_ratio 0.60, infobox sigma 0.52
 - [x] confirmed 2026-10-13: neutral fit converges on the corpus (neutral_fit_converged passes)
-- [ ] Audit the 6 low-precision sides and the scope-error candidates at extract (handover §7 step 3)
+- [ ] **Planned, workstream A** (handover §7 next-sessions plan): Audit the 6 low-precision sides and the scope-error candidates at extract. Folded into A: the scope wording rules (02-extract.md) and Jena-Auerstedt's summed partial figures
+- [ ] **Planned, workstream A**: reconcile compresses force ratios toward 1 in every era (handover-log §29 M1): totals above 50k come out at 0.76x post-1800 (Wagram 172k to 105k, Leipzig 257k to 131k, Kursk 1.91M to 533k) and 0.83x ancient; totals under 10k are inflated 2.3-3.9x (Uhud 754 to 3,114); log ratios shrink by ~0.65-0.75. Ancient inflation correction is not visible in the output. `bayesian-model-reviewer` diagnoses first (the shared prior, `_UNLABELLED_WEIGHT`), the user approves any fix
