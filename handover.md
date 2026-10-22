@@ -11,7 +11,37 @@ would otherwise get it wrong. Session narratives go in
 Code comments cite "handover §9.3" (a file in `docs/handover/`) and
 "handover-log §16" (a file in `docs/handover-log/`).
 
-Last updated: 2026-10-18 (afternoon).
+Last updated: 2026-10-22 (night, mid-session; workstream A in progress).
+
+## 0. In flight (2026-10-22): workstream A, troop numbers
+
+Approved design and user decisions: `docs/handover/07-next-sessions-plan.md`
+"A: approved design (2026-10-22)"; diagnosis: handover-log §31.
+- **Merged to `main` (83cb0b7, not pushed):** extract keeps labelled modern
+  estimates (supersede rule in reconcile load), scope wording (`population`
+  scope, deployed/total/phase rules). Code + DB review, two fix rounds; suite
+  2476 passed 0 skipped on the branch. Not yet run on `general_war_corpus2`.
+- **`wip/troop-recon` (0c0cb98, worktree `w-recon`):** informative noise
+  prior, recovery gates, reconcile exports per-side likelihood, impute uses it
+  (no weak sides with a point report). Suite 2446 passed. **The noise prior
+  as specified fails on the corpus copy** (old extract): sigma 0.59 vs prior
+  0.22, singleton slope 0.61, PPC replicated ratio variance 2.02 vs 0.60.
+  Impute half works (0 weak with point rows) but kept-pair slope 0.45.
+  Experiment V1-V4 (prior log-sd 0.3/0.1 x student_t/contaminated) on the
+  corrected extract running in worktree `w-exp` (`wip/noise-exp`, DB
+  `general_war_wt_exp_corpus`). The user must choose the noise treatment from
+  its results before merge. Failing-first evidence was not collected for this
+  branch.
+- **`wip/jena-split` (worktree `w-jena`, uncommitted):** `battle_split`
+  override kind; ov-0029/0030 removed (moot). One stale test assertion to fix;
+  corpus check pending.
+- Backup before any of this: `data/backups/general_war_corpus2_20261022_pre_troopfix.dump`.
+  Scratch DBs this session: `general_war_wt_{troop,troop_corpus,recon,
+  recon_corpus,jena,jena_corpus,exp_corpus}`.
+- Then: refit corpus2 from extract in order, both reviewers, report Khalid,
+  Pyrrhus and force-ratio compression before (reconcile 0.60, impute 0.43).
+- TODO to file: the generic "(<Adjective> sources)" ancient_claim rule would
+  tag WWII "(German sources)"; no corpus hit today (only a naval row).
 
 ## 1. Current state
 
