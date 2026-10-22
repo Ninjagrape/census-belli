@@ -396,7 +396,7 @@ CREATE TABLE troop_reports (
     -- It defaulted to 'engaged' until 2026-09-23, so any INSERT omitting the
     -- column silently asserted troops-on-the-field, which is the one thing an
     -- unreadable scope is not evidence of.
-    scope           TEXT DEFAULT 'unknown',  -- 'engaged', 'available', 'theatre_strength', 'on_paper', 'unknown'
+    scope           TEXT DEFAULT 'unknown',  -- 'engaged', 'available', 'theatre_strength', 'on_paper', 'unknown', 'population'
     is_estimate     BOOLEAN DEFAULT FALSE,   -- source itself says "approximately"
     is_upper_bound  BOOLEAN DEFAULT FALSE,   -- source says "up to X"
     is_lower_bound  BOOLEAN DEFAULT FALSE,   -- source says "at least X"

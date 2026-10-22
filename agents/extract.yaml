@@ -113,7 +113,8 @@ prompt:
               type: number
             scope:
               type: string
-              enum: [engaged, available, theatre_strength, on_paper, unknown]
+              enum: [engaged, available, theatre_strength, on_paper, unknown, population]
+              description: "population is a count of a whole people including non-combatants (a migrating nation, a city's inhabitants), not an army"
             is_estimate:
               type: boolean
             is_upper_bound:

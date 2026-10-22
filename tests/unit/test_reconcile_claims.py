@@ -18,6 +18,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from pipeline.reconcilers import (
     Report,
     SourceKey,
@@ -260,3 +262,109 @@ def test_two_agreeing_labelled_rows_stay_independent() -> None:
     first = _report(1, reported_value=50_000.0, claim_regime="chronicle")
     second = _report(2, source_id=2, reported_value=50_000.0, claim_regime="ancient_claim")
     assert len(merge_cross_regime_duplicates([first, second])) == 2
+
+
+# --- Modern wording variants and ancient-tradition wording ----------------------
+@pytest.mark.parametrize(
+    "text",
+    [
+        "30,000 (modern estimation)",
+        "5,000 (modern est.)",
+        "Modern estimate: 108,000–158,000",
+        "~7,000 (Modern estimate)",
+    ],
+)
+def test_modern_wording_variants_are_modern_scholarly(text: str) -> None:
+    assert classify_regime(text) == "modern_scholarly"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "70,000 (Muslim source)",
+        "80,000 (Islamic estimates)",
+        "70,000 (Arab estimates)",
+        "90,000 (Byzantine accounts)",
+        "50,000 (Roman tradition)",
+        "20,000 (Greek sources)",
+        "100,000 (Persian estimate)",
+    ],
+)
+def test_ancient_tradition_wording_is_an_ancient_claim(text: str) -> None:
+    assert classify_regime(text) == "ancient_claim"
+
+
+def test_a_bare_tradition_word_without_source_wording_is_not_ancient() -> None:
+    assert classify_regime("40,000 Roman soldiers") == "unlabelled"
+
+
+def test_hazir_field_labels_each_figure_by_the_marker_that_follows_it() -> None:
+    field = "70,000 (Muslim source) ~7,000 (Modern estimate)"
+    assert classify_regime(field, value=70_000) == "ancient_claim"
+    assert classify_regime(field, value=7_000) == "modern_scholarly"
+
+
+def test_chains_field_labels_both_range_bounds_modern_and_the_total_ancient() -> None:
+    field = "80,000 (Islamic estimates) 15,000–20,000 (modern estimates)"
+    assert classify_regime(field, value=80_000) == "ancient_claim"
+    assert classify_regime(field, value=15_000) == "modern_scholarly"
+    assert classify_regime(field, value=20_000) == "modern_scholarly"
+
+
+# ─── classify_regime: per-figure bracket binding ────────────────────────────
+def test_a_bracket_naming_two_regimes_binds_nothing_and_the_nearer_marker_wins() -> None:
+    text = "30,000 (Plutarch; modern historians doubt this)"
+    assert classify_regime(text, value=30_000.0) == "ancient_claim"
+
+
+def test_gaugamela_figures_each_take_their_own_bracket() -> None:
+    text = "52,930-100,000 (modern estimates) 250,000-1,000,000 (ancient sources)"
+    assert classify_regime(text, value=100_000.0) == "modern_scholarly"
+    assert classify_regime(text, value=52_930.0) == "modern_scholarly"
+    assert classify_regime(text, value=250_000.0) == "ancient_claim"
+    assert classify_regime(text, value=1_000_000.0) == "ancient_claim"
+
+
+def test_a_yarmouk_like_field_binds_each_figure_to_its_bracket() -> None:
+    text = "80,000 (Islamic estimates) 15,000-40,000 (modern estimates)"
+    assert classify_regime(text, value=80_000.0) == "ancient_claim"
+    assert classify_regime(text, value=15_000.0) == "modern_scholarly"
+    assert classify_regime(text, value=40_000.0) == "modern_scholarly"
+
+
+def test_a_yarmouk_like_field_without_brackets_stays_unlabelled_without_a_value() -> None:
+    text = "Muslim sources 80,000 modern estimates 15,000-40,000"
+    assert classify_regime(text) == "unlabelled"
+
+
+# ─── classify_regime: a figure's own unrecognised source label ──────────────
+def test_a_figure_with_its_own_unrecognised_source_label_borrows_no_other_marker() -> None:
+    text = "100,000 (Carthaginian claim) 20,000 (modern estimates)"
+    assert classify_regime(text, value=100_000.0) == "unlabelled"
+    assert classify_regime(text, value=20_000.0) == "modern_scholarly"
+
+
+@pytest.mark.parametrize(
+    "label", ["Chinese sources", "Carthaginian accounts", "Frankish chronicles", "Gallic tradition"]
+)
+def test_a_capitalised_people_source_label_in_brackets_is_an_ancient_claim(label: str) -> None:
+    text = f"100,000 ({label}) 20,000 (modern estimates)"
+    assert classify_regime(text, value=100_000.0) in ("ancient_claim", "chronicle")
+    assert classify_regime(text, value=20_000.0) == "modern_scholarly"
+
+
+def test_chinese_sources_are_ancient_claim_and_frankish_chronicles_a_chronicle() -> None:
+    assert classify_regime("100,000 (Chinese sources)", value=100_000.0) == "ancient_claim"
+    assert classify_regime("5,000 (Frankish chronicles)", value=5_000.0) == "chronicle"
+
+
+def test_modern_sources_in_brackets_stay_modern_not_ancient() -> None:
+    assert classify_regime("100,000 (Modern sources)", value=100_000.0) == "modern_scholarly"
+
+
+def test_an_unlabelling_bracket_does_not_swallow_a_later_modern_marker_for_an_estimate_note() -> (
+    None
+):
+    assert classify_regime("30,000 (est.) per modern historians", value=30_000.0) == (
+        "modern_scholarly"
+    )

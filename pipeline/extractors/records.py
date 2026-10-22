@@ -45,12 +45,18 @@ __all__ = [
 # Vocabularies. These mirror the enums in config/schema.sql and the enums in
 # agents/extract.yaml's output schema; anything outside them is coerced
 # rather than written, so a model inventing a value cannot break an INSERT.
+#
+# ``population`` marks a figure that counts people (a migrating nation, its
+# non-combatants, a city's inhabitants) rather than an army. It is not a level
+# of the force-size hierarchy: reconcile excludes those rows before the scope
+# offsets are built, so it must never appear in reconcilers.design.SCOPE_ORDER.
 SCOPES: Final[tuple[str, ...]] = (
     "engaged",
     "available",
     "theatre_strength",
     "on_paper",
     "unknown",
+    "population",
 )
 
 BRANCHES: Final[tuple[str, ...]] = (

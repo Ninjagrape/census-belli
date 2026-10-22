@@ -224,6 +224,8 @@ class ReconcileCounts:
     casualty_reports_used: int = 0
     excluded_non_total_branch: int = 0
     excluded_naval: int = 0
+    excluded_population_scope: int = 0
+    excluded_superseded_by_modern: int = 0
     excluded_non_positive: int = 0
     excluded_implausible_small: int = 0
     excluded_non_personnel: int = 0
@@ -253,6 +255,8 @@ class ReconcileCounts:
             "casualty_reports_used": self.casualty_reports_used,
             "excluded_non_total_branch": self.excluded_non_total_branch,
             "excluded_naval": self.excluded_naval,
+            "excluded_population_scope": self.excluded_population_scope,
+            "excluded_superseded_by_modern": self.excluded_superseded_by_modern,
             "excluded_non_positive": self.excluded_non_positive,
             "excluded_implausible_small": self.excluded_implausible_small,
             "excluded_non_personnel": self.excluded_non_personnel,
