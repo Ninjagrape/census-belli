@@ -400,9 +400,11 @@ def _classified_branch(
     """Pick the branch a headcount is stored under.
 
     A line naming an arm keeps that arm. A line naming a contingent,
-    nationality or unit is a component, stored as ``other`` so reconcile does
-    not read "25,000 Romans" as the Roman side's total. Only an explicit total
-    or a lone unqualified figure stays ``total``.
+    nationality or unit, or a force "under <Name>", is a component, stored as
+    ``other`` so reconcile does not read "25,000 Romans" as the Roman side's
+    total. Only an explicit total, a figure labelled as a modern estimate, or a
+    lone unqualified figure stays ``total``: a labelled modern estimate is the
+    anchor reconcile needs to see, not a component to be dropped.
 
     Args:
         quantity: The parsed figure.
@@ -502,6 +504,8 @@ def _side_troop_reports(
     reports: list[TroopReport] = []
     equipment: set[int] = set()
     unsafe: set[int] = set()
+    phases: dict[int, tuple[str, str]] = {}
+    explicit_totals: set[str] = set()
     has_orphan = False
 
     for field_name, value in fields:
@@ -515,8 +519,15 @@ def _side_troop_reports(
         first_context = quantities[0].context if quantities else ""
         for quantity in quantities:
             branch, is_equipment = _classified_branch(
-                quantity, implied_branch, first_line=quantity.context == first_context
+                quantity,
+                implied_branch,
+                first_line=quantity.block_first or quantity.context == first_context,
             )
+            if branch == "total" and not is_equipment:
+                if quantity.phase:
+                    phases[len(reports)] = (field_name, quantity.phase)
+                elif quantity.total_worded:
+                    explicit_totals.add(field_name)
             if is_equipment:
                 equipment.add(len(reports))
             # A label before the number may name a phase or a date ("Skirmish:
@@ -544,12 +555,72 @@ def _side_troop_reports(
                 )
             )
 
+    _demote_smaller_phase_totals(reports, phases, explicit_totals)
+
     if reports and not any(r.branch == "total" for r in reports):
         _complete_total(
             reports, equipment, unsafe, side_label, provenance, may_derive=not has_orphan
         )
 
     return reports
+
+
+_PHASE_LEAD_ON_RE: Final = re.compile(r"^\W*on\s+", re.IGNORECASE)
+_PHASE_DASH_RE: Final = re.compile("\\s*[-\u2010-\u2015\u2212]\\s*")
+
+
+def _phase_key(phase: str) -> str:
+    """Normalise a phase heading so spelling variants of one phase compare equal.
+
+    Args:
+        phase: A heading such as "On 1 March 1944" or "16–17 October".
+
+    Returns:
+        The heading lowercased, without a leading "on", with one dash
+        character and single spaces.
+    """
+    text = _PHASE_LEAD_ON_RE.sub("", phase.strip())
+    text = _PHASE_DASH_RE.sub("-", text)
+    return " ".join(text.lower().split())
+
+
+def _demote_smaller_phase_totals(
+    reports: list[TroopReport],
+    phases: dict[int, tuple[str, str]],
+    explicit_totals: set[str],
+) -> None:
+    """Keep only the largest phase's side figure as the total, per strength field.
+
+    A field such as Leipzig's gives one side figure per dated phase
+    ("16-17 October: 257,000", "18-19 October: 359,000"). They differ only by
+    phase, so the largest is the side's total and the others become
+    components. A field that also states its own total ("Total: 250,000")
+    keeps that figure and every phase figure becomes a component. Their
+    ``extracted_context`` keeps the phase heading.
+
+    Args:
+        reports: The side's reports, modified in place.
+        phases: Index into ``reports`` of each total candidate that sits under
+            a phase heading, mapped to its field name and the heading.
+        explicit_totals: Names of the fields that state a total of their own.
+    """
+    by_field: dict[str, dict[str, list[int]]] = {}
+    for index, (field_name, phase) in phases.items():
+        by_field.setdefault(field_name, {}).setdefault(_phase_key(phase), []).append(index)
+    for field_name, by_phase in by_field.items():
+        if field_name in explicit_totals:
+            winner = None
+        elif len(by_phase) < 2:
+            continue
+        else:
+            winner = max(
+                by_phase, key=lambda p: max(reports[i].reported_value for i in by_phase[p])
+            )
+        for phase, indexes in by_phase.items():
+            if phase == winner:
+                continue
+            for index in indexes:
+                reports[index].branch = "other"
 
 
 def _complete_total(

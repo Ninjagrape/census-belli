@@ -70,6 +70,8 @@ _TOTAL_BRANCH: Final[str] = "total"
 # own, not folded into the general non-total-branch count. It is also
 # non-total, so it must never increment both counters (see load_reports).
 _NAVAL_BRANCH: Final[str] = "naval"
+_POPULATION_SCOPE: Final[str] = "population"
+_MODERN_REGIME: Final[str] = "modern_scholarly"
 
 # The default for params.min_plausible_troops. No battle side fields fewer than
 # a hundred combatants in this corpus's sources; below that the figure is a day
@@ -120,7 +122,8 @@ _LOAD_CASUALTY_REPORTS = text(
 # to see what a side's un-usable rows actually were, to say why.
 _LOAD_TROOP_SIDE_ROWS = text(
     """
-    SELECT tr.side_id, bs.battle_id, tr.branch, tr.reported_value, tr.extracted_context
+    SELECT tr.side_id, bs.battle_id, tr.branch, tr.reported_value, tr.extracted_context,
+           tr.scope
     FROM troop_reports tr
     JOIN battle_sides bs ON bs.side_id = tr.side_id
     """
@@ -176,12 +179,17 @@ class UnfillableSide:
     reason: str
 
 
-def _classify_troop_report(branch: str, reported_value: float, counts: ReconcileCounts) -> bool:
+def _classify_troop_report(
+    branch: str, reported_value: float, scope: str | None, counts: ReconcileCounts
+) -> bool:
     """Apply the troop-report exclusion rules and count the outcome.
 
     Args:
         branch: The report's ``troop_branch`` value.
         reported_value: The report's raw value.
+        scope: The report's ``scope``. ``population`` counts people (a nation
+            on the move, its non-combatants), not an army, and is not a level
+            of the force-size hierarchy the scope offsets model.
         counts: Counters to accumulate the exclusion into.
 
     Returns:
@@ -192,6 +200,11 @@ def _classify_troop_report(branch: str, reported_value: float, counts: Reconcile
         # again as a generic non-total exclusion.
         counts.excluded_naval += 1
         return False
+    if scope == _POPULATION_SCOPE:
+        # Counted before the branch rule: a "368,000 people" row is stored as a
+        # component, and calling it a non-total would hide why it was dropped.
+        counts.excluded_population_scope += 1
+        return False
     if branch != _TOTAL_BRANCH:
         counts.excluded_non_total_branch += 1
         return False
@@ -199,6 +212,64 @@ def _classify_troop_report(branch: str, reported_value: float, counts: Reconcile
         counts.excluded_non_positive += 1
         return False
     return True
+
+
+def _sides_with_modern_estimate(reports: list[Report]) -> set[int]:
+    """Sides holding a modern point estimate or a modern lower and upper pair.
+
+    A lone modern bound ("up to 20,000 (modern estimates)") is a ceiling, not
+    an estimate, and must not displace a point figure. A pair counts when its
+    two bounds share one context, i.e. one stated range.
+
+    Args:
+        reports: Troop reports with ``claim_regime`` set.
+
+    Returns:
+        The ids of the sides on which a modern estimate stands.
+    """
+    sides: set[int] = set()
+    lowers: set[tuple[int, str]] = set()
+    uppers: set[tuple[int, str]] = set()
+    for report in reports:
+        if report.claim_regime != _MODERN_REGIME:
+            continue
+        key = (report.side_id, report.extracted_context)
+        if report.is_lower_bound:
+            lowers.add(key)
+        if report.is_upper_bound:
+            uppers.add(key)
+        if not report.is_lower_bound and not report.is_upper_bound:
+            sides.add(report.side_id)
+    sides.update(side_id for side_id, _ in lowers & uppers)
+    return sides
+
+
+def drop_superseded_by_modern(reports: list[Report], counts: ReconcileCounts) -> list[Report]:
+    """Drop every non-modern total on a side that has a modern-scholarly estimate.
+
+    A modern estimate is the model's zero-bias anchor, and the reason an
+    infobox prints one beside an ancient figure is that the ancient figure is
+    the inflated claim. Fitting both lets the ancient number drag the side's
+    estimate back up, so on such a side the other totals (ancient, chronicle,
+    unlabelled, and a derived lower-bound sum alike) are excluded and counted.
+    The rows stay in ``troop_reports``.
+
+    Args:
+        reports: Troop reports that already passed the branch, scope and
+            plausibility rules, each with ``claim_regime`` set.
+        counts: Counters; increments ``excluded_superseded_by_modern``.
+
+    Returns:
+        The reports in their original order, minus the superseded ones.
+    """
+    modern_sides = _sides_with_modern_estimate(reports)
+    kept: list[Report] = []
+    for report in reports:
+        if report.side_id in modern_sides and report.claim_regime != _MODERN_REGIME:
+            counts.excluded_superseded_by_modern += 1
+            continue
+        kept.append(report)
+    return kept
 
 
 def _build_troop_reports(
@@ -235,7 +306,7 @@ def _build_troop_reports(
     ) in conn.execute(_LOAD_TROOP_REPORTS).fetchall():
         counts.reports_read += 1
         value = float(reported_value)
-        if not _classify_troop_report(str(branch), value, counts):
+        if not _classify_troop_report(str(branch), value, scope, counts):
             continue
 
         regime = classify_regime(extracted_context, value=value)
@@ -265,6 +336,7 @@ def _build_troop_reports(
     # After the per-row rules and the component rule, so every counter below
     # describes the reports the model will actually see.
     reports = filter_troop_reports(reports, counts, min_plausible_troops=min_plausible_troops)
+    reports = drop_superseded_by_modern(reports, counts)
     counts.troop_reports_used += len(reports)
     counts.regime_unlabelled += sum(1 for r in reports if r.claim_regime == "unlabelled")
     return reports
@@ -372,6 +444,7 @@ def load_reports(
         counts: Counters to accumulate into. Populates ``reports_read``,
             ``troop_reports_used``, ``casualty_reports_used``,
             ``excluded_non_total_branch``, ``excluded_naval``,
+            ``excluded_population_scope``, ``excluded_superseded_by_modern``,
             ``excluded_non_positive``, the four plausibility counters
             (``excluded_implausible_small``, ``excluded_non_personnel``,
             ``excluded_date_context``, ``excluded_component_of_stated_total``),
@@ -400,6 +473,8 @@ def load_reports(
         casualty_reports_used=counts.casualty_reports_used,
         excluded_non_total_branch=counts.excluded_non_total_branch,
         excluded_naval=counts.excluded_naval,
+        excluded_population_scope=counts.excluded_population_scope,
+        excluded_superseded_by_modern=counts.excluded_superseded_by_modern,
         excluded_non_positive=counts.excluded_non_positive,
         excluded_implausible_small=counts.excluded_implausible_small,
         excluded_non_personnel=counts.excluded_non_personnel,
@@ -411,7 +486,7 @@ def load_reports(
 
 
 def _unfillable_reason(
-    rows: Sequence[tuple[str, float, str]], *, min_plausible_troops: float
+    rows: Sequence[tuple[str, float, str, str]], *, min_plausible_troops: float
 ) -> str:
     """Explain why a side's troop reports produced no usable report.
 
@@ -420,24 +495,27 @@ def _unfillable_reason(
     fact than every row merely being non-total.
 
     Args:
-        rows: Every ``(branch, reported_value, extracted_context)`` triple for
-            one side.
+        rows: Every ``(branch, reported_value, extracted_context, scope)``
+            tuple for one side.
         min_plausible_troops: The plausibility floor the loader applied.
 
     Returns:
         One of ``"only naval counts"``, ``"only non-total branch reports"``,
+        ``"only population-scope totals"``,
         ``"only implausible or non-personnel figures"`` (positive totals that
         every plausibility rule rejected), or ``"no positive value"``.
     """
-    if all(branch == _NAVAL_BRANCH for branch, _, _ in rows):
+    if all(branch == _NAVAL_BRANCH for branch, _, _, _ in rows):
         return "only naval counts"
-    if all(branch != _TOTAL_BRANCH for branch, _, _ in rows):
+    if all(branch != _TOTAL_BRANCH for branch, _, _, _ in rows):
         return "only non-total branch reports"
+    if all(scope == _POPULATION_SCOPE for branch, _, _, scope in rows if branch == _TOTAL_BRANCH):
+        return "only population-scope totals"
     if any(
         branch == _TOTAL_BRANCH
         and value > 0
         and exclusion_reason(value, context, min_plausible_troops=min_plausible_troops) is not None
-        for branch, value, context in rows
+        for branch, value, context, _ in rows
     ):
         return "only implausible or non-personnel figures"
     return "no positive value"
@@ -479,14 +557,16 @@ def classify_sides(
     modellable = {report.side_id for report in reports if report.quantity == "troops"}
     casualty_modellable = {report.side_id for report in reports if report.quantity == "casualties"}
 
-    rows_by_side: dict[int, list[tuple[str, float, str]]] = defaultdict(list)
+    rows_by_side: dict[int, list[tuple[str, float, str, str]]] = defaultdict(list)
     battle_by_side: dict[int, int] = {}
-    for side_id, battle_id, branch, reported_value, context in conn.execute(
+    for side_id, battle_id, branch, reported_value, context, scope in conn.execute(
         _LOAD_TROOP_SIDE_ROWS
     ).fetchall():
         side_id = int(side_id)
         battle_by_side[side_id] = int(battle_id)
-        rows_by_side[side_id].append((str(branch), float(reported_value), context or ""))
+        rows_by_side[side_id].append(
+            (str(branch), float(reported_value), context or "", str(scope))
+        )
 
     unfillable: list[UnfillableSide] = []
     for side_id, rows in rows_by_side.items():
