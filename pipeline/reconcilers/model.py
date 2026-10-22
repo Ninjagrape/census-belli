@@ -106,9 +106,33 @@ deviation; below that they are constants at ``source_deviation_prior_sd`` and
 prior. The count is of the keys that actually get a deviation, which excludes
 the lone key of a type that has no pooled keys, since that key is ``b_type``.
 
+## The observation-noise prior (troops, from 2026-10-22)
+
+The per-row noise sd was identified only by the 31 multi-report sides of the
+real corpus (selected for disagreement: pooled within-side sd 1.16) and then
+applied to 309 singletons against one Student-t side prior. That gave sigma
+about 0.51 with nu about 3.4, a shrinkage factor of 0.58 to 0.63 and a singleton
+slope of 0.61 (``docs/handover-log/31-troop-numbers-diagnosis-2026-10-22.md``).
+Troops therefore take an informative prior on each source type's noise sd::
+
+    sigma_modern[type]  ~ LogNormal(log(m_modern), noise_modern_log_sd)   # 0.22, 0.3
+    sigma_ancient[type] ~ LogNormal(log(noise_ancient_median), noise_ancient_log_sd)  # 0.40, 0.35
+
+``m_modern`` is the gold set's ``faithful_sd`` from ``config/inflation_priors.yaml``
+unless ``noise_modern_median`` overrides it (the 0.35 sensitivity). A row uses
+the ancient scale when its battle is before the noise cutoff year (default the
+stage's ``ancient_cutoff_year``, 500; ``design.ancient_rows``); an undated row
+uses the modern one. The per-key deviation ``exp(tau_sigma * z_sigma)`` multiplies
+both. ``sigma_estimate`` and ``sigma_round`` are ``HalfNormal(0.1)`` and the
+Student-t ``nu`` is floored at 3. ``sigma_sq_type`` is kept as the modern scale
+squared so the diagnostics that read it work for either prior; the ancient
+scale is ``sigma_type_ancient``. Casualties, and
+``observation_noise_prior: inverse_gamma``, keep the older prior below.
+
 ## Observation scale, casualty ratios and one-sided bounds
 
-``sigma_sq_type`` is ``InverseGamma(3, 4/3)``. The first version was IG(2, 1),
+``sigma_sq_type`` (casualties, and the legacy troop prior) is ``InverseGamma(3, 4/3)``.
+The first version was IG(2, 1),
 whose infinite variance sits on a parameter that sets every interval width.
 Alpha 3 fixes that, but IG(3, 2) keeping the *mean* at 1 was a much stronger
 prior than that suggests (mode 0.5, a thin right tail) and visibly shrank
@@ -318,8 +342,8 @@ class ModelPriors:
     scope_offset_prior_sd: float = 0.4
     casualty_type_offset_prior_sd: float = 0.7
     scope_unknown_dispersion_sd: float = 0.4
-    estimate_dispersion_sd: float = 0.3
-    roundness_dispersion_sd: float = 0.3
+    estimate_dispersion_sd: float = 0.1
+    roundness_dispersion_sd: float = 0.1
     precision_prior_alpha: float = 3.0
     precision_prior_beta: float = 4.0 / 3.0
     min_keys_for_hierarchical_deviation: int = 5
@@ -330,6 +354,17 @@ class ModelPriors:
     contamination_pi_alpha: float = 1.0
     contamination_pi_beta: float = 9.0
     contamination_sd: float = 2.0
+    observation_noise_prior: str = "informative"
+    noise_modern_median: float | None = None
+    noise_modern_log_sd: float = 0.3
+    noise_ancient_median: float = 0.40
+    noise_ancient_log_sd: float = 0.35
+    student_t_nu_floor: float = 3.0
+
+    @property
+    def informative_noise(self) -> bool:
+        """Whether the per-source-type noise scale takes the informative LogNormal."""
+        return self.observation_noise_prior == "informative"
 
     @classmethod
     def from_params(cls, params: dict[str, Any], *, quantity: str) -> ModelPriors:
@@ -345,7 +380,9 @@ class ModelPriors:
             The priors.
         """
         prefix = "" if quantity == _TROOPS else "casualty_"
-        default_mu = 9.2 if quantity == _TROOPS else 7.0
+        is_troops = quantity == _TROOPS
+        default_mu = 9.2 if is_troops else 7.0
+        modern_median = params.get("noise_modern_median")
         return cls(
             side_prior_mu=float(params.get(f"{prefix}side_prior_mu", default_mu)),
             side_prior_mu_sd=float(params.get(f"{prefix}side_prior_mu_sd", 1.0)),
@@ -357,8 +394,14 @@ class ModelPriors:
             scope_offset_prior_sd=float(params.get("scope_offset_prior_sd", 0.4)),
             casualty_type_offset_prior_sd=float(params.get("casualty_type_offset_prior_sd", 0.7)),
             scope_unknown_dispersion_sd=float(params.get("scope_unknown_dispersion_sd", 0.4)),
-            estimate_dispersion_sd=float(params.get("estimate_dispersion_sd", 0.3)),
-            roundness_dispersion_sd=float(params.get("roundness_dispersion_sd", 0.3)),
+            # Casualties keep their original 0.3: the 0.1 prior was set from the
+            # troop diagnosis and nothing here has measured casualty rows.
+            estimate_dispersion_sd=float(
+                params.get(f"{prefix}estimate_dispersion_sd", 0.1 if is_troops else 0.3)
+            ),
+            roundness_dispersion_sd=float(
+                params.get(f"{prefix}roundness_dispersion_sd", 0.1 if is_troops else 0.3)
+            ),
             precision_prior_alpha=float(params.get("precision_prior_alpha", 3.0)),
             precision_prior_beta=float(params.get("precision_prior_beta", 4.0 / 3.0)),
             min_keys_for_hierarchical_deviation=int(
@@ -371,7 +414,34 @@ class ModelPriors:
             contamination_pi_alpha=float(params.get("contamination_pi_alpha", 1.0)),
             contamination_pi_beta=float(params.get("contamination_pi_beta", 9.0)),
             contamination_sd=float(params.get("contamination_sd", 2.0)),
+            observation_noise_prior=_noise_prior_name(params.get("observation_noise_prior")),
+            noise_modern_median=None if modern_median is None else float(modern_median),
+            noise_modern_log_sd=float(params.get("noise_modern_log_sd", 0.3)),
+            noise_ancient_median=float(params.get("noise_ancient_median", 0.40)),
+            noise_ancient_log_sd=float(params.get("noise_ancient_log_sd", 0.35)),
+            student_t_nu_floor=float(params.get("student_t_nu_floor", 3.0)),
         )
+
+
+def _noise_prior_name(value: Any) -> str:
+    """Validate the ``observation_noise_prior`` spec param.
+
+    Args:
+        value: The raw param, or None for the default.
+
+    Returns:
+        ``"informative"`` or ``"inverse_gamma"``.
+
+    Raises:
+        ValueError: For any other value, so a typo cannot silently select the
+            legacy prior.
+    """
+    name = "informative" if value is None else str(value)
+    if name not in ("informative", "inverse_gamma"):
+        raise ValueError(
+            f"observation_noise_prior must be 'informative' or 'inverse_gamma', got {name!r}"
+        )
+    return name
 
 
 @dataclass(frozen=True)
@@ -583,13 +653,48 @@ def build_model(
         era_column = _data(pm, "data_era", design.era * _unlabelled_mask(design))
 
         # ── observation scale ────────────────────────────────────────────────
-        sigma_sq_type = pm.InverseGamma(
-            "sigma_sq_type",
-            alpha=priors.precision_prior_alpha,
-            beta=priors.precision_prior_beta,
-            dims="source_type",
-        )
-        sigma_type_scale = pm.math.sqrt(sigma_sq_type[source_type_of_key])
+        # Troops take an informative LogNormal on the noise sd of each source
+        # type, one for modern rows and one for rows before the noise cutoff
+        # year. See "The observation-noise prior" in the module docstring.
+        # Casualties, and troops under observation_noise_prior=inverse_gamma
+        # (the behaviour before 2026-10-22), keep the inverse-gamma on the variance.
+        informative = priors.informative_noise and design.quantity == _TROOPS
+        has_ancient = informative and bool(design.ancient_rows.any())
+        sigma_type_scale_ancient: Any = None
+        if informative:
+            modern_median = (
+                inflation.faithful_sd
+                if priors.noise_modern_median is None
+                else priors.noise_modern_median
+            )
+            sigma_type_modern = pm.LogNormal(
+                "sigma_type_modern",
+                mu=float(np.log(modern_median)),
+                sigma=priors.noise_modern_log_sd,
+                dims="source_type",
+            )
+            # Same name and meaning as the inverse-gamma path's variable (the
+            # modern-row type scale squared), so summaries read either.
+            sigma_sq_type = pm.Deterministic(
+                "sigma_sq_type", sigma_type_modern**2, dims="source_type"
+            )
+            sigma_type_scale = sigma_type_modern[source_type_of_key]
+            if has_ancient:
+                sigma_type_ancient = pm.LogNormal(
+                    "sigma_type_ancient",
+                    mu=float(np.log(priors.noise_ancient_median)),
+                    sigma=priors.noise_ancient_log_sd,
+                    dims="source_type",
+                )
+                sigma_type_scale_ancient = sigma_type_ancient[source_type_of_key]
+        else:
+            sigma_sq_type = pm.InverseGamma(
+                "sigma_sq_type",
+                alpha=priors.precision_prior_alpha,
+                beta=priors.precision_prior_beta,
+                dims="source_type",
+            )
+            sigma_type_scale = pm.math.sqrt(sigma_sq_type[source_type_of_key])
         if deviation_groups:
             tau_sigma: Any = (
                 pm.HalfNormal("tau_sigma", sigma=priors.sigma_deviation_prior_sd)
@@ -606,10 +711,17 @@ def build_model(
                 _within_type_deviations(pm, pt, design, deviation_groups, prefix="z_sigma"),
                 dims="source_key",
             )
-            sigma_type_scale = sigma_type_scale * pm.math.exp(tau_sigma * z_sigma)
-        # A pooled key's noise is its type's scale: one sigma per source type,
-        # drawn from the same inverse-gamma the per-key scales are centred on.
+            deviation = pm.math.exp(tau_sigma * z_sigma)
+            sigma_type_scale = sigma_type_scale * deviation
+            if sigma_type_scale_ancient is not None:
+                sigma_type_scale_ancient = sigma_type_scale_ancient * deviation
+        # A pooled key's noise is its type's scale: one sigma per source type.
         sigma_source = pm.Deterministic("sigma_source", sigma_type_scale, dims="source_key")
+        sigma_source_ancient: Any = None
+        if sigma_type_scale_ancient is not None:
+            sigma_source_ancient = pm.Deterministic(
+                "sigma_source_ancient", sigma_type_scale_ancient, dims="source_key"
+            )
 
         sigma_estimate = pm.HalfNormal("sigma_estimate", sigma=priors.estimate_dispersion_sd)
         sigma_round = pm.HalfNormal("sigma_round", sigma=priors.roundness_dispersion_sd)
@@ -647,8 +759,12 @@ def build_model(
         # scope, a hedged figure, a number rounded to a convention. Added in
         # variance rather than in scale because that is the algebra for
         # independent error components.
+        sigma_row = sigma_source[source_ix]
+        if sigma_source_ancient is not None:
+            is_ancient = _data(pm, "data_noise_ancient", design.ancient_rows)
+            sigma_row = sigma_row + is_ancient * (sigma_source_ancient[source_ix] - sigma_row)
         var = (
-            sigma_source[source_ix] ** 2
+            sigma_row**2
             + sigma_estimate**2 * _data(pm, "data_is_estimate", design.is_estimate.astype(float))
             + sigma_round**2 * _data(pm, "data_roundness", design.roundness)
             # A stated range is one point row whose width is the extra spread.
@@ -1017,10 +1133,15 @@ def _attach_likelihood(
         # Concentrated on small values on purpose. PyMC's Gamma takes a rate,
         # so Gamma(2, 0.1) would have mean 20, where StudentT is visually
         # Normal -- the robustness the family is here for would be asserted and
-        # not delivered. Gamma(2, 0.5) has mean 4, so nu sits near 6 and the
-        # tails stay genuinely heavy. Registered as a Deterministic so it
-        # reaches the trace and the convergence diagnostics.
-        nu = pm_module.Deterministic("nu", pm_module.Gamma("nu_raw", alpha=2.0, beta=0.5) + 2.0)
+        # not delivered. Gamma(2, 0.5) has mean 4, so nu sits near 7 with the
+        # floor at 3 and the tails stay genuinely heavy. The floor is 3
+        # (student_t_nu_floor), not 2: at 2 the variance is infinite and the
+        # sampler used it to absorb disagreement as noise, which inflated every
+        # singleton's scale (nu 3.4 with sigma 0.51 on the corpus). Registered as
+        # a Deterministic so it reaches the trace and the convergence diagnostics.
+        nu = pm_module.Deterministic(
+            "nu", pm_module.Gamma("nu_raw", alpha=2.0, beta=0.5) + priors.student_t_nu_floor
+        )
 
     def dist(rows: Any) -> Any:
         if family != "student_t":

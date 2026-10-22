@@ -131,6 +131,7 @@ def write_gate_report(
     written: bool,
     gates: Sequence[GateResult],
     shared_error: dict[str, object] | None = None,
+    missing_by_cause: dict[str, int] | None = None,
 ) -> Path:
     """Write the gate report under the scale directory.
 
@@ -143,6 +144,7 @@ def write_gate_report(
         gates: The dataset-level gate results.
         shared_error: From ``shared_error_summary``: whether the shared
             reconcile error was propagated, with the diagnostics.
+        missing_by_cause: Sides without a likelihood, by cause.
 
     Returns:
         The scale-level report path.
@@ -155,6 +157,8 @@ def write_gate_report(
     }
     if shared_error is not None:
         report["shared_error"] = shared_error
+    if missing_by_cause is not None:
+        report["missing_by_cause"] = missing_by_cause
     text = json.dumps(report, indent=2, sort_keys=True, default=_json_default)
     scale_dir = root / scale
     scale_dir.mkdir(parents=True, exist_ok=True)

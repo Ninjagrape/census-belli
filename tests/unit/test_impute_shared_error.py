@@ -12,8 +12,6 @@ from pipeline.imputers.conditional import PosteriorSamples, draw_rounds, select_
 from pipeline.imputers.design import build_design
 from pipeline.imputers.likelihood import (
     NeutralDraws,
-    divide_prior,
-    fit_shared_error,
     likelihoods_from_draws,
     shared_error_summary,
 )
@@ -22,48 +20,48 @@ from pipeline.imputers.priors import load_priors
 from pipeline.imputers.records import SideRow
 
 PRIORS = load_priors("config/imputation_priors.yaml")
-M0 = 0.5
-S0 = 2.0
-MIN_PRECISION = 0.5
 N_DRAWS = 4000
-TRUE_LOADING = 2.0
-NOISE_SD = 0.3
+TRUE_LOADING = -2.0
+LIK_SD = 0.3
 # Battles 1 and 2 load on g; battle 3 does not.
 LOADINGS = {1: TRUE_LOADING, 2: TRUE_LOADING, 3: 0.0}
 
 
 def _neutral(
     *,
-    with_shared: bool = True,
+    with_theta: bool = True,
     g_constant: bool = False,
-    a_era_present: bool = False,
+    names: tuple[str, ...] = ("g_unlabelled",),
     seed: int = 0,
 ) -> NeutralDraws:
-    """Two sides per battle; side draws are ``center + loading * g + noise``."""
+    """Two sides per battle with centres ``1 + battle + k`` and an exported loading on g."""
     rng = np.random.default_rng(seed)
     g = np.zeros(N_DRAWS) if g_constant else rng.standard_normal(N_DRAWS)
-    columns: list[np.ndarray] = []
     side_id: list[int] = []
     battle_id: list[int] = []
-    for battle, loading in LOADINGS.items():
+    mean: list[float] = []
+    loading: list[list[float]] = []
+    for battle, slope in LOADINGS.items():
         for k in range(2):
-            center = 1.0 + battle + k
-            columns.append(center + loading * g + NOISE_SD * rng.standard_normal(N_DRAWS))
             side_id.append(2 * battle - 1 + k)
             battle_id.append(battle)
-    n_sides = len(columns)
+            mean.append(1.0 + battle + k)
+            loading.append([slope, 0.0][: len(names)])
+    n_sides = len(side_id)
     return NeutralDraws(
         run_id=1,
         side_id=np.array(side_id, dtype=np.int64),
         battle_id=np.array(battle_id, dtype=np.int64),
-        draws=np.column_stack(columns),
-        m0_mean=M0,
-        s0_mean=S0,
-        g_unlabelled=g if with_shared else None,
-        a_era=(0.5 * g + rng.standard_normal(N_DRAWS)) if (with_shared and a_era_present) else None,
-        offset_bar=np.zeros(N_DRAWS) if with_shared else None,
-        side_era=np.zeros(n_sides) if with_shared else None,
-        side_unlabelled_share=np.ones(n_sides) if with_shared else None,
+        draws=np.zeros((N_DRAWS, n_sides)),
+        m0_mean=9.0,
+        s0_mean=1.0,
+        g_unlabelled=g if with_theta else None,
+        a_era=rng.standard_normal(N_DRAWS) if (with_theta and "a_era" in names) else None,
+        lik_mean=np.array(mean),
+        lik_sd=np.full(n_sides, LIK_SD),
+        lik_has_point=np.ones(n_sides, dtype=bool),
+        lik_loadings=np.array(loading, dtype=float).reshape(n_sides, len(names)),
+        lik_loading_names=names,
     )
 
 
@@ -103,119 +101,27 @@ def _posterior(n: int, prior_sd: float = 2.0) -> PosteriorSamples:
     )
 
 
-def test_regression_recovers_the_known_loading() -> None:
+def test_the_shared_error_carries_the_exported_loadings_and_the_centred_draws() -> None:
     neutral = _neutral()
 
-    fit = fit_shared_error(neutral, list(range(6)))
-
-    assert not isinstance(fit, str)
-    shared, loadings, residual = fit
-    assert shared.names == ("g_unlabelled",)
-    np.testing.assert_allclose(loadings[:4, 0], TRUE_LOADING, atol=0.05)
-    np.testing.assert_allclose(loadings[4:, 0], 0.0, atol=0.05)
-    # Residual keeps each column's mean and loses the shared part.
-    np.testing.assert_allclose(residual.mean(axis=0), neutral.draws.mean(axis=0), atol=1e-9)
-    np.testing.assert_allclose(residual.std(axis=0), NOISE_SD, atol=0.02)
-    assert shared.explained_share == pytest.approx(0.97, abs=0.02)
-    assert shared.mean_abs_loading == pytest.approx(4 * TRUE_LOADING / 6, abs=0.05)
-
-
-def test_likelihood_loading_undoes_the_prior_pull_on_the_posterior_mean() -> None:
-    # Data mean m_lik = c + 2 g with precision P; reconcile's posterior mean moves by
-    # only 2 P / (P + 1/s0^2) per unit g. The likelihood loading must come back to 2.
-    rng = np.random.default_rng(5)
-    precision = 3.0
-    g = 0.3 * rng.standard_normal(N_DRAWS)
-    post_precision = precision + 1.0 / S0**2
-    mean = (precision * (1.0 + TRUE_LOADING * g) + M0 / S0**2) / post_precision
-    draws = (mean + rng.standard_normal(N_DRAWS) / np.sqrt(post_precision))[:, None]
-    neutral = NeutralDraws(
-        run_id=1,
-        side_id=np.array([1]),
-        battle_id=np.array([1]),
-        draws=draws,
-        m0_mean=M0,
-        s0_mean=S0,
-        g_unlabelled=g,
-    )
-
-    liks, stats = likelihoods_from_draws(neutral, {1}, min_precision=MIN_PRECISION)
+    liks, stats = likelihoods_from_draws(neutral, set(neutral.side_id.tolist()))
 
     assert stats.shared is not None
-    shift = liks[0].shift_loading
-    assert shift is not None
-    assert shift[0, 0] == pytest.approx(TRUE_LOADING, abs=0.1)
-    assert liks[0].precision[0, 0] == pytest.approx(precision, rel=0.1)
-
-
-def _comoving_neutral(*, with_m0: bool) -> tuple[NeutralDraws, float]:
-    """One all-unlabelled side: data mean ``d - g``, prior mean ``M0 - g`` (as ``m0`` is).
-
-    Reconcile's posterior mean is ``(P (d - g) + (M0 - g) / s0^2) / (P + 1/s0^2)``,
-    which falls by exactly one per unit g, the same as the data does.
-    """
-    rng = np.random.default_rng(8)
-    precision = 2.0
-    g = 0.5 * rng.standard_normal(N_DRAWS)
-    post_precision = precision + 1.0 / S0**2
-    mean = (precision * (1.0 - g) + (M0 - g) / S0**2) / post_precision
-    draws = (mean + rng.standard_normal(N_DRAWS) / np.sqrt(post_precision))[:, None]
-    neutral = NeutralDraws(
-        run_id=1,
-        side_id=np.array([1]),
-        battle_id=np.array([1]),
-        draws=draws,
-        m0_mean=M0,
-        s0_mean=S0,
-        g_unlabelled=g,
-        a_era=None,
-        offset_bar=g,
-        side_era=np.zeros(1),
-        side_unlabelled_share=np.ones(1),
-        m0_draws=(M0 - g) if with_m0 else None,
-    )
-    return neutral, precision
-
-
-def test_comoving_m0_returns_an_unlabelled_sides_data_loading_as_minus_one() -> None:
-    neutral, precision = _comoving_neutral(with_m0=True)
-
-    liks, stats = likelihoods_from_draws(neutral, {1}, min_precision=MIN_PRECISION)
-
-    shift = liks[0].shift_loading
-    assert shift is not None and stats.shared is not None
-    assert shift[0, 0] == pytest.approx(-1.0, abs=0.06)
-    assert stats.shared.m0_loading is not None
-    assert stats.shared.m0_loading[0] == pytest.approx(-1.0, abs=0.05)
-    assert stats.shared.loading_gap is not None
-    assert stats.shared.loading_gap < 0.1
-    summary = shared_error_summary(stats.shared, stats.shared_reason)
-    assert summary["m0_comoves"] is True
-    assert summary["loading_gap_vs_design"] == stats.shared.loading_gap
-    assert precision > 0
-
-
-def test_fixed_m0_formula_overstates_the_loading_and_the_gap_shows_it(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    neutral, precision = _comoving_neutral(with_m0=False)
-
-    liks, stats = likelihoods_from_draws(neutral, {1}, min_precision=MIN_PRECISION)
-
-    shift = liks[0].shift_loading
-    assert shift is not None and stats.shared is not None
-    assert stats.shared.m0_loading is None
-    assert shift[0, 0] == pytest.approx(-(1.0 + 1.0 / (precision * S0**2)), abs=0.06)
-    assert stats.shared.loading_gap is not None
-    assert stats.shared.loading_gap > 0.05
+    assert stats.shared.names == ("g_unlabelled",)
+    assert stats.shared.theta_centered.shape == (N_DRAWS, 1)
+    assert float(stats.shared.theta_centered.mean()) == pytest.approx(0.0, abs=1e-12)
+    assert stats.shared.mean_abs_loading == pytest.approx(4 * abs(TRUE_LOADING) / 6)
+    # Four loaded sides at variance 4 against 0.09 of Fisher variance, two unloaded.
+    expected = 4 * 4.0 / (4 * 4.0 + 6 * LIK_SD**2)
+    assert stats.shared.explained_share == pytest.approx(expected, abs=0.03)
+    assert liks[0].shift_loading is not None
+    np.testing.assert_allclose(liks[0].shift_loading[:, 0], TRUE_LOADING)
+    np.testing.assert_allclose(liks[2].shift_loading[:, 0], 0.0)
 
 
 def _round_values(neutral: NeutralDraws, *, propagate: bool, n_rounds: int = 300) -> np.ndarray:
     liks, stats = likelihoods_from_draws(
-        neutral,
-        set(neutral.side_id.tolist()),
-        min_precision=MIN_PRECISION,
-        propagate_shared=propagate,
+        neutral, set(neutral.side_id.tolist()), propagate_shared=propagate
     )
     design = build_design(_sides(), liks, PRIORS)
     rounds = draw_rounds(
@@ -246,9 +152,7 @@ def test_battles_sharing_a_loading_are_correlated_across_rounds() -> None:
 
 def test_theta_draw_is_deterministic_per_round_and_leaves_the_main_stream_alone() -> None:
     neutral = _neutral()
-    liks, stats = likelihoods_from_draws(
-        neutral, set(neutral.side_id.tolist()), min_precision=MIN_PRECISION
-    )
+    liks, stats = likelihoods_from_draws(neutral, set(neutral.side_id.tolist()))
     design = build_design(_sides(), liks, PRIORS)
     post = _posterior(20)
 
@@ -263,19 +167,12 @@ def test_theta_draw_is_deterministic_per_round_and_leaves_the_main_stream_alone(
     np.testing.assert_array_equal(first.values, again.values)
 
 
-def test_old_file_without_shared_arrays_behaves_as_before(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    neutral = _neutral(with_shared=False)
+def test_a_file_without_the_parameter_draws_propagates_nothing() -> None:
+    neutral = _neutral(with_theta=False)
 
-    liks, stats = likelihoods_from_draws(
-        neutral, set(neutral.side_id.tolist()), min_precision=MIN_PRECISION
-    )
+    liks, stats = likelihoods_from_draws(neutral, set(neutral.side_id.tolist()))
     plain, _ = likelihoods_from_draws(
-        neutral,
-        set(neutral.side_id.tolist()),
-        min_precision=MIN_PRECISION,
-        propagate_shared=False,
+        neutral, set(neutral.side_id.tolist()), propagate_shared=False
     )
 
     assert stats.shared is None
@@ -289,20 +186,24 @@ def test_old_file_without_shared_arrays_behaves_as_before(
     assert off.theta_index is None
 
 
-def test_constant_component_is_dropped_and_all_constant_falls_back() -> None:
-    mixed = fit_shared_error(_neutral(g_constant=True, a_era_present=True), list(range(6)))
-    flat = fit_shared_error(_neutral(g_constant=True), list(range(6)))
+def test_a_parameter_that_does_not_vary_falls_back_to_independent_battles() -> None:
+    flat = _neutral(g_constant=True)
+    disabled = _neutral()
 
-    assert not isinstance(mixed, str)
-    assert mixed[0].names == ("a_era",)
-    assert flat == "theta_has_no_variance"
+    _, stats = likelihoods_from_draws(flat, set(flat.side_id.tolist()))
+    _, off = likelihoods_from_draws(
+        disabled, set(disabled.side_id.tolist()), propagate_shared=False
+    )
+
+    assert stats.shared is None
+    assert stats.shared_reason == "theta_has_no_variance"
+    assert off.shared is None
+    assert off.shared_reason == "disabled"
 
 
 def test_summary_and_manifests_record_propagation(tmp_path: Path) -> None:
     neutral = _neutral()
-    liks, stats = likelihoods_from_draws(
-        neutral, set(neutral.side_id.tolist()), min_precision=MIN_PRECISION
-    )
+    liks, stats = likelihoods_from_draws(neutral, set(neutral.side_id.tolist()))
     design = build_design(_sides(), liks, PRIORS)
     rounds = draw_rounds(
         design, _posterior(10), n_rounds=3, seed=1, mnar_delta=0.0, shared=stats.shared
@@ -320,66 +221,27 @@ def test_summary_and_manifests_record_propagation(tmp_path: Path) -> None:
     )
     summary = shared_error_summary(stats.shared, stats.shared_reason, rounds.theta_index)
     write_gate_report(
-        tmp_path, scale="neutral", run_id=1, written=True, gates=[], shared_error=summary
+        tmp_path,
+        scale="neutral",
+        run_id=1,
+        written=True,
+        gates=[],
+        shared_error=summary,
+        missing_by_cause={"bound_only": 2, "no_reports": 1, "other": 0},
     )
 
     manifest = json.loads((tmp_path / "neutral" / "round_2" / "manifest.json").read_text("utf-8"))
     report = json.loads((tmp_path / "neutral" / "gate_report.json").read_text("utf-8"))
     assert manifest["shared_error_propagated"] is True
-    assert manifest["theta_draw_index"] == rounds.theta_index[2] if rounds.theta_index else False
+    assert rounds.theta_index is not None
+    assert manifest["theta_draw_index"] == rounds.theta_index[2]
     assert report["shared_error"]["propagated"] is True
     assert report["shared_error"]["theta"] == ["g_unlabelled"]
-    assert report["shared_error"]["theta_draw_index"] == list(rounds.theta_index or ())
-    assert 0.9 < report["shared_error"]["explained_variance_share"] <= 1.0
+    assert report["shared_error"]["theta_draw_index"] == list(rounds.theta_index)
+    assert 0.5 < report["shared_error"]["explained_variance_share"] <= 1.0
+    assert report["missing_by_cause"] == {"bound_only": 2, "no_reports": 1, "other": 0}
     fallback = shared_error_summary(None, "shared_arrays_absent")
     assert fallback == {"propagated": False, "reason": "shared_arrays_absent"}
-
-
-def test_singular_subset_fallback_keeps_original_side_indices() -> None:
-    # Sides 0 and 2 are the same draws (singular together); side 1 is far too diffuse
-    # to carry a likelihood. After dropping it the subset is still singular, and the
-    # diagonal path's survivors must be reported against the original three sides.
-    rng = np.random.default_rng(2)
-    base = 1.0 + 0.3 * rng.standard_normal(500)
-    diffuse = 5.0 * rng.standard_normal(500)
-    block = np.column_stack([base, diffuse, base])
-
-    result = divide_prior(block.mean(axis=0), np.cov(block, rowvar=False), M0, S0, MIN_PRECISION)
-
-    assert result.method == "diagonal"
-    assert result.keep == (0, 2)
-    assert result.m_lik.shape == (2,)
-
-
-def test_weak_sides_are_classified_on_the_raw_covariance() -> None:
-    # Side 2 carries a loading of 1.5 on g with little noise of its own: weak on its
-    # raw posterior, comfortably strong once g is regressed out. Propagation on or
-    # off must still drop it.
-    rng = np.random.default_rng(6)
-    g = rng.standard_normal(N_DRAWS)
-    strong = 1.0 + 0.3 * rng.standard_normal(N_DRAWS)
-    loaded = 2.0 + 1.5 * g + 0.8 * rng.standard_normal(N_DRAWS)
-    neutral = NeutralDraws(
-        run_id=1,
-        side_id=np.array([1, 2]),
-        battle_id=np.array([1, 1]),
-        draws=np.column_stack([strong, loaded]),
-        m0_mean=M0,
-        s0_mean=S0,
-        g_unlabelled=g,
-        offset_bar=np.zeros(N_DRAWS),
-        side_era=np.zeros(2),
-        side_unlabelled_share=np.ones(2),
-    )
-
-    on, on_stats = likelihoods_from_draws(neutral, {1, 2}, min_precision=MIN_PRECISION)
-    off, off_stats = likelihoods_from_draws(
-        neutral, {1, 2}, min_precision=MIN_PRECISION, propagate_shared=False
-    )
-
-    assert on_stats.shared is not None
-    assert on_stats.weak_sides == off_stats.weak_sides == 1
-    assert [lik.side_ids for lik in on] == [lik.side_ids for lik in off] == [(1,)]
 
 
 def test_theta_selection_is_stratified_deterministic_and_permuted() -> None:
@@ -417,23 +279,23 @@ def test_an_imputed_side_moves_with_theta_as_the_observed_side_in_its_era_does()
     # drift with theta across rounds, though each level does.
     rng = np.random.default_rng(12)
     g = rng.standard_normal(N_DRAWS)
-    draws = np.column_stack(
-        [1.0 + 0.6 * g + NOISE_SD * rng.standard_normal(N_DRAWS) for _ in range(2)]
-    )
     neutral = NeutralDraws(
         run_id=1,
         side_id=np.array([1, 2]),
         battle_id=np.array([1, 1]),
-        draws=draws,
-        m0_mean=M0,
-        s0_mean=S0,
+        draws=np.zeros((N_DRAWS, 2)),
+        m0_mean=9.0,
+        s0_mean=1.0,
         g_unlabelled=g,
-        offset_bar=np.zeros(N_DRAWS),
-        side_era=np.zeros(2),
-        side_unlabelled_share=np.ones(2),
+        lik_mean=np.array([1.0, np.nan]),
+        lik_sd=np.array([LIK_SD, np.nan]),
+        lik_has_point=np.array([True, False]),
+        lik_loadings=np.array([[0.6], [0.0]]),
+        lik_loading_names=("g_unlabelled",),
     )
-    liks, stats = likelihoods_from_draws(neutral, {1}, min_precision=MIN_PRECISION)
+    liks, stats = likelihoods_from_draws(neutral, {1, 2})
     assert [lik.side_ids for lik in liks] == [(1,)]
+    assert stats.bound_only_side_ids == frozenset({2})
     design = build_design(_sides()[:2], liks, PRIORS)
     n_rounds = 400
 
@@ -446,7 +308,8 @@ def test_an_imputed_side_moves_with_theta_as_the_observed_side_in_its_era_does()
         shared=stats.shared,
     )
 
-    assert stats.shared is not None and rounds.theta_index is not None
+    assert stats.shared is not None
+    assert rounds.theta_index is not None
     theta = stats.shared.theta_centered[list(rounds.theta_index), 0]
     observed, imputed = rounds.values[:, 0], rounds.values[:, 1]
     slope_level = np.polyfit(theta, observed, 1)[0]

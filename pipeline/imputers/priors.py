@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
+import structlog
 import yaml
 
 __all__ = [
@@ -22,6 +23,8 @@ __all__ = [
     "era_of_year",
     "load_priors",
 ]
+
+logger = structlog.get_logger()
 
 DEFAULT_PRIORS_PATH: Final[Path] = Path("config/imputation_priors.yaml")
 UNDATED: Final[str] = "undated"
@@ -63,7 +66,6 @@ class ImputeParams:
     scale: str = "neutral"
     n_imputations: int = 20
     mnar_delta: float = 0.0
-    min_lik_precision: float = 0.5
     published_default_sd: float = 1.0
     draws: int = 1000
     tune: int = 1000
@@ -80,6 +82,9 @@ class ImputeParams:
     value_max: float = 10_000_000.0
     ks_alpha: float = 0.01
     ks_min_n: int = 5
+    min_pair_slope: float = 0.8
+    min_side_slope: float = 0.9
+    slope_gate_min_n: int = 10
     model_type: str = "imputation"
     imputed_root: str = "data/imputed"
     priors_path: str = str(DEFAULT_PRIORS_PATH)
@@ -102,6 +107,13 @@ class ImputeParams:
             ValueError: If ``scale`` is not ``'neutral'`` or ``'published'``.
         """
         d = cls()
+        if "min_lik_precision" in params:
+            # Removed 2026-10-22: reconcile exports each side's likelihood, so no
+            # side with a point row can be weak. Ignored rather than honoured.
+            logger.warning(
+                "impute_min_lik_precision_ignored",
+                hint="removed; a side is missing only when it has no point row",
+            )
         scale = str(params.get("scale", d.scale))
         if scale not in ("neutral", "published"):
             raise ValueError(f"params.scale must be 'neutral' or 'published', got {scale!r}")
@@ -110,7 +122,6 @@ class ImputeParams:
             scale=scale,
             n_imputations=int(params.get("n_imputations", d.n_imputations)),
             mnar_delta=float(params.get("mnar_delta", d.mnar_delta)),
-            min_lik_precision=float(params.get("min_lik_precision", d.min_lik_precision)),
             published_default_sd=float(params.get("published_default_sd", d.published_default_sd)),
             draws=int(params.get("mcmc_samples", d.draws)),
             tune=int(params.get("mcmc_tune", d.tune)),
@@ -127,6 +138,9 @@ class ImputeParams:
             value_max=float(params.get("value_max", d.value_max)),
             ks_alpha=float(params.get("ks_alpha", d.ks_alpha)),
             ks_min_n=int(params.get("ks_min_n", d.ks_min_n)),
+            min_pair_slope=float(params.get("min_pair_slope", d.min_pair_slope)),
+            min_side_slope=float(params.get("min_side_slope", d.min_side_slope)),
+            slope_gate_min_n=int(params.get("slope_gate_min_n", d.slope_gate_min_n)),
             model_type=str(params.get("model_type", d.model_type)),
             imputed_root=str(params.get("imputed_root", d.imputed_root)),
             priors_path=str(params.get("imputation_priors", d.priors_path)),

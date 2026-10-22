@@ -74,6 +74,13 @@ from pipeline.reconcilers.model import (
     _unlabelled_mask,
 )
 from pipeline.reconcilers.records import Quantity, Report, SideEstimate, SourceBias, SourceKey
+from pipeline.reconcilers.recovery import (
+    RecoverySettings,
+    battle_pairs,
+    between_battle_ppc,
+    recovery_diagnostics,
+    singleton_points,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     import arviz as az
@@ -137,6 +144,8 @@ def summarise_fit(
     computed_at: datetime,
     max_quantile_mcse_frac: float = DEFAULT_MAX_QUANTILE_MCSE_FRAC,
     max_median_mcse_log: float = DEFAULT_MAX_MEDIAN_MCSE_LOG,
+    recovery: RecoverySettings | None = None,
+    ancient_cutoff_year: int = 500,
 ) -> SummaryResult:
     """Turn a sampled posterior into the records the reconcile stage stores.
 
@@ -159,6 +168,10 @@ def summarise_fit(
             MCSE as a share of its interval width; see :func:`_convergence`.
         max_median_mcse_log: The write gate's absolute limit on the MCSE of a
             side's median, in log units.
+        recovery: Sizes and thresholds of the recovery diagnostics (troops only);
+            defaults when None.
+        ancient_cutoff_year: The stage's ancient cutoff, for the ancient group of
+            the recovery diagnostics.
 
     Returns:
         The side estimates, source biases, and diagnostics payload.
@@ -207,6 +220,17 @@ def summarise_fit(
         # Type-level observation scale: sqrt(sigma_sq_type) per source type, the
         # sigma a pooled key uses.
         "sigma_type": _sigma_type_stats(idata),
+        "sigma_type_ancient": _sigma_ancient_stats(idata),
+        "nu": _scalar_stats(idata, "nu") if "nu" in idata.posterior.data_vars else None,
+        "noise_prior": {
+            "family": priors.observation_noise_prior,
+            "modern_median": priors.noise_modern_median or inflation.faithful_sd,
+            "modern_log_sd": priors.noise_modern_log_sd,
+            "ancient_median": priors.noise_ancient_median,
+            "ancient_log_sd": priors.noise_ancient_log_sd,
+            "nu_floor": priors.student_t_nu_floor,
+            "applies": design.quantity == "troops" and priors.informative_noise,
+        },
         # Do the estimates spread as widely as the reports? ~0.005 on the pilot
         # corpus where every side came back at the same level; see spread_ratio.
         "spread_ratio": spread_ratio(design, log_estimates),
@@ -242,6 +266,16 @@ def summarise_fit(
         "bound_excess": _bound_excess_stats(idata, priors),
     }
     diagnostics.update(_contamination_diagnostics(idata, design, priors.contamination_sd))
+    if design.quantity == "troops":
+        diagnostics["recovery"] = recovery_block(
+            idata,
+            design,
+            log_estimates,
+            battle_of_side={r.side_id: r.battle_id for r in rows},
+            year_of_side={r.side_id: r.year_astronomical for r in rows},
+            settings=recovery or RecoverySettings(),
+            ancient_cutoff_year=ancient_cutoff_year,
+        )
 
     logger.info(
         "reconcile_summary_built",
@@ -404,19 +438,64 @@ def singleton_slope(design: Design, log_estimates: dict[int, float]) -> float | 
         The slope, or None when fewer than three singleton sides exist or
         their reports do not vary.
     """
-    counts = np.bincount(design.side_index, minlength=design.n_sides)
-    xs: list[float] = []
-    ys: list[float] = []
-    for row in design.point_rows:
-        position = int(design.side_index[row])
-        side_id = design.side_ids[position]
-        if counts[position] != 1 or side_id not in log_estimates:
-            continue
-        xs.append(float(design.log_y[row]))
-        ys.append(log_estimates[side_id])
+    xs, ys = singleton_points(design, log_estimates)
     if len(xs) < 3 or float(np.var(xs)) <= 0.0:
         return None
     return _finite(float(np.polyfit(xs, ys, 1)[0]))
+
+
+def recovery_block(
+    idata: az.InferenceData,
+    design: Design,
+    log_estimates: dict[int, float],
+    *,
+    battle_of_side: dict[int, int],
+    year_of_side: dict[int, int | None],
+    settings: RecoverySettings,
+    ancient_cutoff_year: int,
+) -> dict[str, Any]:
+    """Recovery diagnostics for one troop fit, including its posterior predictive check.
+
+    Args:
+        idata: The fit's posterior.
+        design: The design the fit used.
+        log_estimates: ``side_id`` to the log of the fit's estimate (published
+            or neutral).
+        battle_of_side: ``side_id`` to ``battle_id``.
+        year_of_side: ``side_id`` to the battle's astronomical year.
+        settings: Sizes and thresholds.
+        ancient_cutoff_year: The stage's ancient cutoff.
+
+    Returns:
+        See :func:`pipeline.reconcilers.recovery.recovery_diagnostics`.
+    """
+    ppc: dict[str, Any] | None = None
+    pairs = battle_pairs(design, battle_of_side)
+    if len(pairs) >= settings.min_battles:
+        rows = np.unique(np.concatenate([np.concatenate([p.rows_a, p.rows_b]) for p in pairs]))
+        pooled_size = int(np.prod(idata.posterior["mu_side"].shape[:2]))
+        keep = np.unique(
+            np.linspace(0, pooled_size - 1, min(settings.ppc_draws, pooled_size)).astype(int)
+        )
+
+        def draw(name: str) -> np.ndarray:
+            thinned: np.ndarray = _pooled(idata, name)[keep]
+            return thinned
+
+        eta, var = _row_eta_and_var(draw, design, rows)
+        nu = draw("nu") if "nu" in idata.posterior.data_vars else None
+        ppc = between_battle_ppc(pairs, design.log_y, eta, var, rows, nu, seed=settings.ppc_seed)
+    return recovery_diagnostics(
+        design,
+        log_estimates,
+        battle_of_side,
+        year_of_side,
+        settings=settings,
+        ancient_cutoff_year=ancient_cutoff_year,
+        singleton_slope=singleton_slope(design, log_estimates),
+        spread_ratio=spread_ratio(design, log_estimates),
+        ppc=ppc,
+    )
 
 
 def _log_normal_pdf(y: np.ndarray, mu: np.ndarray, sd: np.ndarray) -> np.ndarray:
@@ -432,6 +511,30 @@ def _log_normal_pdf(y: np.ndarray, mu: np.ndarray, sd: np.ndarray) -> np.ndarray
     """
     z = (y - mu) / sd
     return cast(np.ndarray, -0.5 * z * z - np.log(sd) - 0.5 * math.log(2.0 * math.pi))
+
+
+def _row_sigma(draw: Callable[[str], np.ndarray], design: Design, rows: np.ndarray) -> np.ndarray:
+    """Per-draw source noise sd of the given rows, ancient rows on the ancient scale.
+
+    Args:
+        draw: Name to an array of shape ``(n_draws, ...)`` of that posterior
+            variable. May raise ``KeyError`` for ``sigma_source_ancient``, which
+            exists only for a troop fit with the informative noise prior and at
+            least one row before the noise cutoff year.
+        design: The design the fit used.
+        rows: Row indices into the design.
+
+    Returns:
+        ``(n_draws, len(rows))``.
+    """
+    sigma: np.ndarray = draw("sigma_source")[:, design.source_index[rows]]
+    try:
+        ancient: np.ndarray = draw("sigma_source_ancient")[:, design.source_index[rows]]
+    except KeyError:
+        return sigma
+    is_ancient = design.ancient_rows[rows][None, :]
+    blended: np.ndarray = sigma + is_ancient * (ancient - sigma)
+    return blended
 
 
 def _row_eta_and_var(
@@ -464,7 +567,7 @@ def _row_eta_and_var(
         offsets = draw("sigma_ratio")[:, None] * draw("z_ratio")[:, pair_of_row[rows]]
         eta = eta + offsets * ratio[rows]
     var = (
-        draw("sigma_source")[:, design.source_index[rows]] ** 2
+        _row_sigma(draw, design, rows) ** 2
         + draw("sigma_estimate")[:, None] ** 2 * design.is_estimate.astype(float)[rows]
         + draw("sigma_round")[:, None] ** 2 * design.roundness[rows]
         + design.range_var[rows]
@@ -558,6 +661,24 @@ def _sigma_type_stats(idata: az.InferenceData) -> dict[str, float | None]:
         Source type to mean observation sd on the log scale.
     """
     values = np.sqrt(_pooled(idata, "sigma_sq_type"))
+    labels = _coord_labels(idata, "source_type")
+    return {label: _finite(float(values[:, i].mean())) for i, label in enumerate(labels)}
+
+
+def _sigma_ancient_stats(idata: az.InferenceData) -> dict[str, float | None]:
+    """Posterior mean of the ancient-row noise sd for each source type.
+
+    Args:
+        idata: The fit's posterior.
+
+    Returns:
+        Source type to mean ancient observation sd on the log scale; empty when
+        the fit has no ancient scale (casualties, the inverse-gamma prior, or no
+        row before the noise cutoff).
+    """
+    if "sigma_type_ancient" not in idata.posterior.data_vars:
+        return {}
+    values = _pooled(idata, "sigma_type_ancient")
     labels = _coord_labels(idata, "source_type")
     return {label: _finite(float(values[:, i].mean())) for i, label in enumerate(labels)}
 
@@ -1161,9 +1282,17 @@ def _row_precision(idata: az.InferenceData, design: Design, *, max_draws: int = 
     """
     if "sigma_source" not in idata.posterior.data_vars:
         return np.ones(design.n_obs)
-    sigma = _pooled(idata, "sigma_source")
-    keep = np.unique(np.linspace(0, sigma.shape[0] - 1, min(max_draws, sigma.shape[0])).astype(int))
-    var = sigma[keep][:, design.source_index] ** 2 + design.range_var[None, :]
+    pooled_sigma = _pooled(idata, "sigma_source")
+    keep = np.unique(
+        np.linspace(0, pooled_sigma.shape[0] - 1, min(max_draws, pooled_sigma.shape[0])).astype(int)
+    )
+
+    def draw_kept(name: str) -> np.ndarray:
+        thinned: np.ndarray = _pooled(idata, name)[keep]
+        return thinned
+
+    sigma = _row_sigma(draw_kept, design, np.arange(design.n_obs))
+    var = sigma**2 + design.range_var[None, :]
     columns = {
         "sigma_estimate": design.is_estimate.astype(float),
         "sigma_round": design.roundness,

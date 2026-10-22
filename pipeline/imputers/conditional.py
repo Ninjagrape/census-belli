@@ -9,7 +9,7 @@ conditional Gaussian::
 
 so the battle's posterior precision is ``prior_precision + H' P H`` and its mean
 solves ``precision * mean = prior_precision * mu + H' P m_lik``. Sides with no
-likelihood (missing, or too weakly measured) are simply not in ``H``.
+likelihood (missing: no point report) are simply not in ``H``.
 
 Observed sides are redrawn rather than copied through: this is
 overimputation. Treating an observed side's noisy reconcile estimate as exact
@@ -193,7 +193,7 @@ def select_theta_indices(theta_centered: np.ndarray, n_rounds: int, seed: int) -
 def era_loading_table(design: ImputeDesign) -> np.ndarray | None:
     """Precision-weighted mean likelihood loading of the observed sides, per era.
 
-    An imputed side, or a side too weak to carry a likelihood, has no data to
+    An imputed side has no data to
     shift with theta, but its prior mean is the era level, which was learned
     from observed sides whose estimates do shift. This table is how much, per
     era, those observed sides move per unit of centred theta.

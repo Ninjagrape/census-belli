@@ -66,16 +66,16 @@ class BattleLikelihood:
 
     The measurement model is ``m_lik ~ N(y_obs, inv(precision))``: ``y_obs``
     is the latent log troop count and ``precision`` the likelihood's
-    precision, with reconcile's own side prior already divided out on the
-    neutral scale.
+    precision. On the neutral scale both come straight from reconcile's exported
+    per-side likelihood (point rows only, Fisher precision), so ``precision`` is
+    diagonal.
 
     Attributes:
         battle_id: The battle.
         side_ids: Observed sides, in the row/column order of the arrays.
         m_lik: Likelihood mean per side, log scale, shape ``(k,)``.
         precision: Likelihood precision, shape ``(k, k)``, positive definite.
-        method: ``'joint'`` (full matrix), ``'diagonal'`` (fallback) or
-            ``'published'``.
+        method: ``'reconcile'`` (neutral scale) or ``'published'``.
         shift_loading: ``(k, p)`` response of ``m_lik`` to the ``p`` shared
             reconcile parameters, or None when the shared error is not
             propagated. A round that draws theta shifts ``m_lik`` by this
@@ -97,9 +97,11 @@ class ImputeCounts:
     sides_in_scope: int = 0
     sides_observed: int = 0
     sides_imputed: int = 0
-    sides_weak_as_missing: int = 0
+    sides_missing_bound_only: int = 0
+    sides_missing_no_reports: int = 0
+    sides_missing_other: int = 0
     sides_stale_in_draws: int = 0
-    battles_diagonal_fallback: int = 0
+    log_rows_retired: int = 0
     log_rows_updated: int = 0
     log_rows_inserted: int = 0
     extra: dict[str, int] = field(default_factory=dict)
@@ -114,9 +116,11 @@ class ImputeCounts:
             "sides_in_scope": self.sides_in_scope,
             "sides_observed": self.sides_observed,
             "sides_imputed": self.sides_imputed,
-            "sides_weak_as_missing": self.sides_weak_as_missing,
+            "sides_missing_bound_only": self.sides_missing_bound_only,
+            "sides_missing_no_reports": self.sides_missing_no_reports,
+            "sides_missing_other": self.sides_missing_other,
             "sides_stale_in_draws": self.sides_stale_in_draws,
-            "battles_diagonal_fallback": self.battles_diagonal_fallback,
+            "log_rows_retired": self.log_rows_retired,
             "log_rows_updated": self.log_rows_updated,
             "log_rows_inserted": self.log_rows_inserted,
             **self.extra,

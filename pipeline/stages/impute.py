@@ -8,10 +8,13 @@ scale; outputs go to ``data/imputed/{scale}/round_{n}/``.
 ## What it does
 
 1. Builds a likelihood for each battle's observed sides from reconcile: on the
-   neutral scale from the posterior draws in
-   ``data/processed/reconcile/neutral_draws_run{run_id}.npz`` with
-   reconcile's own side prior divided out; on the published scale from
-   ``est_troops_total`` and its interval, diagonally.
+   neutral scale from the per-side likelihood that reconcile's neutral fit
+   exports in ``data/processed/reconcile/neutral_draws_run{run_id}.npz`` (point
+   rows only, Fisher precision; a file without it is refused, re-run
+   reconcile); on the published scale from ``est_troops_total`` and its
+   interval, diagonally. A side is missing only when it has no point row, and
+   the missing sides are counted by cause: ``bound_only``, ``no_reports`` or
+   ``other``.
 2. Fits the marginalised joint model (``pipeline/imputers/model.py``).
 3. Writes only if the fit converged (the same rule reconcile uses): one
    posterior draw per round, every side redrawn from the conditional Gaussian
@@ -54,6 +57,7 @@ from pipeline.imputers.likelihood import (
 from pipeline.imputers.load import (
     latest_written_neutral_run_id,
     load_side_rows,
+    load_sides_with_troop_reports,
     published_run_id,
     subset_sides,
 )
@@ -61,7 +65,7 @@ from pipeline.imputers.model import build_model
 from pipeline.imputers.outputs import config_hash, write_gate_report, write_rounds
 from pipeline.imputers.priors import ImputeParams, ImputePriors, load_priors
 from pipeline.imputers.records import BattleLikelihood, ImputeCounts, SideRow
-from pipeline.imputers.store import write_imputed_log
+from pipeline.imputers.store import retire_kept_sides, write_imputed_log
 from pipeline.imputers.summarise import (
     build_diagnostics,
     convergence,
@@ -106,11 +110,10 @@ def _build_likelihoods(
             diagnostics say it was written.
     """
     if ip.scale == "published":
-        return (
-            likelihoods_from_published(sides, default_sd=ip.published_default_sd),
-            published_run_id(conn),
-            LikelihoodStats(shared_reason="published_scale"),
-        )
+        liks = likelihoods_from_published(sides, default_sd=ip.published_default_sd)
+        stats = LikelihoodStats(shared_reason="published_scale")
+        _count_missing_by_cause(conn, sides, liks, stats, counts)
+        return liks, published_run_id(conn), stats
 
     expected = latest_written_neutral_run_id(conn)
     if ip.draws_path:
@@ -143,13 +146,51 @@ def _build_likelihoods(
     liks, stats = likelihoods_from_draws(
         neutral,
         {s.side_id for s in sides},
-        min_precision=ip.min_lik_precision,
         propagate_shared=ip.propagate_shared_error,
     )
     counts.sides_stale_in_draws = stats.stale_sides
-    counts.sides_weak_as_missing = stats.weak_sides
-    counts.battles_diagonal_fallback = stats.diagonal_battles
+    _count_missing_by_cause(conn, sides, liks, stats, counts)
     return liks, neutral.run_id, stats
+
+
+def _count_missing_by_cause(
+    conn: Any,
+    sides: list[SideRow],
+    liks: list[BattleLikelihood],
+    stats: LikelihoodStats,
+    counts: ImputeCounts,
+) -> None:
+    """Count the sides without a likelihood by why, and log them.
+
+    A side is missing only if it has no point row. ``bound_only`` sides are in
+    reconcile's fit with bound rows alone; ``no_reports`` have no ``troop_reports``
+    row at all; ``other`` have reports that reconcile's load filters excluded
+    (a branch that is not a total, an implausible figure, a population count).
+
+    Args:
+        conn: An open database connection.
+        sides: Every in-scope side.
+        liks: The likelihoods built.
+        stats: From the likelihood build; supplies the bound-only sides.
+        counts: Counters to update.
+    """
+    kept = {side_id for lik in liks for side_id in lik.side_ids}
+    missing = [s.side_id for s in sides if s.side_id not in kept]
+    with_reports = load_sides_with_troop_reports(conn) if missing else set()
+    for side_id in missing:
+        if side_id in stats.bound_only_side_ids:
+            counts.sides_missing_bound_only += 1
+        elif side_id in with_reports:
+            counts.sides_missing_other += 1
+        else:
+            counts.sides_missing_no_reports += 1
+    logger.info(
+        "impute_missing_sides_by_cause",
+        bound_only=counts.sides_missing_bound_only,
+        no_reports=counts.sides_missing_no_reports,
+        other=counts.sides_missing_other,
+        kept=len(kept),
+    )
 
 
 def _check_fingerprint(conn: Any, neutral: NeutralDraws, path: Path) -> None:
@@ -252,6 +293,7 @@ def _fit_and_write(
             written=False,
             gates=[],
             shared_error=shared_error_summary(shared, reason),
+            missing_by_cause=_missing_by_cause(counts),
         )
         return diagnostics
 
@@ -264,6 +306,7 @@ def _fit_and_write(
         shared=shared,
     )
     gates = _gates(ip, design, rounds)
+    kept_side_ids = [int(side_id) for side_id in design.side_ids[design.observed_rows]]
     write_rounds(
         root,
         scale=ip.scale,
@@ -275,6 +318,7 @@ def _fit_and_write(
         config_digest=config_digest,
     )
     if ip.scale == "neutral":
+        counts.log_rows_retired = retire_kept_sides(conn, kept_side_ids, scale=ip.scale)
         write_imputed_log(
             conn,
             summarise_imputed(rounds, design),
@@ -289,9 +333,19 @@ def _fit_and_write(
         written=True,
         gates=gates,
         shared_error=shared_error_summary(shared, reason, rounds.theta_index),
+        missing_by_cause=_missing_by_cause(counts),
     )
     counts.sides_imputed = int(rounds.is_imputed.sum())
     return diagnostics
+
+
+def _missing_by_cause(counts: ImputeCounts) -> dict[str, int]:
+    """The sides without a likelihood, by cause, for the gate report."""
+    return {
+        "bound_only": counts.sides_missing_bound_only,
+        "no_reports": counts.sides_missing_no_reports,
+        "other": counts.sides_missing_other,
+    }
 
 
 def _gates(ip: ImputeParams, design: ImputeDesign, rounds: RoundSet) -> list[GateResult]:
@@ -308,6 +362,11 @@ def _gates(ip: ImputeParams, design: ImputeDesign, rounds: RoundSet) -> list[Gat
         value_max=ip.value_max,
         ks_alpha=ip.ks_alpha,
         ks_min_n=ip.ks_min_n,
+        report=design.reported,
+        is_observed=design.is_observed,
+        min_pair_slope=ip.min_pair_slope,
+        min_side_slope=ip.min_side_slope,
+        slope_min_n=ip.slope_gate_min_n,
     )
 
 

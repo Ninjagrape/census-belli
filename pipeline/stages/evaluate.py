@@ -166,7 +166,7 @@ def _load_neutral(conn: Any, reconcile_root: Path) -> NeutralDraws:
     if not path.is_file():
         raise NotEvaluableError(f"neutral draws file {path} not found")
     try:
-        return load_neutral_draws(path)
+        return load_neutral_draws(path, require_likelihood=False)
     except (OSError, ValueError, KeyError) as exc:
         raise NotEvaluableError(f"cannot read {path}: {type(exc).__name__}: {exc}") from exc
 

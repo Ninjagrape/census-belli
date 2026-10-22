@@ -184,6 +184,10 @@ def test_neutral_estimates_are_stamped_with_their_own_run_id() -> None:
     assert "neutral" not in other.calls[0][0]
 
 
+SIGMA = 0.25
+NU = 5.0
+
+
 def _shared_summary(n_draws: int = 4000):  # type: ignore[no-untyped-def]
     """A neutral summary whose shared-parameter draws are exact multiples of a row index.
 
@@ -212,11 +216,29 @@ def _shared_summary(n_draws: int = 4000):  # type: ignore[no-untyped-def]
         "g_regime": g_regime,
         "a_era": 3.0 * index,
         "offset_bar": 4.0 * index,
+        # The pieces the exported likelihood rebuilds each row's offset and noise from.
+        "beta_source": np.zeros((chains, per_chain, design.n_sources)),
+        "delta_level": np.zeros((chains, per_chain, len(design.levels))),
+        "sigma_source": np.full((chains, per_chain, design.n_sources), SIGMA),
+        "sigma_estimate": np.full((chains, per_chain), 0.1),
+        "sigma_round": np.full((chains, per_chain), 0.1),
+        "nu": np.full((chains, per_chain), NU),
     }
     idata = az.from_dict(
         posterior=posterior,
-        coords={"side": [str(s) for s in design.side_ids], "regime": regimes},
-        dims={"mu_side": ["side"], "g_regime": ["regime"]},
+        coords={
+            "side": [str(s) for s in design.side_ids],
+            "regime": regimes,
+            "source_key": design.coords()["source_key"],
+            "level": list(design.levels),
+        },
+        dims={
+            "mu_side": ["side"],
+            "g_regime": ["regime"],
+            "beta_source": ["source_key"],
+            "delta_level": ["level"],
+            "sigma_source": ["source_key"],
+        },
     )
     battles = {30: 3, 10: 1, 20: 1}
     return design, summarise_neutral(idata, design, battles, run_id=9, ci_mass=0.95)

@@ -128,6 +128,9 @@ class Design:
             rows (the only rows the era term applies to), subtracted from
             those rows. Recorded so a run's anchoring is reconstructable.
         era_centre_rows: How many rows ``era_mean`` was computed over.
+        noise_ancient: Per row, 1.0 where the battle is before the noise cutoff
+            year (the wider observation-noise prior), else 0.0; None on a
+            hand-built design, read as all zeros through :attr:`ancient_rows`.
         roundness: 0..1 per row; conventional figures get more observation
             variance because they are coarsened, not merely noisy.
         is_estimate: Whether the source hedged the figure.
@@ -176,6 +179,21 @@ class Design:
     levels: tuple[str, ...]
     lineage_ids: tuple[int, ...]
     era_centre_rows: int = 0
+    noise_ancient: np.ndarray | None = None
+
+    @property
+    def ancient_rows(self) -> np.ndarray:
+        """Per row, 1.0 where the observation-noise prior uses the wider ancient scale.
+
+        Unlike ``era`` this is the raw indicator: not centred and not limited to
+        unlabelled rows, because the noise of a figure does not depend on whether
+        its claim regime could be read. An undated battle is 0.0 (modern scale);
+        see :func:`pipeline.reconcilers.claims.era_flag` for why undated is not
+        read as ancient.
+        """
+        if self.noise_ancient is None:
+            return np.zeros(self.n_obs, dtype=float)
+        return self.noise_ancient
 
     @property
     def n_obs(self) -> int:
@@ -249,6 +267,7 @@ def build_design(
     counts: ReconcileCounts | None = None,
     min_battles_per_source_effect: int = DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT,
     merge_ranges: bool = True,
+    noise_cutoff_year: int | None = None,
 ) -> Design:
     """Assemble the aligned arrays for one quantity's model.
 
@@ -267,6 +286,9 @@ def build_design(
             range become one point row; see
             :func:`pipeline.reconcilers.claims.merge_range_pairs`. Off only to
             show what the pairs do to the fit.
+        noise_cutoff_year: Astronomical year below which a row takes the wider
+            ancient observation-noise prior. Defaults to ``ancient_cutoff_year``,
+            the stage's one existing notion of "ancient".
 
     Returns:
         The design.
@@ -337,6 +359,16 @@ def build_design(
         flag = era_flag(report.year_astronomical, ancient_cutoff_year)
         era_values.append(np.nan if flag is None else flag)
     era_raw = np.array(era_values, dtype=float)
+    noise_cutoff = ancient_cutoff_year if noise_cutoff_year is None else noise_cutoff_year
+    noise_ancient = np.array(
+        [
+            0.0
+            if r.year_astronomical is None
+            else float(era_flag(r.year_astronomical, noise_cutoff) or 0.0)
+            for r in rows
+        ],
+        dtype=float,
+    )
     # The era term only ever applies to unlabelled rows (model.py gates it so),
     # so the centre is taken over those rows. Centring over every dated row
     # left the applied column with a non-zero mean whenever labelled and
@@ -400,6 +432,7 @@ def build_design(
         levels=tuple(str(x) for x in sorted(level_ix, key=lambda k: level_ix[k])),
         lineage_ids=tuple(sorted(lineage_ix, key=lambda k: lineage_ix[k])),
         era_centre_rows=era_centre_rows,
+        noise_ancient=noise_ancient,
     )
 
     logger.info(

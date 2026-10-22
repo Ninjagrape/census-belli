@@ -33,6 +33,7 @@ __all__ = [
     "load_commanders",
     "load_mnar_side_ids",
     "load_side_rows",
+    "load_sides_with_troop_reports",
     "polity_key",
     "primary_commander_keys",
     "latest_written_neutral_run_id",
@@ -74,6 +75,8 @@ _LOAD_MNAR = text(
       AND side_id IS NOT NULL
     """
 )
+
+_SIDES_WITH_REPORTS = text("SELECT DISTINCT side_id FROM troop_reports")
 
 _PUBLISHED_RUN = text("SELECT MAX(est_troops_run_id) FROM battle_sides")
 
@@ -140,6 +143,21 @@ def load_mnar_side_ids(conn: Any) -> set[int]:
         Their side ids.
     """
     return {int(r[0]) for r in conn.execute(_LOAD_MNAR).fetchall()}
+
+
+def load_sides_with_troop_reports(conn: Any) -> set[int]:
+    """Sides that have at least one ``troop_reports`` row, usable or not.
+
+    Used only to tell a side with no reports at all from one whose reports
+    reconcile could not use, when counting the sides impute treats as missing.
+
+    Args:
+        conn: An open database connection.
+
+    Returns:
+        Their side ids.
+    """
+    return {int(r[0]) for r in conn.execute(_SIDES_WITH_REPORTS).fetchall()}
 
 
 def latest_written_neutral_run_id(conn: Any) -> int | None:
