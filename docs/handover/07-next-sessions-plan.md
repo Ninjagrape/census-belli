@@ -61,6 +61,66 @@ Evidence: §29 M1 and M3, §30 MAJOR 2. Three separate defects:
    341 estimated sides are discarded this way. Check whether weakness should be
    judged on the residual (theta-regressed) precision.
 
+### A: approved design (2026-10-22)
+
+Diagnosis (bayesian-model-reviewer via Opus, read-only refits of run 84 in
+memory; full report in handover-log §31): one cause behind 3 and 4. The
+observation noise (sigma ~0.51 under Student-t nu 3.4, effective ~0.8) is
+identified only from 31 multi-report sides selected for disagreement, and is
+applied to 309 singletons against one corpus-wide t(4) side prior (m0 ~40k,
+s0 0.69): singleton slope 0.61, ratio slope 0.60. The corpus contradicts it
+(observed between-battle log-ratio variance 0.60 < the 0.92 the noise alone
+implies). g_unlabelled is pulled to ~0, so ancient "deflation" is shrinkage,
+not inflation correction. Residualising shared error rescues only 12 weak
+sides; weakness is an artefact of dividing out a t prior as if Normal
+(corr(|report - m0|, sd) = 0.94), so the rule discards the largest and
+smallest armies. Residual rule rejected.
+
+User decisions, 2026-10-22:
+1. **Extract** (wip/troop-extract): "(modern estimate[s]/est./estimation)"
+   figures are `branch=total`; on a side with a usable `modern_scholarly`
+   total, reconcile excludes every other total (`excluded_superseded_by_modern`,
+   rows kept). `ancient_claim` also matches Muslim/Islamic/Arab/Byzantine/
+   Roman/Greek/Persian source/estimate/account/tradition. Scope: "deployed" is
+   engaged; "total" is available only beside a deployed/engaged figure in the
+   same field; people/population/non-combatants/civilians are a new scope
+   `population`, excluded by reconcile (`excluded_population_scope`); within
+   a field of phase-dated or "initial" figures the largest is the total, the
+   rest components. "N under <Name>" is a component; "picked fighters" are men.
+2. **Reconcile noise** (approved as proposed, no explicit ancient term): an
+   informative observation-scale prior from the gold set's faithful component
+   (LogNormal(log 0.22, 0.3)) for post-1500 rows, a wider one for pre-1500 rows
+   (LogNormal(log 0.40, 0.35), a judgement call; sensitivity below);
+   sigma_round and sigma_est priors HalfNormal(0.1); Student-t nu floored at 3.
+   Consequence accepted: published ancient head counts rise to near reported
+   (~0.98x); force ratios are unaffected by that. Sensitivity variant with the
+   modern scale centred at 0.35 must be run once and recorded.
+   New gates: singleton slope >= 0.85 and spread_ratio >= 0.85 (error);
+   within-battle log-ratio slope >= 0.8 (error); post-1800 sides reported
+   > 50k geometric ratio in [0.85, 1.15] (warning); PPC of the between-battle
+   reported log-ratio variance (warning).
+3. **Impute likelihood** (approved): reconcile's neutral fit exports each
+   side's likelihood directly (no Gaussian division of a t prior): per side
+   with >= 1 point row, the likelihood mean and sd from its point rows at the
+   fitted noise (Fisher-information sd for the Student-t), with loadings on the
+   shared parameters (g_unlabelled, a_era, offset_bar), in the neutral npz.
+   A side is missing only if it has no point row (bound-only or no reports);
+   weak count logged by cause; no side with a point report may be weak.
+   Gates: kept-pair impute ratio slope >= 0.8; imputed vs report slope >= 0.9.
+4. **Jena-Auerstedt: split into two battles** (user's choice over a
+   `side_troops` kind). A new extract override kind creates "Battle of Jena"
+   and "Battle of Auerstedt" from the one article, routing commanders and
+   strength figures by the infobox's "Jena:"/"Auerstedt:" headings and
+   "(Jena)"/"(Auerstedt)" labels, with stable synthetic slugs, and retires the
+   parent. Cost accepted: the Arsht reference row for this battle no longer
+   joins; its 4 sides are re-resolved and re-classified.
+5. Phase 2b overrides: none in this refit.
+
+Verification after the refit: both reviewers; Khalid and Pyrrhus movement;
+force-ratio compression before (reconcile ratio slope 0.60, impute kept-pair
+0.43) and after; Soviet x_diff against reports for historiography-reviewer;
+evaluate's `observed_only` variant and beta_force compared.
+
 Jena-Auerstedt needs a design call either way (split into two battles, or a
 new `side_troops` override kind); bring options to the user, do not choose.
 

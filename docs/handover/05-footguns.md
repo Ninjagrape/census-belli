@@ -80,6 +80,10 @@ Part of the handover; the index is `handover.md` at the repo root.
   audit this after the fact; the agent panel shows "Spawned by".
 - An `llm-batch-worker` can stall on a slow API ("no progress for 600s");
   relaunch that chunk, `split --skip-answered` makes it safe.
+- **Workers must never kill processes they did not start.** On 2026-10-22 a
+  worker restarting its own suite "killed all python processes" and silently
+  took down another worker's impute run (re-run, no lasting damage). Every
+  brief that runs commands says: stop only your own process, by its PID.
 - **The laptop hibernates overnight** and kills background runs (a resolve
   run died mid-SPARQL on 2026-10-17). Re-run, do not trust a partial log.
 - A worker worktree needs its own `data/processed` copy (stage paths are

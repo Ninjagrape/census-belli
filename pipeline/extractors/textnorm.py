@@ -20,7 +20,7 @@ from __future__ import annotations
 import html
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final
 
 import mwparserfromhell
@@ -29,12 +29,14 @@ import structlog
 from pipeline.extractors.records import coerce_scope
 
 __all__ = [
+    "MODERN_ESTIMATE_PATTERN",
     "Quantity",
     "classify_figure",
     "is_equipment_count",
     "infer_branch",
     "infer_casualty_type",
     "infer_scope",
+    "is_modern_estimate",
     "normalise_label",
     "parse_number",
     "parse_quantities",
@@ -379,7 +381,12 @@ class Quantity:
     ``lead`` is the text between the previous number (or the line start) and
     this one, and ``noun`` the words directly after it. They are what tells
     "Total: 86,400" from "25,000 Romans" and "II Corps: 20,000" when the
-    branch keyword alone says only "total".
+    branch keyword alone says only "total". ``trailing`` is the text after the
+    number up to the next number, where a parenthetical source label
+    ("(modern estimates)") sits. ``phase`` is the date or phase heading the
+    figure falls under ("16-17 October"), ``block_first`` marks the figures on
+    the first line under such a heading, and the last two flags record whether
+    the figure's own wording says it was engaged or is a stated total.
     """
 
     value: float
@@ -391,6 +398,11 @@ class Quantity:
     context: str = ""
     lead: str = ""
     noun: str = ""
+    trailing: str = ""
+    phase: str = ""
+    block_first: bool = False
+    explicit_engaged: bool = False
+    total_worded: bool = False
 
 
 def parse_number(token: str) -> float | None:
@@ -440,6 +452,14 @@ def _looks_like_year(text: str, match: re.Match[str]) -> bool:
 # Ordered most specific first. on_paper and theatre_strength are tested
 # before engaged because a sentence can carry both ("30,000 on paper, of
 # whom 22,000 were engaged") and the qualifier is the informative half.
+_ENGAGED_RE: Final = re.compile(
+    r"\b(?:engaged|took part|present at the battle|committed to the (?:battle|engagement)"
+    r"|deployed|on the field|fought (?:at|in)|in the battle(?: itself)?|participated"
+    r"|brought to the field)\b",
+    re.IGNORECASE,
+)
+_TOTAL_WORD_RE: Final = re.compile(r"\btotal\b", re.IGNORECASE)
+
 _SCOPE_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (
         re.compile(
@@ -468,15 +488,17 @@ _SCOPE_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
         ),
         "available",
     ),
-    (
-        re.compile(
-            r"\b(?:engaged|took part|present at the battle|committed to the (?:battle|engagement)"
-            r"|deployed|on the field|fought (?:at|in)|in the battle(?: itself)?|participated"
-            r"|brought to the field)\b",
-            re.IGNORECASE,
-        ),
-        "engaged",
-    ),
+    (_ENGAGED_RE, "engaged"),
+)
+
+# A figure counting people rather than an army: a migrating nation, its
+# non-combatants, a city's inhabitants. Such a figure says nothing about
+# the force that fought, so it gets its own scope instead of "engaged".
+_POPULATION_RE: Final = re.compile(
+    r"\b(?:people(?![\'’]s)|peoples(?![\'’])|population|non-?combatants?"
+    r"|civilians?(?!\s+(?:levies|militia|volunteers|fighters|defenders|troops|soldiers))"
+    r"|inhabitants|refugees)\b",
+    re.IGNORECASE,
 )
 
 _BRANCH_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
@@ -513,7 +535,11 @@ _BRANCH_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
         "naval",
     ),
     (
-        re.compile(r"\b(?:aircraft|aeroplanes?|airplanes?|planes?|bombers?|fighters?)\b", re.I),
+        re.compile(
+            r"\b(?:aircraft|aeroplanes?|airplanes?|planes?|bombers?"
+            r"|fighter[- ](?:jets?|planes?))\b",
+            re.I,
+        ),
         "air",
     ),
     (re.compile(r"\b(?:tanks?|armou?r(?:ed)?|panzers?|AFVs?)\b", re.I), "armour"),
@@ -522,6 +548,14 @@ _BRANCH_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
         re.compile(r"\b(?:men|soldiers|troops|total|strength|combatants?|effectives?)\b", re.I),
         "total",
     ),
+)
+
+# "17,000 picked fighters" counts men. A bare "fighters" only means aircraft
+# when the same field speaks of aircraft, bombers or air forces.
+_BARE_FIGHTERS_RE: Final = re.compile(r"\bfighters?\b", re.IGNORECASE)
+_AIR_CONTEXT_RE: Final = re.compile(
+    r"\b(?:aircraft|aeroplanes?|airplanes?|planes?|bombers?|air\s*force|luftwaffe|jets?|sorties)\b",
+    re.IGNORECASE,
 )
 
 _CASUALTY_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
@@ -555,7 +589,54 @@ def infer_scope(context: str) -> str:
     Returns:
         A member of :data:`~pipeline.extractors.records.SCOPES`. ``unknown``
         when the wording says nothing either way, which is common and is not
-        a failure.
+        a failure. ``population`` when the figure counts people (a nation,
+        non-combatants, inhabitants) rather than an army.
+    """
+    if _counts_only_people(context):
+        return "population"
+    return _infer_combat_scope(context)
+
+
+_POPULATION_NEAR_WORDS: Final = 6
+
+
+def _counts_only_people(context: str) -> bool:
+    """Whether every figure in a text counts people by its own adjacent words.
+
+    A population word elsewhere in the clause ("30,000 men drawn from the
+    Boeotian people") says nothing about the figure, so each figure is judged
+    from the few words directly around it, cut at its neighbouring numbers.
+
+    Args:
+        context: The sentence or field value the number appeared in.
+
+    Returns:
+        True when the text holds at least one figure and each one has
+        population wording of its own.
+    """
+    found = list(_NUMBER_RE.finditer(context))
+    if not found:
+        return False
+    previous_end = 0
+    for index, match in enumerate(found):
+        next_start = found[index + 1].start() if index + 1 < len(found) else len(context)
+        before = context[previous_end : match.start()].split()[-_POPULATION_NEAR_WORDS:]
+        after = context[match.end() : next_start].split()[:2]
+        if not _POPULATION_RE.search(" ".join([*before, *after])):
+            return False
+        previous_end = match.end()
+    return True
+
+
+def _infer_combat_scope(context: str) -> str:
+    """Read the force-size scope from wording, ignoring population wording.
+
+    Args:
+        context: The sentence or field value the number appeared in.
+
+    Returns:
+        A member of :data:`~pipeline.extractors.records.SCOPES` other than
+        ``population``; ``unknown`` when the wording says nothing.
     """
     for pattern, scope in _SCOPE_PATTERNS:
         if pattern.search(context):
@@ -600,11 +681,13 @@ def resolve_scope(declared: str | None, context: str, fallback: str = "unknown")
     return coerce_scope(fallback)
 
 
-def _branch_match(context: str) -> str | None:
+def _branch_match(context: str, *, air_context: bool = False) -> str | None:
     """Look for an arm-of-service keyword.
 
     Args:
         context: Text to search.
+        air_context: Whether the whole field speaks of aircraft, which is what
+            lets a bare "fighters" count as aircraft instead of men.
 
     Returns:
         The branch the keyword implies, or None when none is present.
@@ -612,6 +695,8 @@ def _branch_match(context: str) -> str | None:
     for pattern, branch in _BRANCH_PATTERNS:
         if pattern.search(context):
             return branch
+        if branch == "air" and air_context and _BARE_FIGHTERS_RE.search(context):
+            return "air"
     return None
 
 
@@ -627,7 +712,7 @@ def infer_branch(context: str) -> str:
     return _branch_match(context) or "total"
 
 
-def _branch_near(segment: str, start: int, end: int) -> str:
+def _branch_near(segment: str, start: int, end: int, *, air_context: bool = False) -> str:
     """Read the branch for one number from the words closest to it.
 
     A clause can hold several numbers with different branches -- "95,000, of
@@ -640,6 +725,7 @@ def _branch_near(segment: str, start: int, end: int) -> str:
         segment: The clause the number was found in.
         start: Start offset of the number within the clause.
         end: End offset of the number within the clause.
+        air_context: Whether the whole field speaks of aircraft.
 
     Returns:
         A member of :data:`~pipeline.extractors.records.BRANCHES`.
@@ -660,7 +746,7 @@ def _branch_near(segment: str, start: int, end: int) -> str:
         windows.append(segment)
 
     for window in windows:
-        branch = _branch_match(window)
+        branch = _branch_match(window, air_context=air_context)
         if branch is not None:
             return branch
     return "total"
@@ -684,12 +770,83 @@ def infer_casualty_type(context: str) -> str:
 # ─── Quantity extraction ─────────────────────────────────────────────────────
 
 
-def _range_quantities(segment: str, default_scope: str) -> tuple[list[Quantity], str]:
+def _after_window(segment: str, end: int) -> str:
+    """The text right after a number, up to the next digit.
+
+    Args:
+        segment: The clause the number was found in.
+        end: End offset of the number.
+
+    Returns:
+        At most 60 characters, cut at the next number so one figure's wording
+        is never read onto its neighbour.
+    """
+    return re.split(r"\d", segment[end : end + 60], maxsplit=1)[0]
+
+
+def _lead_label(segment: str, start: int) -> str:
+    """The label ending in a colon directly before a number, if there is one.
+
+    Args:
+        segment: The clause the number was found in.
+        start: Start offset of the number.
+
+    Returns:
+        The words since the previous number when they end in a colon
+        ("Total:", "Civilians:"), else an empty string. Wording that does not
+        end in a colon may belong to the previous figure instead.
+    """
+    previous_end = 0
+    for found in _NUMBER_RE.finditer(segment):
+        if found.end() > start:
+            break
+        previous_end = found.end()
+    lead = segment[previous_end:start].strip()
+    return lead if lead.endswith(":") else ""
+
+
+def _figure_wording(
+    segment: str, start: int, end: int, default_scope: str
+) -> tuple[str, bool, bool]:
+    """Read the scope and the two scope flags for one figure from its own words.
+
+    Population wording is judged per figure: "30,000 men and 10,000 civilians"
+    holds an army and a population, and a clause-wide match would call both
+    population. A lone figure in its clause may use the whole clause.
+
+    Args:
+        segment: The clause the number was found in.
+        start: Start offset of the number.
+        end: End offset of the number.
+        default_scope: Scope to fall back on.
+
+    Returns:
+        The scope, whether the figure's own words say it was engaged, and
+        whether they call it a total.
+    """
+    local = f"{_lead_label(segment, start)} {_after_window(segment, end)}"
+    lone = len(_NUMBER_RE.findall(segment)) <= 1
+    if _POPULATION_RE.search(local) or (lone and _POPULATION_RE.search(segment)):
+        return "population", False, False
+    scope = _infer_combat_scope(segment)
+    if scope == "unknown":
+        scope = coerce_scope(default_scope)
+    return (
+        scope,
+        bool(_ENGAGED_RE.search(local)),
+        bool(_TOTAL_WORD_RE.search(local)),
+    )
+
+
+def _range_quantities(
+    segment: str, default_scope: str, *, air_context: bool = False
+) -> tuple[list[Quantity], str]:
     """Pull ranges out of a segment, returning them and the remaining text.
 
     Args:
         segment: One clause of a field value or sentence.
         default_scope: Scope to fall back on.
+        air_context: Whether the whole field speaks of aircraft.
 
     Returns:
         The range endpoints as quantities, and the segment with the matched
@@ -712,34 +869,30 @@ def _range_quantities(segment: str, default_scope: str) -> tuple[list[Quantity],
                     + remainder[match.end() :]
                 )
                 continue
-            branch = _branch_near(segment, match.start(), match.end())
-            scope = resolve_scope(None, segment, default_scope)
+            branch = _branch_near(segment, match.start(), match.end(), air_context=air_context)
+            scope, engaged, total_worded = _figure_wording(
+                segment, match.start(), match.end(), default_scope
+            )
             estimate = bool(_ESTIMATE_RE.search(segment))
             lead, noun = _surround(segment, match.start(), match.end())
-            quantities.append(
-                Quantity(
-                    value=low,
-                    branch=branch,
-                    scope=scope,
-                    is_estimate=estimate,
-                    is_lower_bound=True,
-                    context=segment.strip(),
-                    lead=lead,
-                    noun=noun,
+            trailing = _after_window(segment, match.end())
+            for value, bound in ((low, "lower"), (high, "upper")):
+                quantities.append(
+                    Quantity(
+                        value=value,
+                        branch=branch,
+                        scope=scope,
+                        is_estimate=estimate,
+                        is_lower_bound=bound == "lower",
+                        is_upper_bound=bound == "upper",
+                        context=segment.strip(),
+                        lead=lead,
+                        noun=noun,
+                        trailing=trailing,
+                        explicit_engaged=engaged,
+                        total_worded=total_worded,
+                    )
                 )
-            )
-            quantities.append(
-                Quantity(
-                    value=high,
-                    branch=branch,
-                    scope=scope,
-                    is_estimate=estimate,
-                    is_upper_bound=True,
-                    context=segment.strip(),
-                    lead=lead,
-                    noun=noun,
-                )
-            )
             remainder = (
                 remainder[: match.start()]
                 + " " * (match.end() - match.start())
@@ -809,7 +962,7 @@ _GENERIC_NOUNS: Final[frozenset[str]] = frozenset(
 _EQUIPMENT_NOUN_RE: Final = re.compile(
     r"^(?:guns?|cannons?|pieces|howitzers?|mortars?|ships?|vessels?|galleys?|warships?|triremes?"
     r"|frigates?|destroyers?|battleships?|cruisers?|submarines?|corvettes?|carriers?"
-    r"|aircraft|planes?|aeroplanes?|bombers?|fighters?|tanks?|vehicles?|gunboats?|junks?"
+    r"|aircraft|planes?|aeroplanes?|bombers?|tanks?|vehicles?|gunboats?|junks?"
     r"|boats?|barges?|elephants?|oxen|camels?|chariots?|wagons?|supply)\b",
     re.IGNORECASE,
 )
@@ -849,7 +1002,11 @@ def is_equipment_count(quantity: Quantity) -> bool:
         True when the words right after the number name equipment. Such a
         count must never be summed with, or mistaken for, a headcount.
     """
-    return any(_EQUIPMENT_NOUN_RE.match(w) for w in quantity.noun.split()[:3])
+    if any(_EQUIPMENT_NOUN_RE.match(w) for w in quantity.noun.split()[:3]):
+        return True
+    # "300 fighters" in an air field counts aircraft; "17,000 picked fighters"
+    # elsewhere counts men, and the branch parser has already told them apart.
+    return quantity.branch == "air" and bool(_BARE_FIGHTERS_RE.search(quantity.noun))
 
 
 def is_labelled_figure(quantity: Quantity) -> bool:
@@ -880,23 +1037,84 @@ def is_orphan_figure(quantity: Quantity) -> bool:
     return not re.search(r"[A-Za-z]", quantity.noun) and not re.search(r"\w", quantity.lead)
 
 
+# "Modern estimate(s)", "modern estimation", "modern est.", "modern historians":
+# the regime parser's modern_scholarly wording, shared with reconcile's
+# claims.classify_regime so the two cannot drift apart.
+MODERN_ESTIMATE_PATTERN: Final = r"\bmodern\s+(?:estimat|est\b|source|histor|scholar)\w*"
+_MODERN_LABEL_RE: Final = re.compile(MODERN_ESTIMATE_PATTERN, re.IGNORECASE)
+_MODERN_LEAD_RE: Final = re.compile(rf"{MODERN_ESTIMATE_PATTERN}\s*:\s*$", re.IGNORECASE)
+_BRACKETED_RE: Final = re.compile(r"\([^()]*\)|\[[^\[\]]*\]")
+
+# "15,000 under Ruechel": a force under a named commander is a component.
+# Case matters: "20,000 under arms" is still a side figure.
+_UNDER_NAME_RE: Final = re.compile(
+    r"^(?:(?:men|troops|soldiers)\s+)?(?:directly\s+|immediately\s+)?under\s+"
+    r"(?:(?:the\s+)?(?:command|orders|leadership)\s+of\s+)?"
+    r"[A-Z\u00C0-\u00DE]"
+)
+
+
+def _lead_has_label(lead: str) -> bool:
+    """Whether a lead holds a label once estimate words are removed.
+
+    Args:
+        lead: The words between the previous number and this one.
+
+    Returns:
+        True for a unit, nationality or phase label ("II Corps:", "French:").
+    """
+    residue = _LEAD_NOISE_RE.sub(" ", lead)
+    return bool(re.search(r"[A-Za-z]{2,}", residue) or re.search(r"\b[IVX]{1,4}\b", residue))
+
+
+def is_modern_estimate(quantity: Quantity) -> bool:
+    """Whether a figure is labelled as a modern scholarly estimate.
+
+    A label after the figure ("(modern estimates)") binds to that figure; a
+    label before it counts only in the "Modern estimate: 108,000" form, since
+    wording ahead of a figure may belong to the previous one.
+
+    Args:
+        quantity: A parsed figure.
+
+    Returns:
+        True when the figure carries modern-estimate wording of its own and
+        names no contingent, unit or equipment.
+    """
+    if not (_MODERN_LABEL_RE.search(quantity.trailing) or _MODERN_LEAD_RE.search(quantity.lead)):
+        return False
+    words = re.findall(r"[^\W\d_][\w'-]*", quantity.noun)
+    if words and words[0].lower() not in _GENERIC_NOUNS:
+        return False
+    lead = _BRACKETED_RE.sub(" ", _MODERN_LEAD_RE.sub(" ", quantity.lead))
+    return not _lead_has_label(lead)
+
+
 def classify_figure(quantity: Quantity, *, first_in_field: bool) -> str:
     """Decide whether a headcount is the side's total, one arm, or one component.
 
     Args:
         quantity: A parsed figure.
         first_in_field: Whether the figure sits on the first line of its
-            field. A bare number is a side-level total only there; the same
-            bare number on a later line follows labels the page dropped
-            (nested contingents) and is a component.
+            field (or of its date or phase block). A bare number is a
+            side-level total only there; the same bare number on a later line
+            follows labels the page dropped (nested contingents) and is a
+            component.
 
     Returns:
         ``"arm"`` when the wording names an arm of service, ``"component"``
         for a contingent, nationality, unit or labelled sub-force, and
-        ``"total"`` for an explicit total or an unqualified side figure.
+        ``"total"`` for an explicit total, a labelled modern estimate, or an
+        unqualified side figure.
     """
     if quantity.branch != "total":
         return "arm"
+
+    if _UNDER_NAME_RE.match(quantity.noun):
+        return "component"
+
+    if is_modern_estimate(quantity):
+        return "total"
 
     if re.search(r"\btotal\b", f"{quantity.lead} {quantity.noun}", re.IGNORECASE):
         return "total"
@@ -915,12 +1133,96 @@ def classify_figure(quantity: Quantity, *, first_in_field: bool) -> str:
     return "total"
 
 
+# Date and phase headings that sit on a line of their own and label the figures
+# below them: "16-17 October:", "Initial strength:", "At the start:", "On day 2:".
+_DASH_CLASS: Final = "[-\u2010-\u2015\u2212]"
+_MONTHS_PATTERN: Final = (
+    r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?"
+    r"|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+)
+_PHASE_WORDS_PATTERN: Final = (
+    r"initial(?:\s+(?:strength|force|forces|deployment))?"
+    r"|at\s+the\s+(?:start|outset|beginning)(?:\s+of\s+the\s+(?:battle|engagement))?"
+    r"|(?:on\s+)?day\s+\d+"
+    r"|(?:on\s+)?the\s+(?:first|second|third|fourth|final)\s+day"
+)
+_PHASE_PATTERN: Final = (
+    rf"(?:(?:on|as of|by|from|at)\s+)?\d{{1,2}}(?:\s*{_DASH_CLASS}\s*\d{{1,2}})?"
+    rf"\s+(?:{_MONTHS_PATTERN})\.?(?:\s+\d{{4}})?|{_PHASE_WORDS_PATTERN}"
+)
+_PHASE_HEADING_RE: Final = re.compile(rf"^\W*(?P<phase>{_PHASE_PATTERN})\s*:\s*$", re.IGNORECASE)
+_PHASE_INLINE_RE: Final = re.compile(
+    rf"^\W*(?P<phase>{_PHASE_PATTERN})\s*:\s*(?=\S)", re.IGNORECASE
+)
+
+
+def _phase_heading(segment: str) -> str | None:
+    """The phase named by a line that is only a heading, else None.
+
+    Args:
+        segment: One line of a field value.
+
+    Returns:
+        The heading text without its colon, or None for any other line.
+    """
+    match = _PHASE_HEADING_RE.match(segment.strip())
+    return match.group("phase").strip() if match else None
+
+
+def _decorate(
+    quantities: list[Quantity], segment: str, phase: str, *, block_first: bool, inline: str | None
+) -> list[Quantity]:
+    """Attach the phase and block position to one line's figures.
+
+    Args:
+        quantities: The figures found on the line.
+        segment: The line.
+        phase: The heading currently in force, or an empty string.
+        block_first: Whether this is the first figure line under that heading.
+        inline: A phase named at the start of the line itself, if any.
+
+    Returns:
+        The figures, with the heading prefixed to the context when it came
+        from a line above, so the row stays auditable.
+    """
+    label = inline or phase
+    context = segment.strip()
+    if phase and not inline:
+        context = f"{phase}: {context}"
+    decorated: list[Quantity] = []
+    for quantity in quantities:
+        if quantity.total_worded and not inline:
+            # "Total: 250,000" after dated phases sums the field; it belongs
+            # to no phase.
+            decorated.append(replace(quantity, block_first=block_first))
+            continue
+        lead = quantity.lead
+        if inline:
+            lead = re.sub(rf"^\W*(?:{_PHASE_PATTERN})\s*:\s*", "", quantity.lead, flags=re.I)
+        decorated.append(
+            replace(
+                quantity,
+                phase=label,
+                block_first=block_first,
+                context=context,
+                lead=lead,
+            )
+        )
+    return decorated
+
+
 def parse_quantities(text: str, *, default_scope: str = "unknown") -> list[Quantity]:
     """Read every troop-like number out of a piece of text.
 
     A range becomes two quantities, flagged as the lower and upper bound, so
     that the reconcile stage sees the interval the source actually gave
     rather than a midpoint nobody wrote down.
+
+    A line that is only a date or phase heading ("16-17 October:", "Initial
+    strength:") labels the figures below it until the next heading; the label
+    is kept on each figure's ``phase`` and prefixed to its context. A field
+    that words one figure as deployed or engaged and another as a total reads
+    the total as the larger ``available`` pool.
 
     Args:
         text: Cleaned text, typically one infobox strength field.
@@ -935,13 +1237,21 @@ def parse_quantities(text: str, *, default_scope: str = "unknown") -> list[Quant
         return []
 
     quantities: list[Quantity] = []
+    air_context = bool(_AIR_CONTEXT_RE.search(text))
+    phase = ""
+    awaiting_first_line = False
 
     for segment in _SEGMENT_SPLIT_RE.split(text):
         if not segment.strip():
             continue
 
-        ranged, remainder = _range_quantities(segment, default_scope)
-        quantities.extend(ranged)
+        heading = _phase_heading(segment)
+        if heading is not None:
+            phase, awaiting_first_line = heading, True
+            continue
+
+        ranged, remainder = _range_quantities(segment, default_scope, air_context=air_context)
+        found = list(ranged)
 
         for match in _NUMBER_RE.finditer(remainder):
             trailing = remainder[match.end() :]
@@ -959,18 +1269,57 @@ def parse_quantities(text: str, *, default_scope: str = "unknown") -> list[Quant
 
             before = remainder[max(0, match.start() - 60) : match.start()]
             lead, noun = _surround(segment, match.start(), match.end())
-            quantities.append(
+            scope, engaged, total_worded = _figure_wording(
+                segment, match.start(), match.end(), default_scope
+            )
+            found.append(
                 Quantity(
                     value=value,
-                    branch=_branch_near(segment, match.start(), match.end()),
-                    scope=resolve_scope(None, segment, default_scope),
+                    branch=_branch_near(
+                        segment, match.start(), match.end(), air_context=air_context
+                    ),
+                    scope=scope,
                     is_estimate=bool(_ESTIMATE_RE.search(before)),
                     is_lower_bound=bool(_LOWER_RE.search(before)),
                     is_upper_bound=bool(_UPPER_RE.search(before)),
                     context=segment.strip(),
                     lead=lead,
                     noun=noun,
+                    trailing=_after_window(segment, match.end()),
+                    explicit_engaged=engaged,
+                    total_worded=total_worded,
                 )
             )
 
-    return quantities
+        inline_match = _PHASE_INLINE_RE.match(segment)
+        inline = inline_match.group("phase").strip() if inline_match else None
+        if found and (phase or inline):
+            found = _decorate(found, segment, phase, block_first=awaiting_first_line, inline=inline)
+        if found:
+            awaiting_first_line = False
+        quantities.extend(found)
+
+    return _totals_beside_engaged_figures_are_available(quantities)
+
+
+def _totals_beside_engaged_figures_are_available(quantities: list[Quantity]) -> list[Quantity]:
+    """Read "96,000 total" next to "40,000 deployed" as the larger available pool.
+
+    A lone "Total: 37,000" says nothing about scope and keeps its default; the
+    contrast with a figure worded as deployed or engaged is what shows the
+    total is wider than the force that fought.
+
+    Args:
+        quantities: Every figure of one field.
+
+    Returns:
+        The figures, with such totals rescoped to ``available``.
+    """
+    if not any(q.explicit_engaged for q in quantities):
+        return quantities
+    return [
+        replace(q, scope="available")
+        if q.total_worded and not q.explicit_engaged and q.scope in ("engaged", "unknown")
+        else q
+        for q in quantities
+    ]

@@ -246,6 +246,46 @@ def test_a_naval_ship_count_never_enters_the_personnel_reports(conn: Connection)
     assert counts.excluded_naval == 1
 
 
+def test_population_scope_rows_are_excluded_and_counted_like_naval_rows(conn: Connection) -> None:
+    # Bibracte: "368,000 people" is the migrating nation, not an army. Even a
+    # row stored as a total must not reach the fit, and the scope offsets must
+    # never see "population" as a level.
+    battle = _battle(conn, "Bibracte", "0058-06-01 BC")
+    side = _side(conn, battle, "Helvetii")
+    source = _source(conn)
+    _troop(conn, side, source, 368_000.0, branch="other", scope="population")
+    _troop(conn, side, source, 278_000.0, branch="total", scope="population")
+    _troop(conn, side, source, 90_000.0, context="90,000 warriors")
+
+    reports, counts = _load(conn)
+    troops = [r for r in reports if r.quantity == "troops"]
+
+    assert [r.reported_value for r in troops] == [90_000.0]
+    assert counts.excluded_population_scope == 2
+    assert counts.excluded_non_total_branch == 0
+
+
+def test_a_modern_total_supersedes_every_other_total_on_its_side(conn: Connection) -> None:
+    # Hazir: the Muslim-source 70,000 and the modern ~7,000 are both totals
+    # after extract; the modern one is the anchor and the rest are dropped.
+    battle = _battle(conn, "Hazir", "0634-08-01")
+    side = _side(conn, battle, "Byzantine Empire")
+    source = _source(conn)
+    ctx = "70,000 (Muslim source) ~7,000 (Modern estimate)"
+    _troop(conn, side, source, 70_000.0, context=ctx)
+    _troop(conn, side, source, 7_000.0, context=ctx)
+    _troop(conn, side, source, 51_000.0, context="derived: sum of 2 component figures")
+    other = _side(conn, battle, "Rashidun")
+    _troop(conn, other, source, 17_000.0, context="17,000 (Muslim source)")
+
+    reports, counts = _load(conn)
+    troops = sorted((r.side_id, r.reported_value) for r in reports if r.quantity == "troops")
+
+    assert troops == [(side, 7_000.0), (other, 17_000.0)]
+    assert counts.excluded_superseded_by_modern == 2
+    assert counts.regime_unlabelled == 0
+
+
 def test_a_non_positive_troop_value_is_excluded_and_counted(conn: Connection) -> None:
     battle = _battle(conn, "Zero Field")
     side = _side(conn, battle)
@@ -449,6 +489,8 @@ def test_the_counts_account_for_every_troop_row_read(conn: Connection) -> None:
         + counts.excluded_non_personnel
         + counts.excluded_date_context
         + counts.excluded_component_of_stated_total
+        + counts.excluded_population_scope
+        + counts.excluded_superseded_by_modern
     )
     assert accounted == 4
 

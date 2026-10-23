@@ -304,7 +304,12 @@ def test_the_report_covers_every_entry_and_is_limited_on_a_limited_run(tmp_path:
     )
 
     assert report["entry_ids"] == ["ov-0001", "ov-0002", "ov-0003"]
-    assert report["applied"] == {"outcome": 1, "battle_date": 0, "side_polity": 1}
+    assert report["applied"] == {
+        "outcome": 1,
+        "battle_date": 0,
+        "side_polity": 1,
+        "battle_split": 0,
+    }
     assert [u["id"] for u in report["unmatched"]] == ["ov-0002"]
     assert report["limited"] is True
 

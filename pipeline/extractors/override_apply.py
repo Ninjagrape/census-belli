@@ -1,11 +1,17 @@
 """
 Apply the extract stage's manual overrides to the merged battle records.
 
-``config/overrides.yaml`` entries of kind ``outcome``, ``battle_date`` and
-``side_polity`` are applied to the in-memory :class:`BattleExtraction` list
+``config/overrides.yaml`` entries of kind ``outcome``, ``battle_date``,
+``side_polity`` and ``battle_split`` are applied to the in-memory :class:`BattleExtraction` list
 after extraction and before anything is written, so ``data/processed/*.jsonl``
 (which resolve reads) and the database both carry the correction. The stage
 runs this on every run, after its own logic, so a re-run never undoes it.
+
+A ``battle_split`` entry is acted on earlier, while the article is extracted
+(it replaces the parent record with one record per part); here it is only
+checked and reported: it matched when every part's child record exists.
+Outcome, date and polity entries may target a child by its ``<parent>#<key>``
+slug.
 
 An entry that cannot be applied is reported unmatched with a reason and
 changes nothing: each entry is checked in full before the first mutation.
@@ -30,6 +36,7 @@ import structlog
 
 from pipeline.extractors.dates import astronomical_year, parse_date_text
 from pipeline.extractors.records import BattleExtraction, SideExtraction
+from pipeline.extractors.split import SplitPart, child_slug
 from pipeline.overrides import OverrideEntry, OverrideReport
 
 __all__ = [
@@ -37,6 +44,7 @@ __all__ = [
     "apply_extract_overrides",
     "carries_override",
     "outcome_override_slugs",
+    "split_parts_by_slug",
 ]
 
 logger = structlog.get_logger()
@@ -78,6 +86,31 @@ def outcome_override_slugs(entries: Sequence[OverrideEntry]) -> frozenset[str]:
         Normalised battle slugs.
     """
     return frozenset(_norm(e.target["battle"]) for e in entries if e.kind == "outcome")
+
+
+def split_parts_by_slug(entries: Sequence[OverrideEntry]) -> dict[str, tuple[SplitPart, ...]]:
+    """List the articles a ``battle_split`` entry splits, with their parts.
+
+    Args:
+        entries: The extract stage's override entries.
+
+    Returns:
+        Normalised parent slug to its parts, in the entry's order.
+    """
+    return {
+        _norm(e.target["battle"]): tuple(SplitPart(**part) for part in e.value)
+        for e in entries
+        if e.kind == "battle_split"
+    }
+
+
+def _check_split(entry: OverrideEntry, by_slug: dict[str, BattleExtraction]) -> str | None:
+    """Return an unmatched reason unless every part's child record exists."""
+    children = [child_slug(entry.target["battle"], SplitPart(**part)) for part in entry.value]
+    absent = [slug for slug in children if _norm(slug) not in by_slug]
+    if absent:
+        return f"battle not found (no record for {absent})"
+    return None
 
 
 def _sides_by_label(battle: BattleExtraction) -> dict[str, list[SideExtraction]]:
@@ -221,6 +254,16 @@ def apply_extract_overrides(
 
     outcome_entries: dict[str, OverrideEntry] = {}
     for entry in entries:
+        if entry.kind == "battle_split":
+            reason = _check_split(entry, by_slug)
+            if reason is not None:
+                report.unmatched(entry, reason)
+                continue
+            report.applied(entry)
+            logger.info(
+                "override_applied", id=entry.id, kind=entry.kind, slug=entry.target["battle"]
+            )
+            continue
         target = by_slug.get(_norm(entry.target["battle"]))
         if target is None:
             report.unmatched(entry, "battle not found")

@@ -24,6 +24,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Final
 
+from pipeline.extractors.textnorm import MODERN_ESTIMATE_PATTERN
 from pipeline.reconcilers.records import Report
 
 __all__ = [
@@ -84,16 +85,15 @@ _CHRONICLERS: Final[tuple[str, ...]] = (
 _REGIME_PATTERNS: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
     (
         "modern_scholarly",
-        re.compile(
-            r"\bmodern\s+(?:estimate|source|histor|scholar)\w*\b",
-            re.IGNORECASE,
-        ),
+        re.compile(MODERN_ESTIMATE_PATTERN + r"\b", re.IGNORECASE),
     ),
     (
         "ancient_claim",
         re.compile(
-            r"\bancient\s+(?:source|estimate|claim)\w*\b"
+            r"\bancient\s+(?:source|estimate|claim|historian|author|writer)\w*\b"
             r"|\bprimary\b(?:\s+\w+){0,2}\s+sources?\b"
+            r"|\b(?:Muslim|Islamic|Arab|Arabic|Byzantine|Roman|Greek|Persian)\s+"
+            r"(?:sources?|estimates?|accounts?|tradition)\b"
             r"|'s\s+claim\b"
             r"|\bclaimed\s+by\b"
             r"|\b(?:" + "|".join(_ANCIENT_AUTHORS) + r")\b",
@@ -180,18 +180,91 @@ def classify_regime(text: str | None, *, value: float | None = None) -> str:
         match = pattern.search(cleaned)
         if match is not None:
             hits.append((regime, match.start()))
+    generalised = _people_source_position(cleaned)
+    if generalised is not None and all(regime != "ancient_claim" for regime, _ in hits):
+        hits.append(("ancient_claim", generalised))
 
     if not hits:
         return "unlabelled"
-    if len(hits) == 1:
-        return hits[0][0]
 
     anchor = _value_position(cleaned, value)
+    if anchor is not None:
+        following = _FOLLOWING_PARENTHETICAL.match(cleaned, anchor)
+        bracket = following.group(1) if following is not None else None
+        bound = _bracket_regimes(bracket) if bracket is not None else []
+        if len(bound) == 1:
+            return bound[0]
+        if bracket is not None and not bound and _SOURCE_LABEL.search(bracket):
+            # The figure carries its own source label and none of it is a
+            # known tradition: another figure's marker is not its marker.
+            return "unlabelled"
+    if len(hits) == 1:
+        return hits[0][0]
     if anchor is None:
         # Several traditions named and nothing to say which one this report
         # came from. Deferring to the era signal is the safe error.
         return "unlabelled"
-    return min(hits, key=lambda hit: abs(hit[1] - anchor))[0]
+    ranked = sorted(hits, key=lambda hit: abs(hit[1] - anchor))
+    if abs(ranked[0][1] - anchor) == abs(ranked[1][1] - anchor):
+        return "unlabelled"
+    return ranked[0][0]
+
+
+# "80,000 (Islamic estimates) 15,000-20,000 (modern estimates)": a source label in
+# brackets right after a figure (or range) belongs to that figure. Distance alone
+# misreads the second figure, whose nearest marker by start offset is the first one.
+_FOLLOWING_PARENTHETICAL: Final = re.compile(
+    r"[\d,.]+(?:\s*(?:[-\u2010-\u2015\u2212]|to)\s*[\d,.]+)?"
+    r"(?:\s*(?:thousand|million))?\s*[^()\d]{0,20}?\(([^()]*)\)",
+    re.IGNORECASE,
+)
+
+
+_SOURCE_LABEL: Final = re.compile(
+    r"\b(?:sources?|estimates?|accounts?|claims?|traditions?|chronicles?|historians?"
+    r"|records?|reports?)\b",
+    re.IGNORECASE,
+)
+
+# "(Chinese sources)", "(Carthaginian accounts)": a capitalised people or
+# polity adjective plus a source word, only ever read inside the bracket that
+# directly follows a figure. Case matters, and later-era national labels are
+# left out because they name a modern claimant, not an ancient tradition.
+_PEOPLE_SOURCE: Final = re.compile(
+    r"^\s*(?!(?:Modern|Contemporary|Official|Recent|Soviet|Allied|Axis)\b)"
+    r"[A-Z][a-z]+(?:-[A-Z][a-z]+)?\s+(?:sources?|estimates?|accounts?|tradition)\b"
+)
+
+
+def _bracket_regimes(bracket: str) -> list[str]:
+    """The regimes named in one bracket that directly follows a figure.
+
+    Args:
+        bracket: The text inside the brackets.
+
+    Returns:
+        Every regime whose marker sits in the bracket. More than one means
+        the bracket binds nothing to the figure.
+    """
+    found = [regime for regime, pattern in _REGIME_PATTERNS if pattern.search(bracket)]
+    if _PEOPLE_SOURCE.search(bracket) and "ancient_claim" not in found:
+        found.append("ancient_claim")
+    return found
+
+
+def _people_source_position(text: str) -> int | None:
+    """Offset of the first figure bracketed with a people-and-source label.
+
+    Args:
+        text: The context, already stripped of citation refs.
+
+    Returns:
+        The offset, or None when no such bracket follows a figure.
+    """
+    for match in _FOLLOWING_PARENTHETICAL.finditer(text):
+        if _PEOPLE_SOURCE.search(match.group(1)):
+            return match.start()
+    return None
 
 
 def _value_position(text: str, value: float | None) -> int | None:
