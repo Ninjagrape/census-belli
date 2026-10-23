@@ -309,6 +309,7 @@ def test_the_report_covers_every_entry_and_is_limited_on_a_limited_run(tmp_path:
         "battle_date": 0,
         "side_polity": 1,
         "battle_split": 0,
+        "troop_strength": 0,
     }
     assert [u["id"] for u in report["unmatched"]] == ["ov-0002"]
     assert report["limited"] is True

@@ -21,15 +21,23 @@ TARGET = {"battle": "borodino", "side": "French Empire"}
 
 
 def _entry(n: int, value: Any, target: dict[str, str] | None = None) -> dict[str, Any]:
-    return {
+    """Build an entry; a ``scope`` key in a mapping value is lifted to entry level."""
+    figure = dict(value) if isinstance(value, dict) else value
+    entry: dict[str, Any] = {
         "id": f"ov-{n:04d}",
         "kind": "troop_strength",
         "target": target or dict(TARGET),
-        "value": value,
+        "value": figure,
         "source": CITATION,
         "note": "",
         "reviewed": {"by": "lee", "on": "2026-10-23"},
     }
+    if isinstance(figure, dict):
+        if "scope" in figure:
+            entry["scope"] = figure.pop("scope")
+    else:
+        entry["scope"] = "engaged"
+    return entry
 
 
 def _write(tmp_path: Path, *entries: dict[str, Any]) -> Path:
@@ -99,9 +107,42 @@ def test_the_kind_belongs_to_the_extract_stage() -> None:
 def test_valid_values_load_unchanged(tmp_path: Path, value: dict[str, Any]) -> None:
     loaded = load_overrides(_write(tmp_path, _entry(1, value)))
 
-    assert loaded.entries[0].value == value
+    assert loaded.entries[0].value == {k: v for k, v in value.items() if k != "scope"}
+    assert loaded.entries[0].scope == value["scope"]
     assert loaded.entries[0].stage == "extract"
     assert dict(loaded.entries[0].target) == TARGET
+
+
+def test_the_approved_yaml_shape_loads_with_deployed_stored_as_engaged(tmp_path: Path) -> None:
+    path = tmp_path / "overrides.yaml"
+    path.write_text(
+        """
+version: 1
+entries:
+  - id: ov-0090
+    kind: troop_strength
+    target: {battle: jena, side: French}
+    value: {low: 40000, high: 60000}
+    scope: deployed
+    source: "Chandler (1966), p. 1"
+    note: "why"
+    reviewed: {by: lee, "on": 2026-10-23}
+""",
+        encoding="utf-8",
+    )
+
+    (entry,) = load_overrides(path).entries
+
+    assert entry.scope == "engaged"
+    assert entry.value == {"low": 40_000, "high": 60_000}
+
+
+def test_scope_is_refused_on_other_kinds(tmp_path: Path) -> None:
+    raw = _entry(1, {"point": 5_000, "scope": "engaged"})
+    raw.update(kind="side_polity", target=dict(TARGET), value="x")
+
+    with pytest.raises(OverrideError, match="unknown.*scope"):
+        load_overrides(_write(tmp_path, raw))
 
 
 @pytest.mark.parametrize(
@@ -120,7 +161,7 @@ def test_valid_values_load_unchanged(tmp_path: Path, value: dict[str, Any]) -> N
         ({"low": 6_000, "high": 6_000, "scope": "engaged"}, "less than"),
         ({"low": 7_000, "high": 6_000, "scope": "engaged"}, "less than"),
         ({"point": 50_000}, "scope"),
-        ({"point": 50_000, "scope": "deployed"}, "scope"),
+        ({"point": 50_000, "scope": "total"}, "scope"),
         ({"point": 50_000, "scope": "population"}, "scope"),
         ({"point": 50_000, "scope": "unknown"}, "scope"),
         ({"point": 50_000, "scope": "engaged", "extra": 1}, "keys"),
@@ -228,7 +269,9 @@ def test_a_missing_side_or_battle_is_reported_unmatched_and_changes_nothing(
     )
 
     assert {u["id"]: u["reason"] for u in report["unmatched"]} == {
-        "ov-0001": "side 'Prussia' not found in battle (sides: ['French Empire', 'Russian Empire'])",
+        "ov-0001": (
+            "side 'Prussia' not found in battle (sides: ['French Empire', 'Russian Empire'])"
+        ),
         "ov-0002": "battle not found",
     }
     assert report["applied"]["troop_strength"] == 0

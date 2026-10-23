@@ -98,14 +98,15 @@ def _entry(n: int, value: dict[str, Any], side: str = SIDE) -> dict[str, Any]:
         "id": f"ov-{n:04d}",
         "kind": "troop_strength",
         "target": {"battle": "contested", "side": side},
-        "value": value,
+        "value": {k: v for k, v in value.items() if k != "scope"},
+        "scope": value.get("scope", "deployed"),
         "source": CITATION,
         "note": "",
         "reviewed": {"by": "lee", "on": "2026-10-23"},
     }
 
 
-POINT = _entry(1, {"point": 50_000, "scope": "engaged"})
+POINT = _entry(1, {"point": 50_000, "scope": "deployed"})
 RANGE = _entry(1, {"low": 40_000, "high": 60_000, "scope": "engaged"})
 
 
@@ -175,7 +176,17 @@ def test_a_point_entry_writes_one_cited_modern_row_and_a_rerun_adds_no_duplicate
     _run(conn, raw_root, processed, overrides, monkeypatch)
 
     (row,) = _manual_rows(conn)
-    assert row[:9] == (SIDE, 50_000, "engaged", False, False, True, "total", "manual_entry", CITATION)
+    assert row[:9] == (
+        SIDE,
+        50_000,
+        "engaged",
+        False,
+        False,
+        True,
+        "total",
+        "manual_entry",
+        CITATION,
+    )
     assert "modern estimates" in row[9]
     gap = conn.execute(
         text(
@@ -225,7 +236,9 @@ def test_removing_the_entry_withdraws_its_rows_and_a_rotted_entry_fails_the_gate
     _run(conn, raw_root, processed, empty, monkeypatch)
     assert _manual_rows(conn) == []
 
-    rotted = _write_overrides(tmp_path / "c.yaml", _entry(7, {"point": 1_000, "scope": "engaged"}, "Atlantis"))
+    rotted = _write_overrides(
+        tmp_path / "c.yaml", _entry(7, {"point": 1_000, "scope": "engaged"}, "Atlantis")
+    )
     _run(conn, raw_root, processed, rotted, monkeypatch)
     result = _gate(_spec(raw_root, processed, rotted), conn)
     assert result.passed is False
@@ -322,7 +335,11 @@ def test_the_guard_warns_and_errors_by_span_and_lists_the_offending_sides(conn: 
     close = _battle_with_side(conn, "close", "Red")
     warn = _battle_with_side(conn, "wide", "Blue")
     error = _battle_with_side(conn, "huge", "Green")
-    for side, values in ((close, (10_000, 20_000)), (warn, (10_000, 30_000)), (error, (10_000, 100_000))):
+    for side, values in (
+        (close, (10_000, 20_000)),
+        (warn, (10_000, 30_000)),
+        (error, (10_000, 100_000)),
+    ):
         for value in values:
             _add_infobox_total(conn, side, value)
 

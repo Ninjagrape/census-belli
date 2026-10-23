@@ -87,12 +87,12 @@ def _all_kinds() -> list[dict[str, Any]]:
                 {"key": "main", "name": "Battle of the Moskva", "heading": "Main"},
             ],
         ),
-        _entry(
-            9,
-            "troop_strength",
-            {"battle": "borodino", "side": "French"},
-            {"point": 130_000, "scope": "engaged"},
-        ),
+        {
+            **_entry(
+                9, "troop_strength", {"battle": "borodino", "side": "French"}, {"point": 130_000}
+            ),
+            "scope": "deployed",
+        },
     ]
 
 
