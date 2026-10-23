@@ -23,18 +23,36 @@ Approved design and user decisions: `docs/handover/07-next-sessions-plan.md`
   2476 passed 0 skipped on the branch. Not yet run on `general_war_corpus2`.
 - **`wip/troop-recon` (0c0cb98, worktree `w-recon`):** informative noise
   prior, recovery gates, reconcile exports per-side likelihood, impute uses it
-  (no weak sides with a point report). Suite 2446 passed. **The noise prior
-  as specified fails on the corpus copy** (old extract): sigma 0.59 vs prior
-  0.22, singleton slope 0.61, PPC replicated ratio variance 2.02 vs 0.60.
-  Impute half works (0 weak with point rows) but kept-pair slope 0.45.
-  Experiment V1-V4 (prior log-sd 0.3/0.1 x student_t/contaminated) on the
-  corrected extract running in worktree `w-exp` (`wip/noise-exp`, DB
-  `general_war_wt_exp_corpus`). The user must choose the noise treatment from
-  its results before merge. Failing-first evidence was not collected for this
-  branch.
-- **`wip/jena-split` (worktree `w-jena`, uncommitted):** `battle_split`
-  override kind; ov-0029/0030 removed (moot). One stale test assertion to fix;
-  corpus check pending.
+  (no weak sides with a point report). Suite 2446 passed. **It fails every
+  recovery gate on the corpus**, and so did all four noise variants in the
+  experiment (worktree `w-exp`, branch `wip/noise-exp` = recon + main, DB
+  `general_war_wt_exp_corpus`). Do not merge it as is.
+- **NEXT SESSION STARTS HERE: the user decides on the redesign in
+  handover-log §32** (bayesian-model-reviewer, 2026-10-23). Decisions to ask:
+  1. Approve design P1: side prior with era means plus a shared battle effect
+     (opposing armies' reported sizes correlate at 0.80), Normal likelihood,
+     noise LogNormal(log 0.22, 0.2) / ancient (log 0.40, 0.2), no
+     sigma_round/sigma_est for troops, mixed-predictive PPC. Ranked
+     alternatives in §32.
+  2. Accept that the wb >= 0.8 gate was wrong: a calibrated model shrinks
+     reported force ratios by their reliability (~0.6; Kursk 2.45:1 to
+     1.91:1). The gate becomes "wb consistent with model-implied reliability".
+     This partly reverses the original goal (less compression), on purpose.
+  3. Overrides for ~9 scope-conflated sides (Yom Kippur Egypt, Six-Day UAR,
+     Lebanon 1982 Israel, Toulon royalists, Stalingrad x2, Smolensk x2; check
+     Torch US, Hohenfriedberg), drafted by historiography-reviewer, plus a
+     span guard (> log 1.0 warn, > 2.0 error).
+  4. The level anchor (HIGH): g_unlabelled moves -0.13..-0.34 with era means,
+     shifting published head counts 1.1-1.4x; tighter prior or explicit anchor.
+  Then: implement P1 on a fresh branch from `wip/troop-recon` + main, the
+  sensitivity runs (noise median 0.15/0.22/0.30/free), and only then the
+  refit. Failing-first evidence was not collected for `wip/troop-recon`.
+- **`wip/jena-split` (worktree `w-jena`):** `battle_split` override kind;
+  ov-0029/0030 removed (moot); review fixes in (no silent line loss, retire
+  only after children exist, failed retire raises `SplitRetireError`). Suite
+  2518 passed 0 skipped. Corpus re-check (two extract runs) pending, then
+  merge to main. The §29 drafts for Jena-Auerstedt (Schmettau, Hohenlohe,
+  Kalckreuth) must target the child slugs `...#jena` / `...#auerstedt`.
 - Backup before any of this: `data/backups/general_war_corpus2_20261022_pre_troopfix.dump`.
   Scratch DBs this session: `general_war_wt_{troop,troop_corpus,recon,
   recon_corpus,jena,jena_corpus,exp_corpus}`.

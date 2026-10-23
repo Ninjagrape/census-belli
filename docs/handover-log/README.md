@@ -48,3 +48,4 @@ Last updated: 2026-10-10. §21 to §23 are committed (`a9abeba`, `401e1c7`, `3c6
 | §29 | Historiography review of the Phase 2 refit, with 34 drafted Phase 2b entries (ov-0055..ov-0088), 2026-10-18 | [29-phase2-refit-historiography-review-2026-10-18.md](29-phase2-refit-historiography-review-2026-10-18.md) |
 | §30 | Bayesian review of the Phase 2 refit (runs 84, 86, 108), 2026-10-18 | [30-phase2-refit-bayesian-review-2026-10-18.md](30-phase2-refit-bayesian-review-2026-10-18.md) |
 | §31 | Troop numbers: reconcile shrinkage and impute weak-side diagnosis (run 84/86), 2026-10-22 | [31-troop-numbers-diagnosis-2026-10-22.md](31-troop-numbers-diagnosis-2026-10-22.md) |
+| §32 | Troop-number redesign review: noise experiment V1-V4 and proposed design P1 (era + battle side prior), 2026-10-23 | [32-troop-redesign-review-2026-10-23.md](32-troop-redesign-review-2026-10-23.md) |
