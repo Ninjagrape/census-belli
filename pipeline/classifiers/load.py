@@ -349,8 +349,10 @@ def find_article_path(
     """
     directory = raw_root / _ARTICLE_DIRNAME
     if source_slug:
+        # A part of a split article ("<stem>#jena") is read from the whole article.
+        stem_of_article = source_slug.split("#", 1)[0]
         for suffix in ARTICLE_SUFFIXES:
-            candidate = directory / f"{source_slug}{suffix}"
+            candidate = directory / f"{stem_of_article}{suffix}"
             if candidate.is_file():
                 return candidate
     if not wikipedia_url:

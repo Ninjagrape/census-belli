@@ -32,6 +32,7 @@ from pipeline.extractors.wars import classify_part_of
 __all__ = [
     "ExtractWriteCounts",
     "reserve_battle_id",
+    "retire_battle",
     "source_id",
     "write_battle",
     "write_battle_isolated",
@@ -567,6 +568,18 @@ def _remove_stale_sides(
     if not stale:
         return
 
+    _delete_sides(conn, battle_id, stale, counts)
+
+
+def _delete_sides(conn: Any, battle_id: int, stale: list[Any], counts: ExtractWriteCounts) -> None:
+    """Delete the given sides with every row that hangs off them.
+
+    Args:
+        conn: An open database connection.
+        battle_id: The battle the sides belong to.
+        stale: ``(side_id, side_label)`` rows.
+        counts: Counters to accumulate into.
+    """
     ids = [int(row[0]) for row in stale]
     labels = [str(row[1]) for row in stale]
 
@@ -601,6 +614,60 @@ def _remove_stale_sides(
         rows_deleted=deleted,
         non_extract_rows_deleted=non_extract,
     )
+
+
+_DELETE_BATTLE_MISSING = text("DELETE FROM missing_data_log WHERE battle_id = :battle_id")
+# Attribution only, both columns are nullable: an LLM call or a crawl row that
+# named the retired battle keeps its content and loses the pointer.
+_DETACH_BATTLE_REFERENCES: Final[tuple[Any, ...]] = (
+    text("UPDATE crawl_log SET battle_id = NULL WHERE battle_id = :battle_id"),
+    text("UPDATE llm_calls SET battle_id = NULL WHERE battle_id = :battle_id"),
+)
+_COUNT_MODEL_DETAILS = text("SELECT COUNT(*) FROM battle_war_details WHERE battle_id = :battle_id")
+_DELETE_BATTLE = text("DELETE FROM battles WHERE battle_id = :battle_id")
+
+
+def retire_battle(conn: Any, slug: str, counts: ExtractWriteCounts | None = None) -> bool:
+    """Remove a battle that a ``battle_split`` replaced with its parts.
+
+    The parent article is no longer a battle, so a row left by an earlier run
+    must not keep sides, commanders, reports or gaps that a later stage would
+    read as a second battle. Everything under the battle's sides goes, then
+    the row itself. Old model runs may point at the row through
+    ``battle_war_details``; the row then stays, bare, because those results
+    belong to a run that is history.
+
+    Args:
+        conn: An open database connection.
+        slug: The retired article's ``source_slug``.
+        counts: Optional counters to accumulate into.
+
+    Returns:
+        True when a row for the slug existed.
+    """
+    tally = counts or ExtractWriteCounts()
+    row = conn.execute(_FIND_BATTLE_BY_SLUG, {"slug": slug}).fetchone()
+    if row is None:
+        return False
+    battle_id = int(row[0])
+    stale = conn.execute(_FIND_STALE_SIDES, {"battle_id": battle_id, "keep": []}).fetchall()
+    if stale:
+        _delete_sides(conn, battle_id, stale, tally)
+    conn.execute(_DELETE_BATTLE_MISSING, {"battle_id": battle_id})
+    for detach in _DETACH_BATTLE_REFERENCES:
+        conn.execute(detach, {"battle_id": battle_id})
+    kept = int(conn.execute(_COUNT_MODEL_DETAILS, {"battle_id": battle_id}).scalar_one())
+    if kept:
+        logger.warning(
+            "extract_retired_battle_kept_for_model_runs",
+            slug=slug,
+            battle_id=battle_id,
+            battle_war_details=kept,
+        )
+        return True
+    conn.execute(_DELETE_BATTLE, {"battle_id": battle_id})
+    logger.info("extract_retired_battle_removed", slug=slug, battle_id=battle_id)
+    return True
 
 
 def write_battle(

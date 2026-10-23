@@ -27,6 +27,7 @@ kind                    stage     target keys                value
 ``outcome``             extract   battle                     {side_label: outcome_level}, >= 2
 ``battle_date``         extract   battle                     {start, end|null, precision}
 ``side_polity``         extract   battle, side               non-empty str
+``battle_split``        extract   battle                     list of >= 2 {key, name, heading}
 ``commander_link``      resolve   battle, side, mention      Q-id or the string ``none``
 ``general_merge``       resolve   general                    Q-id (the survivor)
 ``battle_type``         classify  battle                     battle_type enum member
@@ -119,7 +120,7 @@ logger = structlog.get_logger()
 DEFAULT_PATH: Final[Path] = Path(__file__).resolve().parents[1] / "config" / "overrides.yaml"
 
 KINDS_BY_STAGE: Final[dict[str, tuple[str, ...]]] = {
-    "extract": ("outcome", "battle_date", "side_polity"),
+    "extract": ("outcome", "battle_date", "side_polity", "battle_split"),
     "resolve": ("commander_link", "general_merge"),
     "classify": ("battle_type", "attribution"),
 }
@@ -132,6 +133,7 @@ _TARGET_KEYS: Final[dict[str, tuple[str, ...]]] = {
     "outcome": ("battle",),
     "battle_date": ("battle",),
     "side_polity": ("battle", "side"),
+    "battle_split": ("battle",),
     "commander_link": ("battle", "side", "mention"),
     "general_merge": ("general",),
     "battle_type": ("battle",),
@@ -149,6 +151,9 @@ _ATTRIBUTION_KEYS: Final[frozenset[str]] = frozenset(
 )
 _DATE_VALUE_KEYS: Final[frozenset[str]] = frozenset({"start", "end", "precision"})
 _MIN_OUTCOME_SIDES: Final[int] = 2
+_MIN_SPLIT_PARTS: Final[int] = 2
+_SPLIT_PART_KEYS: Final[frozenset[str]] = frozenset({"key", "name", "heading"})
+_SPLIT_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _QID_LOOSE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[Qq][1-9]\d*$")
 _PLAIN_DATE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -336,6 +341,30 @@ def _validate_battle_date(label: str, raw: Any) -> dict[str, str | None]:
     return {"start": start, "end": end, "precision": precision}
 
 
+def _validate_battle_split(label: str, raw: Any) -> list[dict[str, str]]:
+    if not isinstance(raw, list) or len(raw) < _MIN_SPLIT_PARTS:
+        raise _fail(label, f"value must list at least {_MIN_SPLIT_PARTS} parts")
+    parts: list[dict[str, str]] = []
+    seen_keys: set[str] = set()
+    seen_headings: set[str] = set()
+    for index, item in enumerate(raw):
+        where = f"value[{index}]"
+        part = _exact_keys(label, where, item, _SPLIT_PART_KEYS)
+        key = _non_empty_str(label, f"{where}.key", part["key"])
+        if not _SPLIT_KEY_PATTERN.match(key):
+            raise _fail(label, f"{where}.key {key!r} must be a lowercase slug-safe id")
+        name = _non_empty_str(label, f"{where}.name", part["name"])
+        heading = _non_empty_str(label, f"{where}.heading", part["heading"])
+        if key in seen_keys:
+            raise _fail(label, f"duplicate part key {key!r}")
+        if heading.casefold() in seen_headings:
+            raise _fail(label, f"duplicate part heading {heading!r}")
+        seen_keys.add(key)
+        seen_headings.add(heading.casefold())
+        parts.append({"key": key, "name": name, "heading": heading})
+    return parts
+
+
 def _validate_commander_link(label: str, raw: Any) -> str:
     if raw == "none":
         return "none"
@@ -412,6 +441,8 @@ def _validate_value(label: str, kind: str, target: dict[str, str], raw: Any) -> 
         return _validate_battle_date(label, raw)
     if kind == "side_polity":
         return _non_empty_str(label, "value", raw)
+    if kind == "battle_split":
+        return _validate_battle_split(label, raw)
     if kind == "commander_link":
         return _validate_commander_link(label, raw)
     if kind == "general_merge":

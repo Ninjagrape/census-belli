@@ -209,6 +209,17 @@ entries:
     note: "The same army with the same mislabel as Gazala, given the same label."
     reviewed: {by: historiography-reviewer, "on": 2026-10-17}
 
+  # --- battle_split -------------------------------------------------------------
+  - id: ov-0089
+    kind: battle_split
+    target: {battle: Battle_of_Jena_Auerstedt-7e1600f782}
+    value:
+      - {key: jena, name: "Battle of Jena", heading: "Jena"}
+      - {key: auerstedt, name: "Battle of Auerstedt", heading: "Auerstedt"}
+    source: "Wikipedia, 'Battle of Jena-Auerstedt', infobox (commander and strength lists headed 'Jena' and 'Auerstedt'); Chandler, The Campaigns of Napoleon (1966), pp. 479-488"
+    note: "Two separate battles fought on 14 October 1806: Jena (Napoleon against Hohenlohe) and Auerstedt (Davout against Brunswick). One record reconciled Prussia's partial figures as competing reports of one total and credited Davout's victory to Napoleon. Extract writes one battle per part, keyed '<slug>#jena' and '<slug>#auerstedt'. Infobox lines that carry no part label ('Total engaged', the combined casualty totals) describe the whole and are written to neither part. Replaces ov-0029 and ov-0030, which unlinked the 'Jena:' heading that is no longer read as a commander."
+    reviewed: {by: lee, "on": 2026-10-22}
+
   # --- commander_link -----------------------------------------------------------
   - id: ov-0024
     kind: commander_link
@@ -248,22 +259,6 @@ entries:
     value: Q2253
     source: "Polybius 11.20-24; Livy 28.12-16; Wikipedia, 'Battle of Ilipa', infobox and lead (Scipio Africanus against Hasdrubal Gisco and Mago, 206 BC); Wikidata Q2253"
     note: "206 BC. The father died in 211 BC, so this can only be Africanus. Corpus-local general_id 817 ('Publius Cornelius Scipio', the bare name shared by father and son) holds this battle, splitting Africanus from his Q2253 row (Baecula). Replaces the draft general_merge, which would also catch the father (Q3293507) in any future crawl."
-    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
-
-  - id: ov-0029
-    kind: commander_link
-    target: {battle: Battle_of_Jena_Auerstedt-7e1600f782, side: French Empire, mention: "Jena:"}
-    value: none
-    source: "Wikipedia, 'Battle of Jena-Auerstedt', infobox (commander lists headed 'Jena:' and 'Auerstedt:')"
-    note: "'Jena:' is the infobox sub-heading for the Jena half of the battle and became a corpus-local general named 'Jena'. Unlinked."
-    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
-
-  - id: ov-0030
-    kind: commander_link
-    target: {battle: Battle_of_Jena_Auerstedt-7e1600f782, side: Prussia, mention: "Jena:"}
-    value: none
-    source: "Wikipedia, 'Battle of Jena-Auerstedt', infobox (commander lists headed 'Jena:' and 'Auerstedt:')"
-    note: "The same sub-heading on the Prussian side. Unlinked."
     reviewed: {by: historiography-reviewer, "on": 2026-10-17}
 
   - id: ov-0031

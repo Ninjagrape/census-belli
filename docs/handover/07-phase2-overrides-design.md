@@ -26,6 +26,28 @@ What a future session would otherwise get wrong:
 - Extract writes records carrying an override last, so a second record for
   the same battle cannot overwrite it.
 
+**`battle_split` (2026-10-22).** One article that describes several battles
+(Jena-Auerstedt) is split by an extract-stage entry whose value lists >= 2
+parts `{key, name, heading}`. Extract writes one battle per part, keyed
+`<parent slug>#<key>`, with both sides under the parent's labels; commander
+lines follow the part heading lines, strength and casualty lines follow the
+`(heading)` label on the line or on the line they are nested under, and lines
+naming no part (the combined totals) are logged and written to neither child.
+The LLM body pass and the outcome request are skipped for a split article, the
+parent's Q-id goes to neither child, and any `battles` row the parent had is
+removed with its sides and reports (kept bare only if an old model run points
+at it). That bare row keeps its date, type and url, and classify's type and
+terrain queries (`_LOAD_BATTLES_NEEDING_TYPE`, `_LOAD_BATTLES_NEEDING_TERRAIN`)
+do not filter on sides, so it is treated like the 26 sideless shell battles
+already in the corpus (all of which classify also requests types for): it is
+not excluded, to stay consistent, and it counts in per-battle gates as one more
+sideless row. If shells are ever excluded from classify, exclude this row with
+them. A failed split leaves the parent untouched (the entry then fails the
+`overrides_applied` gate); a failed retirement raises `SplitRetireError` before
+any write, so the stage fails rather than writing children beside a complete
+parent. Entries for one child (`outcome`, `battle_date`, `side_polity`, and the
+resolve and classify kinds) target the child slug.
+
 **Design (lead, 2026-10-17).**
 - One file, `config/overrides.yaml`, `version:` at the top, one list of
   entries. Every entry: `id` (stable, e.g. `ov-0001`), `kind`, the target

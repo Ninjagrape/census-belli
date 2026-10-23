@@ -23,6 +23,7 @@ Both feed the same field mapping, so everything downstream sees one shape.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -40,6 +41,13 @@ from pipeline.extractors.records import (
     SideExtraction,
     SourceExtraction,
     TroopReport,
+)
+from pipeline.extractors.split import (
+    RoutedField,
+    SplitPart,
+    route_commander_lines,
+    route_figure_lines,
+    split_raw_lines,
 )
 from pipeline.extractors.textnorm import (
     Quantity,
@@ -59,6 +67,7 @@ __all__ = [
     "campaign_names",
     "detect_variant",
     "parse_article_infobox",
+    "parse_article_infobox_parts",
     "parse_infobox",
     "parse_infobox_html",
     "parse_result",
@@ -834,6 +843,94 @@ def _build_extraction(
 # ─── Entry points ────────────────────────────────────────────────────────────
 
 
+@dataclass(frozen=True)
+class _LocatedInfobox:
+    """An infobox found in an article, ready to be built into an extraction.
+
+    Attributes:
+        fields: Normalised field name to cleaned text.
+        raw_fields: The same fields before markup was stripped. Only the
+            wikitext form has anything more raw to offer; for rendered HTML
+            this is ``fields`` again.
+        variant: The infobox family.
+        provenance: Where the fields came from.
+        campaigns: Campaign names from campaignboxes.
+    """
+
+    fields: dict[str, str]
+    raw_fields: dict[str, str]
+    variant: InfoboxVariant
+    provenance: Provenance
+    campaigns: list[str]
+
+
+def _locate_wikitext(wikitext: str, source_ref: str, source_title: str) -> _LocatedInfobox | None:
+    found: tuple[mwparserfromhell.nodes.Template, InfoboxVariant] | None = None
+    for template in mwparserfromhell.parse(wikitext).filter_templates(recursive=True):
+        variant = detect_variant(str(template.name))
+        if variant is not None:
+            found = (template, variant)
+            break
+
+    if found is None:
+        logger.info("no_conflict_infobox_found", source=source_ref or source_title)
+        return None
+
+    template, variant = found
+    raw_fields = {
+        re.sub(r"\s+", " ", str(param.name).strip().lower()): str(param.value)
+        for param in template.params
+    }
+    return _LocatedInfobox(
+        fields=_template_fields(template),
+        raw_fields=raw_fields,
+        variant=variant,
+        provenance=Provenance(
+            source_type="wikipedia_infobox",
+            extraction_method="infobox_parser",
+            source_ref=source_ref,
+            source_title=source_title,
+        ),
+        campaigns=campaign_names(wikitext),
+    )
+
+
+def _locate_html(html: str, source_ref: str, source_title: str) -> _LocatedInfobox | None:
+    table = find_infobox_table(BeautifulSoup(html, "html.parser"))
+    if table is None:
+        logger.info("no_rendered_infobox_found", source=source_ref or source_title)
+        return None
+
+    fields = html_infobox_fields(table)
+
+    if not fields:
+        logger.info("rendered_infobox_had_no_readable_rows", source=source_ref)
+        return None
+
+    return _LocatedInfobox(
+        fields=fields,
+        raw_fields=fields,
+        variant=_VARIANTS["rendered"],
+        provenance=Provenance(
+            source_type="wikipedia_infobox",
+            extraction_method="infobox_parser",
+            source_ref=source_ref,
+            source_title=source_title,
+        ),
+        campaigns=[],
+    )
+
+
+def _build_located(located: _LocatedInfobox, fallback_name: str) -> SourceExtraction:
+    return _build_extraction(
+        located.fields,
+        located.variant,
+        located.provenance,
+        campaigns=located.campaigns,
+        fallback_name=fallback_name,
+    )
+
+
 def parse_infobox(
     wikitext: str,
     *,
@@ -853,30 +950,8 @@ def parse_infobox(
         the caller logs it as a missing source and carries on with the body
         and Wikidata passes.
     """
-    found: tuple[mwparserfromhell.nodes.Template, InfoboxVariant] | None = None
-    for template in mwparserfromhell.parse(wikitext).filter_templates(recursive=True):
-        variant = detect_variant(str(template.name))
-        if variant is not None:
-            found = (template, variant)
-            break
-
-    if found is None:
-        logger.info("no_conflict_infobox_found", source=source_ref or source_title)
-        return None
-
-    template, variant = found
-    return _build_extraction(
-        _template_fields(template),
-        variant,
-        Provenance(
-            source_type="wikipedia_infobox",
-            extraction_method="infobox_parser",
-            source_ref=source_ref,
-            source_title=source_title,
-        ),
-        campaigns=campaign_names(wikitext),
-        fallback_name=source_title,
-    )
+    located = _locate_wikitext(wikitext, source_ref, source_title)
+    return None if located is None else _build_located(located, source_title)
 
 
 def parse_infobox_html(
@@ -900,29 +975,8 @@ def parse_infobox_html(
     Returns:
         What the infobox says, or None when the page has no infobox table.
     """
-    table = find_infobox_table(BeautifulSoup(html, "html.parser"))
-    if table is None:
-        logger.info("no_rendered_infobox_found", source=source_ref or source_title)
-        return None
-
-    fields = html_infobox_fields(table)
-
-    if not fields:
-        logger.info("rendered_infobox_had_no_readable_rows", source=source_ref)
-        return None
-
-    return _build_extraction(
-        fields,
-        _VARIANTS["rendered"],
-        Provenance(
-            source_type="wikipedia_infobox",
-            extraction_method="infobox_parser",
-            source_ref=source_ref,
-            source_title=source_title,
-        ),
-        campaigns=[],
-        fallback_name=source_title,
-    )
+    located = _locate_html(html, source_ref, source_title)
+    return None if located is None else _build_located(located, source_title)
 
 
 def parse_article_infobox(
@@ -946,3 +1000,110 @@ def parse_article_infobox(
     if is_html:
         return parse_infobox_html(raw, source_ref=source_ref, source_title=source_title)
     return parse_infobox(raw, source_ref=source_ref, source_title=source_title)
+
+
+# ─── Split articles ──────────────────────────────────────────────────────────
+
+
+def _field_role(name: str, variant: InfoboxVariant) -> str | None:
+    """Say whether a field lists commanders, strengths or casualties."""
+    match = _SIDE_SUFFIX_RE.match(name)
+    stem = match.group("stem").strip() if match else name
+    if stem in _COMMANDER_FIELDS:
+        return "commander"
+    if stem in variant.strength_fields or stem in variant.casualty_fields:
+        return "figure"
+    return None
+
+
+def _route_fields(
+    located: _LocatedInfobox, parts: Sequence[SplitPart], source: str
+) -> dict[str, RoutedField]:
+    """Route every commander, strength and casualty field to the parts."""
+    routed: dict[str, RoutedField] = {}
+    for name, raw in located.raw_fields.items():
+        role = _field_role(name, located.variant)
+        if role is None or name not in located.fields:
+            continue
+        lines = split_raw_lines(raw)
+        field_routing = (
+            route_commander_lines(lines, parts)
+            if role == "commander"
+            else route_figure_lines(lines, parts)
+        )
+        routed[name] = field_routing
+        for line in field_routing.unrouted:
+            logger.info(
+                "infobox_split_line_unrouted",
+                source=source,
+                field=name,
+                line=line[:120],
+                reason=(
+                    "commander line before any part heading"
+                    if role == "commander"
+                    else "figure names no part and is not nested under one that does; "
+                    "it describes the whole battle"
+                ),
+            )
+    return routed
+
+
+def _build_parts(
+    located: _LocatedInfobox, parts: Sequence[SplitPart], source: str
+) -> dict[str, SourceExtraction]:
+    routed = _route_fields(located, parts, source)
+    built: dict[str, SourceExtraction] = {}
+    for part in parts:
+        part_fields = dict(located.fields)
+        for name, field_routing in routed.items():
+            lines = field_routing.by_part[part.key]
+            if lines:
+                part_fields[name] = "\n".join(lines)
+            else:
+                del part_fields[name]
+        extraction = _build_extraction(
+            part_fields,
+            located.variant,
+            located.provenance,
+            campaigns=located.campaigns,
+            fallback_name=part.name,
+        )
+        extraction.facts.name = part.name
+        built[part.key] = extraction
+    return built
+
+
+def parse_article_infobox_parts(
+    raw: str,
+    *,
+    is_html: bool,
+    parts: Sequence[SplitPart],
+    source_ref: str = "",
+    source_title: str = "",
+) -> dict[str, SourceExtraction] | None:
+    """Parse an article's infobox once per part of a split article.
+
+    Each part gets both sides with the article's side labels, the article-level
+    facts (date, place, result) and only the commander, strength and casualty
+    lines that :mod:`pipeline.extractors.split` routes to it. Lines that name
+    no part are logged and written to none.
+
+    Args:
+        raw: The article source.
+        is_html: True for rendered HTML, False for MediaWiki source.
+        parts: The battles the article is split into.
+        source_ref: URL or file path identifying the article.
+        source_title: Human-readable article title.
+
+    Returns:
+        Part key to what the infobox says about that part, or None when the
+        article has no infobox.
+    """
+    located = (
+        _locate_html(raw, source_ref, source_title)
+        if is_html
+        else _locate_wikitext(raw, source_ref, source_title)
+    )
+    if located is None:
+        return None
+    return _build_parts(located, parts, source_ref or source_title)
