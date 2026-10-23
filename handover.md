@@ -47,12 +47,16 @@ Approved design and user decisions: `docs/handover/07-next-sessions-plan.md`
   Then: implement P1 on a fresh branch from `wip/troop-recon` + main, the
   sensitivity runs (noise median 0.15/0.22/0.30/free), and only then the
   refit. Failing-first evidence was not collected for `wip/troop-recon`.
-- **`wip/jena-split` (worktree `w-jena`):** `battle_split` override kind;
-  ov-0029/0030 removed (moot); review fixes in (no silent line loss, retire
-  only after children exist, failed retire raises `SplitRetireError`). Suite
-  2518 passed 0 skipped. Corpus re-check (two extract runs) pending, then
-  merge to main. The §29 drafts for Jena-Auerstedt (Schmettau, Hohenlohe,
-  Kalckreuth) must target the child slugs `...#jena` / `...#auerstedt`.
+- **Merged to `main` (c6c530f): Jena-Auerstedt split** (`battle_split`
+  override ov-0089, children `...#jena` and `...#auerstedt`; ov-0029/0030
+  removed as moot; 53 entries). Code review plus fixes; two extract runs on a
+  corpus copy identical. **Verified on merged `main` c6c530f, 2026-10-23:**
+  non-model suite 2518 passed, 0 failed, 0 skipped
+  (`data/logs/main_nonmodel_suite_20261023.log`); ruff, mypy (157 files)
+  clean; one head d0e1f2a3b4c5. Model tests not run. Neither merged change has
+  been run on `general_war_corpus2` yet (the refit waits for the redesign).
+  The §29 drafts for Jena-Auerstedt (Schmettau, Hohenlohe, Kalckreuth) must
+  target the child slugs.
 - Backup before any of this: `data/backups/general_war_corpus2_20261022_pre_troopfix.dump`.
   Scratch DBs this session: `general_war_wt_{troop,troop_corpus,recon,
   recon_corpus,jena,jena_corpus,exp_corpus}`.
