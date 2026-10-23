@@ -78,6 +78,15 @@ def _all_kinds() -> list[dict[str, Any]]:
                 },
             ],
         ),
+        _entry(
+            8,
+            "battle_split",
+            {"battle": "borodino"},
+            [
+                {"key": "shevardino", "name": "Battle of Shevardino", "heading": "Shevardino"},
+                {"key": "main", "name": "Battle of the Moskva", "heading": "Main"},
+            ],
+        ),
     ]
 
 
@@ -110,12 +119,13 @@ def test_enums_match_schema() -> None:
 def test_full_valid_file_covers_every_kind(tmp_path: Path) -> None:
     loaded = load_overrides(_write(tmp_path, _all_kinds()))
 
-    assert len(loaded) == 7
+    assert len(loaded) == 8
     assert {e.kind for e in loaded.entries} == {k for ks in KINDS_BY_STAGE.values() for k in ks}
     assert [e.kind for e in loaded.for_stage("extract")] == [
         "outcome",
         "battle_date",
         "side_polity",
+        "battle_split",
     ]
     assert [e.id for e in loaded.of_kind("attribution")] == ["ov-0007"]
     assert loaded.for_stage("nothing") == []
@@ -266,6 +276,44 @@ def test_rule_violation_names_entry_and_problem(
     _expect_error(tmp_path, _mutated(index, mutate), match)
 
 
+SPLIT = 7
+
+
+@pytest.mark.parametrize(
+    ("mutate", "match"),
+    [
+        (lambda e: e.update(value=[e["value"][0]]), "ov-0008.*at least 2 parts"),
+        (lambda e: e.update(value="jena"), "ov-0008.*at least 2 parts"),
+        (lambda e: e["value"][0].update(extra=1), "ov-0008.*value.0. keys"),
+        (lambda e: e["value"][0].pop("heading"), "ov-0008.*value.0. keys"),
+        (lambda e: e["value"][0].update(key="Jena Part"), "ov-0008.*lowercase slug-safe"),
+        (lambda e: e["value"][0].update(key="a#b"), "ov-0008.*lowercase slug-safe"),
+        (lambda e: e["value"][0].update(name=" "), "ov-0008.*value.0..name"),
+        (lambda e: e["value"][1].update(key=e["value"][0]["key"]), "ov-0008.*duplicate part key"),
+        (
+            lambda e: e["value"][1].update(heading=" " + e["value"][0]["heading"].upper()),
+            "ov-0008.*duplicate part heading",
+        ),
+        (lambda e: e.update(target={"battle": "b", "side": "x"}), "ov-0008.*target keys"),
+    ],
+)
+def test_battle_split_violations_name_the_entry(tmp_path: Path, mutate: Any, match: str) -> None:
+    _expect_error(tmp_path, _mutated(SPLIT, mutate), match)
+
+
+def test_battle_split_normalises_its_parts(tmp_path: Path) -> None:
+    loaded = load_overrides(_write(tmp_path, _all_kinds()))
+
+    (split,) = loaded.of_kind("battle_split")
+
+    assert split.stage == "extract"
+    assert split.value[0] == {
+        "key": "shevardino",
+        "name": "Battle of Shevardino",
+        "heading": "Shevardino",
+    }
+
+
 def test_duplicate_id_fails(tmp_path: Path) -> None:
     first = _entry(1, "battle_type", {"battle": "a"}, "field")
     second = _entry(1, "battle_type", {"battle": "b"}, "naval")
@@ -296,9 +344,10 @@ def test_overrides_path_prefers_the_spec_param(tmp_path: Path) -> None:
 def test_report_shape_lists_every_kind_even_at_zero(tmp_path: Path) -> None:
     loaded = load_overrides(_write(tmp_path, _all_kinds()))
     report = OverrideReport("extract", loaded)
-    outcome, battle_date, side_polity = loaded.for_stage("extract")
+    outcome, battle_date, side_polity, split = loaded.for_stage("extract")
     report.applied(outcome)
     report.applied(battle_date)
+    report.applied(split)
     report.unmatched(side_polity, "no such side")
 
     path = report.write(tmp_path / "out")
@@ -307,9 +356,14 @@ def test_report_shape_lists_every_kind_even_at_zero(tmp_path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["stage"] == "extract"
     assert payload["file"] == str(loaded.path)
-    assert payload["entries"] == 3
-    assert payload["applied"] == {"outcome": 1, "battle_date": 1, "side_polity": 0}
-    assert payload["entry_ids"] == ["ov-0001", "ov-0002", "ov-0003"]
+    assert payload["entries"] == 4
+    assert payload["applied"] == {
+        "outcome": 1,
+        "battle_date": 1,
+        "side_polity": 0,
+        "battle_split": 1,
+    }
+    assert payload["entry_ids"] == ["ov-0001", "ov-0002", "ov-0003", "ov-0008"]
     assert payload["file_sha256"] == file_sha256(loaded.path)
     assert payload["unmatched"] == [
         {"id": "ov-0003", "kind": "side_polity", "reason": "no such side"}

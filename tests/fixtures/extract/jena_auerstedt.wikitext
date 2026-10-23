@@ -1,0 +1,357 @@
+{{Short description|1806 battle of the War of the Fourth Coalition}}
+{{Use shortened footnotes|date=June 2021}}
+{{Use dmy dates|date=July 2021}}
+{{Infobox military conflict
+| conflict         = Battle of Jena–Auerstedt
+| part_of          = the [[War of the Fourth Coalition]]
+| image            = Iena.jpg
+| caption          = ''[[The Battle of Jena]]'' <br /> [[Horace Vernet]], 1836{{sfn|Bauer|2009|p=70}}
+| date             = 14 October 1806{{sfn|Bodart|1908|pp=372–373}}
+| location         = [[Jena]] and [[Auerstedt]], Germany
+| coordinates      = {{Coord|50|55|38|N|11|35|10|E}}
+| result           = [[First French Empire|French]] victory
+| territory        = {{lang|fr|[[Grande Armée]]}} occupies [[Prussia]]
+| combatant1       = {{flagicon|First French Empire}} [[First French Empire|French Empire]]
+| combatant2       = {{plainlist|
+* {{flagicon|Prussia|1803}} [[Kingdom of Prussia|Prussia]]
+* {{flagicon|Electorate of Saxony}} [[Electorate of Saxony|Saxony]]
+}}
+| commander1       = {{plainlist|
+* '''Jena''':
+* {{flagdeco|France|1794}} '''[[Napoleon|Napoleon I]]'''
+* {{flagdeco|France|1794}} [[Jean-Baptiste Bessières]]
+* {{flagdeco|France|1794}} [[François Joseph Lefebvre]]
+* {{flagdeco|France|1794}} [[Jean-de-Dieu Soult]]
+* {{flagdeco|France|1794}} [[Jean Lannes]]
+* {{flagdeco|France|1794}} [[Michel Ney]]
+* {{flagdeco|France|1794}} [[Charles-Pierre Augereau]]
+* {{flagdeco|France|1794}} [[Joachim Murat]]
+* '''Auerstedt''':
+* {{flagdeco|France|1794}} '''[[Louis-Nicolas Davout]]'''
+* {{flagdeco|France|1794}} [[Charles-Étienne Gudin]]
+}}
+| commander2       = {{plainlist|
+* '''Jena''':
+* {{flagicon|Prussia|1803}} {{flagicon|Electorate of Saxony}} '''[[Frederick Louis, Prince of Hohenlohe-Ingelfingen|Prince of Hohenlohe]]'''
+* {{flagicon|Prussia|1803}} [[Julius von Grawert]]
+* {{flagicon|Prussia|1803}} [[Bogislav Friedrich Emanuel von Tauentzien]]
+* {{flagicon|Prussia|1803}} [[Ernst von Rüchel]]{{WIA}}
+* '''Auerstedt''':
+* {{flagicon|Prussia|1803}} '''[[Charles William Ferdinand, Duke of Brunswick|Duke of Brunswick]]'''{{DOW}}
+* {{flagicon|Prussia|1803}} [[Frederick William III of Prussia]]
+* {{flagicon|Prussia|1803}} [[Friedrich Wilhelm von Schmettau]]{{DOW}}
+* {{flagicon|Prussia|1803}} [[Gerhard von Scharnhorst]]
+* {{flagicon|Prussia|1803}} [[Friedrich Adolf, Count von Kalckreuth | Count of Kalckreuth]]
+* {{flagicon|Prussia|1803}} [[Gebhard Leberecht von Blücher | Gebhard von Blücher]]
+}}
+| strength1        = 40,000 deployed to do battle, 96,000 total <small>(Jena)</small>{{sfn|Connelly|2006|pages=98–101}}<br>26,000 <small>(Auerstedt)</small>{{sfn|Connelly|2006|page=101}}<br>'''Total engaged''':<br>66,000
+| strength2        = {{tree list}}
+* 46,000 <small>(Jena)</small>{{sfn|Chandler|1966|p=488}}
+** 40,000 directly under Hohenlohe, with 33,000 of them engaged{{sfn|Connelly|2006|pages=98–101}}
+** 15,000 under Rüchel, with 13,000 of them engaged{{sfn|Connelly|2006|pages=98–101}}
+{{tree list/end}}
+64,000 <small>(Auerstedt)</small>{{sfn|Chandler|1966|p=488}}<br>'''Total engaged''':<br>110,000
+| casualties1      = 5,000–6,000{{sfn|Bodart|1908|p=372}} <small>(Jena)</small><br>7,052–7,100{{sfn|Bodart|1908|p=373}} <small>(Auerstedt)</small><br>'''Total''':<br>12,600 killed, wounded, missing or captured (1,000 [[killed in action]]{{sfn|Clodfelter|2017|p=85}})
+| casualties2      = 26,000–27,000 <small>(including 7,200 Saxons){{sfn|Bodart|1908|p=372}} (Jena)</small>{{sfn|Connelly|2006|page=101}}<br>13,000{{sfn|Bodart|1908|p=373}}–15,000 <small>(Auerstedt)</small>{{sfn|Connelly|2006|page=101}}<br>'''Total''':<br>41,000 killed, wounded, missing or captured
+| pushpin_map      = Europe
+| pushpin_relief   = 1
+| pushpin_map_size = 300
+| image_size       = 290
+}}
+{{Campaignbox Fourth Coalition}}
+{{OSM Location map
+| coord = {{coord|52.7|15.5}}
+| zoom = 5
+| float = right
+| nolabels = 1
+| width = 304
+| height = 180
+| title = [[War of the Fourth Coalition]]
+| caption = {{legend|white|text=⬤|textcolor=#228833|current battle}}{{legend|white|text=⬤|textcolor=#4477aa|Napoleon not in command}}{{legend|white|text=⬤|textcolor=#aa3377|Napoleon in command}}
+
+| shapeD=n-circle
+| shape-colorD=#4477aa
+| shape-outlineD=white
+| label-colorD = #4477aa
+| label-sizeD = 12
+| label-posD = left
+| label-offset-xD =
+| label-offset-yD =
+
+| label1 = 
+| mark-coord1 = {{coord|50.58|11.82}}
+| mark-title1 = [[Battle of Schleiz]] on 9 October 1806
+
+| label2 = 
+| mark-coord2 = {{coord|50.65|11.37}}
+| mark-title2 = [[Battle of Saalfeld]] on 10 October 1806
+
+| label3 = Jena–Auerstedt
+| mark-coord3 = {{coord|50.93|11.59}}
+| mark-title3 = Battle of Jena–Auerstedt on 14 October 1806
+| label-pos3 = right
+| label-offset-y3 = -4
+| label-color3 = #228833
+| shape-color3 = #228833
+
+| label4 = 
+| mark-coord4 = {{coord|50.98|11.03}}
+| mark-title4 = [[Capitulation of Erfurt]] on 16 October 1806
+
+| label5 = 
+| mark-coord5 = {{coord|51.47|11.97}}
+| mark-title5 = [[Battle of Halle]] on 17 October 1806
+
+| label6 = 
+| mark-coord6 = {{coord|52.13|11.62}}
+| mark-title6 = [[Siege of Magdeburg (1806)]] from 25 October to 8 November 1806
+
+| label7 = Berlin
+| mark-coord7 = {{coord|52.52|13.41}}
+| mark-title7 = [[Fall of Berlin (1806)]] on 27 October 1806
+| shape-color7 = #aa3377
+| label-color7 = #aa3377
+
+| label8 = 
+| mark-coord8 = {{coord|53.32|13.87}}
+| mark-title8 = [[Battle of Prenzlau]] on 28 October 1806
+
+| label9 = 
+| mark-coord9 = {{coord|53.5|14}}
+| mark-title9 = [[Capitulation of Pasewalk]] on 29 October 1806
+
+| label10 = 
+| mark-coord10 = {{coord|53.43|14.55}}
+| mark-title10 = [[Capitulation of Stettin]] from 29 to 30 October 1806
+
+| label11 = 
+| mark-coord11 = {{coord|53.52|12.68}}
+| mark-title11 = [[Battle of Waren-Nossentin]] on 1 November 1806
+
+| label12 = 
+| mark-coord12 = {{coord|53.87|10.69}}
+| mark-title12 = [[Battle of Lübeck]] on 6 November 1806
+
+| label13 = 
+| mark-coord13 = {{coord|52.1|9.37}}
+| mark-title13 = [[Siege of Hamelin]] from 7 to 22 November 1806
+
+| label14 =
+| mark-coord14 = {{coord|52.48|20.77}}
+| mark-title14 = [[Battle of Czarnowo]] on 23 December 1806
+
+| label15 = 
+| mark-coord15 = {{coord|52.82|20.87}}
+| mark-title15 = [[Battle of Golymin]] on 26 December 1806
+
+| label16 = 
+| mark-coord16 = {{coord|52.72|21.1}}
+| mark-title16 = [[Battle of Pułtusk (1806)]] on 26 December 1806
+
+| label17 = 
+| mark-coord17 = {{coord|53.49|18.78}}
+| mark-title17 = [[Siege of Graudenz]] from 22 January to 11 December 1807
+
+| label18 =
+| mark-coord18 = {{coord|53.92|19.93}}
+| mark-title18 = [[Battle of Mohrungen]] on 25 January 1807
+
+| label19 = 
+| mark-coord19 = {{coord|53.78|20.48}}
+| mark-title19 = [[Battle of Allenstein]] on 3 February 1807
+
+| label20 = ''Eylau''
+| mark-coord20 = {{coord|54.4|20.63}}
+| mark-title20 = [[Battle of Eylau]] from 7 to 8 February 1807
+| label-pos20 = left
+| label-offset-x20 = 2
+| label-offset-y20 = -2
+| shape-color20 = #aa3377
+| label-color20 = #aa3377
+
+| label21 = 
+| mark-coord21 = {{coord|53.08|21.58}}
+| mark-title21 = [[Battle of Ostrołęka (1807)]] on 16 February 1807
+
+| label22 = 
+| mark-coord22 = {{coord|54.17|15.57}}
+| mark-title22 = [[Siege of Kolberg (1807)]] from 20 March to 2 July 1807
+
+| label23 = 
+| mark-coord23 = {{coord|54.37|18.63}}
+| mark-title23 = [[Siege of Danzig (1807)]] from 19 March to 24 May 1807
+
+| label24 = 
+| mark-coord24 = {{coord|54.31|13.08}}
+| mark-title24 = [[Great Sortie of Stralsund]] from 1 to 3 April 1807
+
+| label25 = 
+| mark-coord25 = {{coord|53.98|20.4}}
+| mark-title25 = [[Battle of Guttstadt-Deppen]] from 5 to 6 June 1807
+
+| label26 = 
+| mark-coord26 = {{coord|54.12|20.58}}
+| mark-title26 = [[Battle of Heilsberg]] on 10 June 1807
+
+| label27 = Friedland
+| mark-coord27 = {{coord|54.45|21.02}}
+| mark-title27 = [[Battle of Friedland]] on 14 June 1807
+| label-pos27 = top
+| label-offset-x27 = -5
+| label-offset-y27 = 2
+| shape-color27 = #aa3377
+| label-color27 = #aa3377
+}}
+[[Image:Battle of Jena-Auerstedt - Map01.jpg|thumb|300px|Battles of Jena and Auerstedt]]
+
+The [[Battle of Jena–Auerstedt]] was fought on Tuesday 14 October 1806, near [[Jena]] and [[Auerstedt]] (then in the [[Duchy of Saxe-Weimar]] and [[Kingdom of Prussia]], now in [[Thuringia]] and [[Saxony-Anhalt]], [[Germany]]), being the decisive engagement of the [[War of the Fourth Coalition]]. The ''[[Grande Armée]]'' under the command of [[Napoleon|Emperor Napoleon I]] defeated a combined [[Prussian Army|Prussian]] and [[Saxon Army|Saxon]] army. One force was an [[Imperial French Army|imperial French force]] under the command of Napoleon I at Jena, while the other comprised an [[III Corps (Grande Armée)|imperial French corps]] under the command of Marshal [[Louis-Nicolas Davout]] at Auerstedt. The opposing forces consisted of a Prussian army under the command of [[Frederick Louis, Prince of Hohenlohe-Ingelfingen|Prince Hohenlohe]] at Jena, and the main Prussian army under the command of [[Charles William Ferdinand, Duke of Brunswick-Wolfenbüttel|Duke Charles William Ferdinand]] and [[Frederick William III of Prussia|King Frederick William III]] at Auerstedt.<ref>{{cite book |last=Chandler |first=David G. |title=The Campaigns of Napoleon |year=1966 |publisher=Scribner |isbn=978-0-02-523660-8}}</ref>
+
+The Prussians did not forget the military glory of [[Frederick the Great]] and venerated it, but by the time of the war, changes were needed for victory, despite the fact that Prussia showed itself well in the [[French Revolutionary Wars]].{{efn|See [[Low Countries theatre of the War of the First Coalition|Flanders campaign]] and [[Template:Campaignbox Rhine Campaign of 1793–94|Rhine campaign of 1793–94]]}} By 1806, Prussian military doctrines had been unchanged for more than 50 years—tactics were monotonous, and the [[Wagon train|wagon]] system was obsolete. The Prussian [[musket]] of 1806 (the [[Potzdam Musket|1754 model]]) was called "the worst in Europe" by one authority; there were many recruited non-Prussians in the royal army.<ref name=Citino>{{cite book|last=Citino |first=Robert M. |author-link=Robert M. Citino |title=The German Way of War: From the Thirty Years' War to the Third Reich |year=2005 |publisher=University Press of Kansas |page=108–110 |isbn=0-7006-1410-9}}</ref> At the same time, Napoleon's army was recently reorganized according to the advanced [[Corps#France|corps]] system, which the French Emperor improved greatly by 1805,<ref>{{Cite book |last=Haythornthwaite |first=Philip J. |author-link=Philip Haythornthwaite |title= Napoleon's military machine |publisher=Guild Puplishing |location=London |date=1988 |isbn=0946771669 |pages=14–15 }}</ref> who also had such tactics as {{lang|fr|[[la maraude]]}} at hand. And although the Prussian cavalry was better than the French, and the infantry was a very formidable force, this did not compensate for the shortcomings. Thus at Jena and Auerstedt the backwardness of the Prussian Army became apparent.{{sfn|Fisher|Fremont-Barnes|2004|p=34}} At Jena the French were led by Napoleon himself, and at Auerstedt they were led by one of the most outstanding commanders of the Napoleonic Wars,{{sfn|Bodart|1908|p=790}} [[Louis-Nicolas Davout]].
+
+The battle of Jena took the Prussian supreme commander there, [[Frederick Louis, Prince of Hohenlohe-Ingelfingen|Prince of Hohenlohe-Ingelfingen]], by surprise due to his misorientation and ignorance of the enemy. Due to this incompetence, the Prussians fought a series of isolated, disjointed engagements, unconnected by a unified plan. From beginning to end, Hohenlohe remained disoriented regarding the enemy's strength and direction of advance, and not only did not find time to maintain control of the battle but was unable to even organize an adequate retreat; whilst Napoleon showed firm will at Jena, skillfully taking advantage of both the weather conditions (fog) and the rugged terrain (see [[Advantage of terrain]]) when his troops gradually entered the battle from the march.{{sfn|Novitsky|1913}}
+
+At Auerstedt, Davout, at the first sign of the enemy's appearance, rapidly analysed the area, took an advantageous defensive position, and quickly brought up and deployed all his forces on the battlefield. Thus, [[Charles William Ferdinand, Duke of Brunswick|Duke of Brunswick]] (overall commander-in-chief) failed to take advantage of his numerical superiority. Davout showed his steadfastness and personally rode around his position during the battle whilst proving himself a good tactician. As was stated by author [[Nikolay Alexeyevich Orlov|Nikolai Orlov]], "Davout, having concentrated all his troops, correctly assessed the Prussian position and was convinced that a bold offensive would completely disrupt them. He concentrated all his efforts on their key [[military strategy|strategic]] position, Mount Eckartsberg (on their left flank), and captured it. It was the main line of operations, as it provided the road to the important points of [[Freyburg, Germany|Freyburg]] and Berlin. Simultaneously, he used one division to take Mount Sonnenberg (on the right), which was of merely [[military tactics|tactical]] interest, and was occupied by only a battalion. Having captured these two mountains, he began an artillery bombardment of the Prussians from these mountains, which turned the simple withdrawal into a [[rout]]. The French, exhausted, hardly pursued, and stopped near Auerstedt." Davout also took advantage of the confusion among the Prussian command caused by the death of Brunswick and [[Friedrich Wilhelm von Schmettau]] ([[division (army)|divisional]] commander).{{sfn|Orlov|1856|pp=140-160}}
+
+Several figures who were later integral to the reformation of the Prussian Army participated at Jena–Auerstedt, including [[Gebhard Leberecht von Blücher|Gebhard von Blücher]], [[Carl von Clausewitz]], [[August Neidhardt von Gneisenau]], [[Gerhard von Scharnhorst]], and [[Hermann von Boyen]].
+
+==Background==
+{{Main|Jena–Auerstedt campaign order of battle}}
+
+Following the Prussian declaration of war, Napoleon initiated his campaign against the Fourth Coalition by thrusting a 180,000-strong force through the [[Franconian Forest]]. The Prussian army, meanwhile, awaited Napoleon's advance with a force composed of about 130,000 Prussians and 20,000 Saxons.{{sfn|Petre|1914|p=46}} In comparison to the modern, tightly organized structure of the ''[[Grande Armée]]'', the Prussian command was bloated and inefficient; key roles were divided between multiple officers, creating uncertainty and disagreement in the coordination of field movements. There was also no courier system in place for messages to be transmitted quickly; if orders were changed, precious minutes would then be lost making the arrangements necessary for the changes to be distributed.{{sfn|Petre|1914|p=21}}
+
+==Overview==
+The battles began when elements of Napoleon's main force encountered Hohenlohe's troops near Jena. Initially 48,000 strong, the Emperor took advantage of his carefully planned and flexible dispositions to rapidly achieve local superiority, with a force reaching 96,000 men.{{sfn|Chandler|1966|p=1119}} However, less than half fought the Prussians as only 40,000 men were sent and actually took part in the battle.{{sfn|Connelly|2006|page=101}} The Prussians, meanwhile, were slow to grasp the situation, and slower still to react. Before [[Ernst von Rüchel|Rüchel]]'s 15,000 men could arrive from [[Weimar]], Hohenlohe's force was routed, with 10,000 killed or wounded and 15,000 captured.{{sfn|Chandler|1966|p=1119}} Ruchel did eventually bring his troops to the battlefield. Soon after it was committed to battle and Hohenlohe rode up to take personal command of the corps, they were ridden over and sent fleeing to the rear in irretrievable rout, with Ruchel being wounded. Nevertheless, Jena was a fierce battle, with 5,000 French killed, wounded or captured;{{sfn|Chandler|1966|p=1119}} and Napoleon mistakenly believed that he had faced the main body of the Prussian army.
+
+Further north at [[Auerstedt]], both [[Davout]] and [[Charles XIV John|Bernadotte]] received orders to come to Napoleon's aid. Davout attempted to comply via [[Eckartsberga]], Bernadotte via Dornburg. Davout's route south, however, was blocked by the Prussian main force of 64,000 men,{{sfn|Chandler|1966|p=488}} including the Prussian King, the [[Charles William Ferdinand, Duke of Brunswick|Duke of Brunswick]] and Field Marshals [[Wichard Joachim Heinrich von Möllendorf|von Möllendorf]] and [[Friedrich Adolf Graf von Kalckreuth|von Kalckreuth]].{{sfn|Chandler|1966|p=1119}} A savage battle ensued. Although outnumbered more than two to one, Davout's superbly trained and disciplined III Corps endured repeated attacks before it eventually took the offensive and put the Prussians to flight. Though within earshot of both battles, Marshal Bernadotte controversially took no steps to come to Davout's aid, refusing to take the initiative and instead adhering to the last written set of Napoleon's orders.{{sfn|Barton|1921|pp=138–146}}{{sfn|Petre|1914|pp=170–173}}{{sfn|Gallaher|2018|pp=134–135}}
+
+==Battle of Jena==
+[[Image:Battle of Jena-Auerstedt - Map02.jpg|thumb|left|300px|Situation – 10 a.m., 14 October]]
+
+===Plan===
+[[File:Napoleon.Jena.jpg|thumb|left|The Battle of Jena.]]
+
+The Prussian army was divided into three armies drawn from across Prussia. Prussia's main weakness in 1806 was its senior command structure, which included command positions being held by multiple officers. One such example is the position of chief of staff, held by three different officers: General [[Karl Ludwig von Phull|Phull]], Colonel [[Gerhard von Scharnhorst]] and Colonel Rudolf Massenbach. The confusing system led to delays and complexities that resulted in over a month's delay before the final order of battle was prepared. Another obstacle facing the Prussians was the creation of a unified plan of battle. Five main plans emerged for discussion; however, protracted planning and deliberating shifted the initiative to the French. Thus, the Prussian plans became mere reactions to Napoleon's movements.
+
+Although Prussia had begun its mobilization almost a month before France, Napoleon had kept a high state of readiness after the Russian refusal to accept defeat after the [[War of the Third Coalition]]. Napoleon conceived a plan to force Prussia into a decisive battle, like [[Battle of Austerlitz|Austerlitz]], and pre-empt the Prussian offensive. Napoleon had a major portion of his {{lang|fr|[[Grande Armée]]}} in position in present-day Baden-Württemberg in southwest Germany and thus decided on a northeast advance into [[Saxony]] and on to [[Berlin]].{{sfn|Petre|1914|pp=48–71}}
+
+===Battle===
+[[File:Battle of Jena.jpg|thumb|French dragoon with captured Prussian flag at the battle of Jena]]
+The battle commenced on the morning of 14 October 1806, on the grassy fields near Jena. The first movements of the French Army were attacks on either flank of the Prussian lines. That gave the supporting armies (making up the central attack) time to get into position. The skirmishes had little decisive success, save for a breakthrough by the French General [[Louis-Vincent-Joseph Le Blond de Saint-Hilaire|Saint-Hilaire]], who attacked and isolated the Prussian left flank.
+
+At that time, Marshal [[Michel Ney]] had completed his maneuvers and had taken up position as ordered by Napoleon. However, once in position, Ney decided to attack the Prussian line despite having no orders to do so, a move that proved to be almost disastrous. Ney's initial assault was a success, but he found himself overextended and under heavy fire from Prussian artillery. Recognizing the distressed salient, the Prussian general ordered a counterattack and enveloped Ney's forces; Ney formed them into a [[Infantry square|square]] to protect all their flanks. Napoleon recognized Ney's situation and ordered Marshal [[Jean Lannes]] to shift from the center of attack to help Ney.
+
+That action left the French center weak. However, Napoleon deployed the Imperial Guard to hold the French center until Ney could be rescued. That adaptability was one of Napoleon's greatest strengths. He kept the Imperial Guard under his direct command and could order them to take positions depending on the situation that the battle presented him. The rescue worked, and Ney's units were able to retreat from the battle. Although the French were then in a troubling situation, the Prussian commanders did not take the initiative to push at the French weaknesses. That was later considered to have been their undoing. The inactivity of the Prussian infantry left them open to artillery and light infantry fire. One Prussian general later wrote that "the area around the entrance of the village was the scene of the most terrible blood-letting and slaughter".
+
+[[File:Chartier-Murat at Jena.jpg|thumb|left|Marshal [[Joachim Murat]], the most famous of many daring and charismatic French cavalry commanders of the era, leads a charge during the battle.]]
+
+It was at that time, around 1 p.m., that Napoleon decided to make the decisive move. He ordered his flanks to push hard and try to break through the Prussian flanks and encircle the main center army while the French center attempted to crush the Prussian center. The attacks on the flanks proved to be a success. With its flanks broken, the Prussian army was forced to withdraw and Napoleon had won another battle. In total the Prussian army lost 10,000 men killed or wounded, had 15,000 prisoners of war taken as well as 150 guns.{{sfn|Petre|1914|pp=121–148}}
+
+==Battle of Auerstedt==
+[[Image:Battle of Jena-Auerstedt - Map03.jpg|thumb|300px|Situation – 2 p.m., 14 October]]
+General [[Charles-Étienne Gudin de La Sablonnière|Étienne Gudin's]] Division were on the move from Naumburg before 6:30&nbsp;a.m. By 7 a.m. the 1st [[Chasseurs]] were stopped cold in their tracks outside of Poppel by Prussian cavalry and artillery. There was a heavy fog, which had lifted just as they approached the village. Once Davout became aware of the Prussian force, he ordered Gudin to deploy his force at Hassenhausen.
+
+The Prussian commander on the field was Friedrich Wilhelm Carl von Schmettau. His division was actually under orders to proceed down the very road that Davout was on, to block his advance in the Kösen Pass. While Schmettau's troops were deploying to attack Hassenhausen, [[Gebhard Leberecht von Blücher|Blücher]] arrived with his cavalry and deployed on his left. Together, they attacked Gudin's troops and pushed them back to the village.
+
+[[Image:Doppelschlacht bei Jena und Auerstadt.jpg|left|thumb|alt=Prussian wounded and stragglers leaving the double battle by Richard Knötel|Prussian wounded and stragglers leaving the double battle by [[Richard Knötel]]. The [[Charles William Ferdinand, Duke of Brunswick|Duke of Brunswick]] is the prominent figure in the painting, being wounded and having lost both of his eyes.]]
+Wartensleben arrived at 8:30&nbsp;a.m. with the Duke of Brunswick, who ordered his infantry to the left flank and his cavalry to the right. The rest of the French cavalry arrived at 9 a.m. and was placed on Gudin's left. General [[Louis Friant]]'s Division and the 12-pound artillery arrived at 9:30&nbsp;a.m. and moved in squares on Gudin's right. The advance of the French squares forced Blücher's cavalry back. Seeing no other option available he ordered his cavalry to attack. At that very moment, two of Wartensleben's regiments attacked Hassenhausen.
+
+Within the battle, the French squares were rained down with grapeshot, and when Davout and Gudin encouraged the battalions, the only thing heard among the French soldiers was: {{langx|fr|serrez vos rangs||close ranks|label=none}}. Davout also used the "[[reverse slope defence|reverse slope]]" tactic, hiding his {{lang|fr|[[chasseurs à cheval]]}} behind a hill and then unleashing at a crucial moment to put to flight Blücher's cavalry, which had already been battered by infantry and artillery.{{sfn|Orlov|1856|pp=146-147}} Everything failed: three Prussian cavalry regiments were routed and the infantry fell back. At this critical point, the Duke needed to take drastic action. Shortly before 10 a.m., he ordered a full assault on Hassenhausen. By 10 a.m., the Duke of Brunswick was carried from the field mortally wounded along with Schmettau who was also badly wounded. With the loss of both commanders, the Prussian command broke down. The Prussian army was in danger of collapse.
+
+Oswald's infantry and the Prince of Orange, the later [[William I of the Netherlands]], arrived about 10:30&nbsp;a.m., and the King made his only decision of the day: to split Orange's command in two, half to each flank. On the French side, [[Charles Morand|Morand's]] Division arrived and was sent to secure Gudin's left. Davout could now see that the Prussians were wavering and so at 11 a.m. he ordered his infantry to counter-attack. By noon Schmettau's center was broken and forced back over the Lissbach Stream, Blücher's cavalry was blown, and Wartensleben was trying to reposition his troops. The Prussians realized all was now lost and the King ordered a withdrawal.{{sfn|Petre|1914|pp=149–164}}
+
+Davout's corps had lost 7,052 officers and men killed or wounded, while Prussian casualties were 13,000.{{sfn|Chandler|1966|p=1119}}
+
+==Aftermath==
+[[File:Detaille-Le Soir D'Jena.jpg|thumb|left|Napoleon after the Battle of Jena.]] 
+{{Further|Fall of Berlin (1806)}}
+Napoleon initially did not believe that Davout's single Corps had defeated the Prussian main body unaided and responded to the first report by saying "Your Marshal must be seeing double!", a reference to Davout's poor eyesight. As matters became clearer, however, the Emperor was unstinting in his praise. Davout was made Duke of Auerstedt. Lannes, the hero of Jena, was not so honored.
+
+Bernadotte's lack of action was controversial within a week of the twin battles. Bernadotte had last received positive written orders on the day before the battle in which his I Corps, along with Davout's III Corps, were to lie astride the Prussians' projected line of retreat. He was the only Marshal not to receive updates, written orders on the night of 13 October.{{sfn|Barton|1921|p=133}} In the early hours of 14 October, Davout received a courier from Berthier in which he wrote: "If the Prince of Ponte Corvo [Bernadotte] is with you, you ''may'' both march together, but the Emperor hopes that ''he will be in the position which had been indicated at Dornburg''." Davout thence relayed this order to Bernadotte when the next met at 0400 the same morning.{{sfn|Gallaher|2018|pp=134–135}} Bernadotte later cited the poorly written, equivocal nature of the verbal order, as discretionary and complied with Napoleon's wish to be at Dornburg instead of accompanying Davout. Moreover, when told of Davout's difficulties, Bernadotte did not believe that the Prussian main force was before III Corps as Napoleon had claimed the main body was at Jena. As a consequence, he failed to aid Davout and instead fulfilled the Emperor's orders to position I Corps in the Prussian rear on the Heights of Apolda, which, incidentally, did have the effect intended as the Prussians at Jena withdrew once they saw French troops occupying their line of retreat.{{sfn|Barton|1921|pp=138–146}}
+
+Davout and Bernadotte later became bitter enemies as the result of Bernadotte's perceived indifference at the fate of a fellow Marshal.{{sfn|Gallaher|2018|p=215}} For his part, Napoleon later stated on St. Helena that Bernadotte's behavior (though he was complying with Napoleon's orders) was disgraceful and that but for his attachment to Bernadotte's wife, Napoleon's own former fiancée, [[Désirée Clary]], he would have had Bernadotte shot.{{sfn|Petre|1914|pp=170–173}} However, contemporary evidence indicates that far from scenes of recriminations and insults alleged by Davout and his aides-de-Camp against Bernadotte the night of the battles, Napoleon was unaware anything was amiss, inasmuch as I Corps had played the part assigned to it by the Emperor, until days later.
+
+A later search of the orders and dispatches from the Imperial Headquarters never yielded any order for Bernadotte to march with Davout. They did, however, confirm Berthier's order of 14 October, sending Bernadotte to Dornberg.{{sfn|Dunn-Pattinson|1909|p=81}}{{sfn|Barton|1921|p=156}} The lack of documentation supporting Napoleon's accusation against Bernadotte calls into question whether Napoleon had intended I Corps to march with Davout, and the order was incorrectly transmitted to Bernadotte on the morning of 14 October, or if Napoleon was using the opportunity to shift blame for Davout having to fight a battle on his own as suggested by Colonel Ernst Marsh Lloyd.{{sfn|Acton|1906|p=227}} Napoleon later sent a severely worded reprimand to Bernadotte but took no further action.{{sfn|Barton|1921|pp=152–158}}
+
+[[File:Charles Meynier - Entrée de Napoléon à Berlin. 27 octobre 1806.jpg|thumb|''[[Entry of Napoleon into Berlin]]'' by [[Charles Meynier]]. French troops entering [[Berlin]] following the battle.]]
+
+On the Prussian side, Brunswick was mortally wounded at Auerstedt, and over the next few days, the remaining forces were unable to mount any serious resistance to Murat's ruthless cavalry pursuit. In the [[Capitulation of Erfurt]] on 16 October, a large body of Prussian troops became prisoners with hardly a shot being fired. Bernadotte crushed [[Eugene Frederick Henry, Duke of Württemberg]]'s Prussian Reserve Army on the 17th in the [[Battle of Halle]], partially redeeming himself in Napoleon's eyes.{{sfn|Barton|1921|pp=148–150}} In recognition of his glorious victory at Auerstadt, Napoleon gave Davout the honor of entering Berlin first. Davout led his exhausted III Corps into Berlin in triumph on 25 October. Hohenlohe's force surrendered on 28 October after the [[Battle of Prenzlau]], followed soon after by the [[Capitulation of Pasewalk]]. The French ran down and captured several small Prussian columns at [[Boldekow]] on 30 October, [[Anklam]] on 1 November, [[Wolgast]] on 3 November, and [[Wismar]] on 5 November.
+
+21,000 Prussian field troops remained at large west of the Oder as November began under the command of [[Gebhard Leberecht von Blücher|Gebhard Blücher]]. French advances prevented his corps from crossing the Oder, or moving toward [[Stettin]] to seek waterborne transport to East Prussia. Bernadotte began a relentless pursuit of Blücher, with the two forces engaging in several holding actions, and was later joined by Murat and Soult in "The Pursuit of the Three Marshals". Blücher then moved west to cross into neutral Denmark but the Danes placed their army on the border with the intent of attacking any force that tried to cross it. The Prussians then violated the neutrality of the Hanseatic City of [[Lübeck]] and fortified it with the intent of joining forces with an allied Swedish contingent there on its way home, and commandeering ships in the hopes of reaching a safe harbor. However, Blücher and Winning's corps was surrounded and destroyed in what became the [[Battle of Lübeck]] on 6 and 7 November after Bernadotte's I Corps, still smarting from the Emperor's censure, stormed the fortified city gates, poured into the streets and squares breaking hasty attempts at resistance and captured Blücher's command post (and his Chief of Staff [[Gerhard von Scharnhorst]]) as Soult's troops blocked all escape routes. The Prussians lost 3,000 killed and wounded. On the morning of 7 November, with all hope of escape extinguished, Blücher surrendered personally to Bernadotte and went into captivity with 9,000 other Prussian prisoners of war.{{sfn|Petre|1907|pp=285–289}}{{sfn|Barton|1921|pp=164–167}} The [[Siege of Magdeburg (1806)|Siege of Magdeburg]] ended on 11 November with Ney's capture of the fortress. Isolated Prussian resistance remained, but Napoleon's primary foe was now Russia, and the [[Battle of Eylau]] and the [[Battle of Friedland]] awaited.
+
+[[Martin van Creveld]] has stated about the effects on command:
+
+{{blockquote|Thus Napoleon at Jena had known nothing about the main action that took place on that day; had forgotten all about two of his corps; did not issue orders to a third, and possibly a fourth; was taken by surprise by the action of a fifth; and, to cap it all, had one of his principal subordinates display the kind of disobedience that would have brought a lesser mortal before a firing squad.  Despite all these faults in command, Napoleon won what was probably the great single triumph in his career.{{sfn|Creveld|1985|p=96}}{{sfn|Barton|1921|pp=138–146}}{{sfn|Petre|1914|pp=170–173}}{{sfn|Gallaher|2018|pp=134–135}}}}
+
+==Influence==
+[[File:Paris pont iena.jpg|thumb|The [[Pont d'Iéna]] in [[Paris]] was built to commemorate the Battle of Jena.]]
+The battle proved most influential in demonstrating the need for reforms in what was a very much feudal Prussian state and army. Important Prussian reformers like [[Gerhard von Scharnhorst|Scharnhorst]], [[August von Gneisenau|Gneisenau]] and [[Carl von Clausewitz|Clausewitz]] served at the battle. Their reforms, together with civilian reforms instituted over the following years, began Prussia's transformation into a modern state. This modernized Prussia took the forefront in expelling France from Germany and eventually assumed a leading role on the continent. The reduction of Prussia to a French vassal, and the subsequent revolt that restored national honor, formed a key component of German nationalism.
+
+Napoleon built a [[Pont d'Iéna|bridge]] in [[Paris]] which he named after the battle. When he was defeated, the Prussian contingent of the allied forces of occupation was so incensed by its name that they wished to destroy the bridge. [[Charles Maurice de Talleyrand-Périgord|Talleyrand]] temporarily renamed the bridge after the French Grand Army, which dissuaded them from doing so. The [[Iéna station|station]] of the [[Paris Metro]] at the bridge has the same name.
+[[File:Cospeda Napoleonstr.jpg|thumb|Three signs of trails near Jena named after Napoleon and his marshals [[Jean Lannes]] and [[Charles-Pierre Augereau]]]]
+Near Jena, several hiking trails are named after Napoleon and some of his marshals. In the villages of Cospeda is a museum about the battle. To mark the 200th anniversary the battle was re-enacted on 14 October 2006 with 1,800 participants on a 600 by 800 meters enclosed area near the village of Cospeda. Annually in October, close to the historical date, commemorative events are organized by the association "Jena 1806 e. V.". This takes place on a grander scale every five years. The award winning short film "Into the Battle" by [[David Cebulla]] was produced during the 210th anniversary reenactment of the battle.<ref>{{cite web|access-date=2023-05-10|title=Dokumentation über 210. Jahrestag gewinnt Preis beim Fimfestival – Arbeitsgemeinschaft »Jena 1806« e.V.|url=http://www.jena1806.org/blog/dokumentation-ueber-210-jahrestag-gewinnt-preis-beim-fimfestival.html}}<!-- auto-translated by Module:CS1 translator --></ref><ref>{{cite web|access-date=2023-05-10|author=Donauwörther Zeitung|language=de|title=Bewegte Bilder, bewegende Bilder|date=12 May 2018 |url=https://www.augsburger-allgemeine.de/donauwoerth/DAFF-Festival-Bewegte-Bilder-bewegende-Bilder-id51093796.html}}<!-- auto-translated by Module:CS1 translator --></ref>
+
+==See also==
+* [[Military career of Napoleon Bonaparte]]
+
+==Explanatory notes==
+{{notelist}}
+
+==Notes==
+{{reflist|3}}
+
+==References==
+* {{cite book | last=Acton | first=Lord | year=1906 | title=The Cambridge Modern History | location=Cambridge | publisher=Cambridge University Press}}
+* {{cite book | last=Barton | first=D. Plunket |author-link=Dunbar Barton | year=1921 | title=Bernadotte and Napoleon: 1763–1810 | publisher=John Murray | location=London}}
+* {{cite book |last=Bauer |first=Gerhard |date=2009 |editor-last1=Lutz |editor-first1=Karl-Heinz |editor-last2=Salisch |editor-first2=Marcus von |title=Jena 1806. Vorgeschichte und Rezeption |publisher=Militärgeschichtliches Forschungsamt, Potsdam |pages=61–80 |chapter=Die Ikonographie des Sieges. 1806 in Malerei und Grafik des 19. und 20. Jahrhunderts | isbn=978-3-941571-01-3 | url=https://books.google.com/books?id=vfW-DwAAQBAJ | lang=de}}
+* {{cite book | last=Bodart | first=Gaston |author-link=Gaston Bodart | year=1908 | title=Militär-historisches Kriegs-Lexikon (1618–1905) | url=https://archive.org/details/bub_gb_A0kNAAAAYAAJ | url-access=registration | access-date=17 June 2021}}
+* {{Cite book | last=Chandler | first=David G. |author-link=David G. Chandler | year=1979 | title=Dictionary of the Napoleonic Wars | location=London | publisher= Arms and Armour Press | url=https://archive.org/details/dictionaryofnapo0000chan | isbn=0853683530 | access-date=8 July 2022}}
+* {{cite book | last=Chandler | first=D. | title=The Campaigns of Napoleon | publisher=Scribner | location=New York | year=1966 | isbn=978-0-02523-660-8 | url-access=registration | url=https://archive.org/details/campaignsofnapol00chan}}
+* {{cite book|last=Clodfelter|first=M.|title=Warfare and Armed Conflicts: A Statistical Encyclopedia of Casualty and Other Figures, 1492–2015|publisher=McFarland|location=Jefferson, North Carolina|year=2017|edition=4th|isbn=978-0-7864-7470-7}}
+* {{cite book | last=Connelly | first=Owen | year=2006 | title=Blundering to Glory: Napoleon's Military Campaigns | edition=3rd | location=Lanham, Maryland | publisher=[[Rowman & Littlefield]] | isbn=978-0-7425-5317-0}}
+* {{cite book | last=Creveld | first=van Martin | year=1985 | title=Command in War | publisher=Harvard University Press | location=Cambridge | isbn=0-674-14440-6}}
+* {{cite book | last=Dunn-Pattinson | first=R.P. | year=1909 | title=Napoleon's Marshals | location=London | publisher=Methuen & Co.}}
+* {{Cite book |last1=Fisher |first1=T. |title=The Napoleonic Wars: The Rise and Fall of an Empire |last2=Fremont-Barnes |first2=G. |publisher=Osprey |date=2004 |isbn=978-1-84176-831-1 |location=Oxford}}
+* {{cite book | last=Gallaher | first=John | year=2018 | title=The Iron Marshal: A Biography of Louis N. Davout | edition=3rd| location=Barnsley, England | publisher=Frontline | isbn=978-1-52673-832-5}}
+* {{Cite encyclopedia |last=Novitsky |first=Vasily |author-link=Vasily Fedorovich Novitsky |url=https://archive.org/details/bmk-brz-11/page/159 |encyclopedia=Военная энциклопедия |publisher=Типография Т-ва И. Д. Сытина |volume=11: Инкерман – Кальмар |location=Moscow |year=1913 |pages=159–162 |language=ru |title=Iена |trans-title=Jena |access-date=26 November 2025}}
+* {{Cite book |last=Orlov |first=Nikolay |author-link=Nikolay Alexeyevich Orlov |title=Очерк трёхнедельного похода Наполеона против Пруссии в 1806-м году |trans-title=An essay on Napoleon's three-week campaign against Prussia in 1806 |language=ru |location=[[Saint Petersburg]] |year=1856 |publisher=Типография Эдуарда Праца}}
+* {{cite book | last=Petre | first=F. Loraine | year=1914 | title=Napoleon's Conquest of Prussia 1806 | publisher=John Lane company | url=https://archive.org/details/napoleonsconque00petrgoog | url-access=registration | access-date=17 June 2021}}
+* {{cite book | last=Petre | first=F. Loraine | year=1907 | author-link=Francis Loraine Petre | title=Napoleon's Conquest of Prussia 1806 | location=London | publisher=Lionel Leventhal Ltd. | isbn=1-85367-145-2}}
+
+==Further reading==
+* {{cite book | ref=none | last=Barton | first=D. Plunket | year=1921 | title=Bernadotte and Napoleon: 1763–1810 | publisher=John Murray | location=London | url=https://archive.org/details/cu31924028418527 | url-access=registration | access-date=17 June 2021}}
+* {{cite journal | ref=none | last=Heyman | first=Neil M. | year=1966 | title=France against Prussia: The Jena Campaign of 1806 | issue=4 | url=https://www.jstor.org/stable/1985399 | journal=Military Affairs | volume=30 | pages=186–198| doi=10.2307/1985399 | jstor=1985399 | url-access=subscription }}
+* {{cite book | ref=none | last=Maude | first=F. N. | year=2007 | title=The Jena Campaign: 1806 – The Twin Battles of Jena & Auerstadt Between Napoleon's French and the Prussian Army}}
+* {{cite book | ref=none | last=Vache | first=Colonel | year=2009 | title=Napoleon and the Campaign of 1806: The Napoleonic Method of Organisation and Command to the Battles of Jena & Auerstadt}}
+
+==External links==
+*[http://www.napoleonguide.com/battle_jena.htm Napoleonic Guide]
+* Short film ''[https://youtube.com/watch?v=SuAeuasl_bY&feature=youtu.be Into the Battle]'' by [[David Cebulla]]
+*[http://www.dailymotion.com/relevance/search/chretzel/video/x6fpu7_1806engl_videogames Student documentary about the battle of Jena–Auerstedt (40 minutes)]
+*{{Cite NIE|wstitle=Auerstädt |year=1905 |short=x}}
+*{{Cite Americana|wstitle=Auerstadt |year=1920 |short=x}}
+*{{commons-inline}}
+
+{{Sequence
+| prev = [[Battle of Saalfeld]]
+| list = Napoleonic Wars
+| curr = Battle of Jena–Auerstedt
+| next = [[Capitulation of Erfurt]]
+}}
+<!--The addition enables mobile users to click at least the next battle or the previous one taken from the navbox "Napoleonic Wars" placed below but invisible in mobile view.-->
+{{Napoleonic Wars}}
+{{Authority control}}
+
+{{DEFAULTSORT:Jena-Auerstedt 1806}}
+[[Category:1806 conflicts]]
+[[Category:Battles of the War of the Fourth Coalition involving Prussia]]
+[[Category:Battles commanded by Napoleon]]
+[[Category:Battles of the Napoleonic Wars involving Saxony]]
+[[Category:Military history of Thuringia]]
+[[Category:1806 in Europe]]
+[[Category:October 1806]]
+[[Category:Battles inscribed on the Arc de Triomphe]]
+[[Category:Joachim Murat]]
+[[Category:Charles William Ferdinand, Duke of Brunswick]]
+[[Category:Frederick William III of Prussia]]
+[[Category:Jena]]
+[[Category:Weimarer Land]]

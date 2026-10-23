@@ -36,7 +36,8 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Final
 from urllib.parse import quote
@@ -62,6 +63,7 @@ from pipeline.extractors import (
     write_battle_isolated,
 )
 from pipeline.extractors.article import DEFAULT_MAX_PASSAGE_CHARS
+from pipeline.extractors.infobox import parse_article_infobox_parts
 from pipeline.extractors.outcome import (
     OUTCOME_LEAD_MAX_CHARS,
     OUTCOME_STAGE,
@@ -74,8 +76,10 @@ from pipeline.extractors.override_apply import (
     apply_extract_overrides,
     carries_override,
     outcome_override_slugs,
+    split_parts_by_slug,
 )
-from pipeline.extractors.store import reserve_battle_id
+from pipeline.extractors.split import SplitPart, child_slug
+from pipeline.extractors.store import reserve_battle_id, retire_battle
 from pipeline.llm import LLMService
 from pipeline.overrides import (
     OverrideEntry,
@@ -87,7 +91,14 @@ from pipeline.overrides import (
 )
 from pipeline.stages.base import StageContext, StageOutcome
 
-__all__ = ["RawBattle", "discover_battles", "extract_battle", "run"]
+__all__ = [
+    "RawBattle",
+    "SplitRetireError",
+    "discover_battles",
+    "extract_battle",
+    "extract_split_battle",
+    "run",
+]
 
 logger = structlog.get_logger()
 
@@ -529,6 +540,63 @@ def _wikidata_ref(path: Path, payload: dict[str, Any]) -> str:
     return str(path)
 
 
+def _structured_sources(
+    battle: RawBattle,
+) -> tuple[list[SourceExtraction], list[ExtractionFailure]]:
+    """Map a battle's Wikidata and DBpedia payloads.
+
+    Args:
+        battle: The battle's raw files.
+
+    Returns:
+        The mapped sources and a failure for each unreadable payload.
+    """
+    sources: list[SourceExtraction] = []
+    failures: list[ExtractionFailure] = []
+
+    if battle.wikidata_path is not None:
+        payload = _read_json(battle.wikidata_path)
+        if payload is None:
+            failures.append(
+                ExtractionFailure(
+                    battle_name=battle.name,
+                    source_ref=str(battle.wikidata_path),
+                    status="parse_error",
+                    error="wikidata payload unreadable or not a JSON object",
+                )
+            )
+        else:
+            mapped = map_entity(
+                payload,
+                source_ref=_wikidata_ref(battle.wikidata_path, payload),
+                fallback_name=battle.name,
+            )
+            if mapped is not None:
+                sources.append(mapped)
+
+    if battle.dbpedia_path is not None:
+        payload = _read_json(battle.dbpedia_path)
+        if payload is None:
+            failures.append(
+                ExtractionFailure(
+                    battle_name=battle.name,
+                    source_ref=str(battle.dbpedia_path),
+                    status="parse_error",
+                    error="dbpedia payload unreadable or not a JSON object",
+                )
+            )
+        else:
+            resource = map_resource(
+                payload,
+                source_ref=battle.dbpedia_ref,
+                fallback_name=battle.name,
+            )
+            if resource is not None:
+                sources.append(resource)
+
+    return sources, failures
+
+
 def extract_battle(
     battle: RawBattle,
     service: LLMService | None,
@@ -577,45 +645,9 @@ def extract_battle(
             if infobox is not None:
                 sources.append(infobox)
 
-    if battle.wikidata_path is not None:
-        payload = _read_json(battle.wikidata_path)
-        if payload is None:
-            failures.append(
-                ExtractionFailure(
-                    battle_name=battle.name,
-                    source_ref=str(battle.wikidata_path),
-                    status="parse_error",
-                    error="wikidata payload unreadable or not a JSON object",
-                )
-            )
-        else:
-            mapped = map_entity(
-                payload,
-                source_ref=_wikidata_ref(battle.wikidata_path, payload),
-                fallback_name=battle.name,
-            )
-            if mapped is not None:
-                sources.append(mapped)
-
-    if battle.dbpedia_path is not None:
-        payload = _read_json(battle.dbpedia_path)
-        if payload is None:
-            failures.append(
-                ExtractionFailure(
-                    battle_name=battle.name,
-                    source_ref=str(battle.dbpedia_path),
-                    status="parse_error",
-                    error="dbpedia payload unreadable or not a JSON object",
-                )
-            )
-        else:
-            resource = map_resource(
-                payload,
-                source_ref=battle.dbpedia_ref,
-                fallback_name=battle.name,
-            )
-            if resource is not None:
-                sources.append(resource)
+    structured, structured_failures = _structured_sources(battle)
+    sources.extend(structured)
+    failures.extend(structured_failures)
 
     llm_result = _llm_sources(
         battle,
@@ -641,6 +673,63 @@ def extract_battle(
         logger.debug("outcome_request_resolved", slug=battle.slug, status=status)
 
     return merged
+
+
+def extract_split_battle(battle: RawBattle, parts: Sequence[SplitPart]) -> list[BattleExtraction]:
+    """Extract an article that a ``battle_split`` override divides into battles.
+
+    Each part becomes its own record, keyed ``<parent slug>#<part key>``. The
+    infobox is read once per part (see ``pipeline.extractors.split`` for how
+    its lines are routed), and the Wikidata and DBpedia sources contribute
+    only their article-level facts: the parent's Q-id is dropped, because it
+    names the combined engagement, not either part.
+
+    The LLM body pass is not run. Its output would describe the whole article
+    and be attached to every part, which is the conflation the split removes,
+    and a passage request per part would be a prompt this pipeline has no
+    answers for. The outcome request is skipped for the same reason; the
+    infobox result is inherited by each part, and an ``outcome`` override on a
+    child slug replaces it.
+
+    Args:
+        battle: The parent article's raw files.
+        parts: The battles the article is split into.
+
+    Returns:
+        One merged record per part, in the parts' order.
+    """
+    infobox_parts: dict[str, SourceExtraction] = {}
+    raw = _read_text(battle.article_path) if battle.article_path is not None else None
+    if raw:
+        found = parse_article_infobox_parts(
+            raw,
+            is_html=battle.article_is_html,
+            parts=parts,
+            source_ref=battle.article_ref,
+            source_title=battle.name,
+        )
+        infobox_parts = found or {}
+    if not infobox_parts:
+        logger.warning("extract_split_without_infobox", slug=battle.slug)
+
+    shared, failures = _structured_sources(battle)
+    children: list[BattleExtraction] = []
+    for part in parts:
+        sources = [infobox_parts[part.key]] if part.key in infobox_parts else []
+        sources.extend(
+            replace(src, facts=replace(src.facts, name=part.name, wikidata_id=None))
+            for src in shared
+        )
+        merged = merge_battle(
+            child_slug(battle.slug, part), sources, failures=failures, fallback_name=part.name
+        )
+        merged.name = part.name
+        merged.notes.append(
+            f"battle_split: '{part.heading}' part of {battle.slug}; infobox lines naming no part, "
+            "and the article body, are not attributed to it"
+        )
+        children.append(merged)
+    return children
 
 
 def _article_lead(battle: RawBattle, max_chars: int) -> str:
@@ -843,7 +932,46 @@ def _attach_outcome_provenance(
             side.outcome_source_id = source
 
 
-def _write_battles(conn: Any, merged: list[BattleExtraction]) -> None:
+class SplitRetireError(RuntimeError):
+    """A split article's parent row could not be removed."""
+
+
+def _retire_split_parents(conn: Any, slugs: Sequence[str], counts: ExtractWriteCounts) -> None:
+    """Remove the parent rows of split articles an earlier run may have written.
+
+    Args:
+        conn: An open database connection.
+        slugs: The split articles' parent slugs.
+        counts: Counters to accumulate into.
+
+    Raises:
+        SplitRetireError: When any parent could not be removed. Nothing has
+            been written by then, so the stage fails before a child can sit
+            beside its complete parent.
+    """
+    failed: list[str] = []
+    for slug in slugs:
+        try:
+            with conn.begin_nested():
+                retire_battle(conn, slug, counts)
+        except Exception as exc:
+            logger.error(
+                "extract_retire_failed",
+                slug=slug,
+                error=str(exc)[:300],
+                error_type=type(exc).__name__,
+            )
+            failed.append(slug)
+    if failed:
+        raise SplitRetireError(
+            f"could not retire the parent row of split article(s) {', '.join(failed)}; "
+            "writing the children beside it would count the engagement twice"
+        )
+
+
+def _write_battles(
+    conn: Any, merged: list[BattleExtraction], retired_slugs: Sequence[str] = ()
+) -> None:
     """Write every merged battle, each inside its own savepoint.
 
     Records carrying an applied override go last (stable otherwise). Two
@@ -854,9 +982,12 @@ def _write_battles(conn: Any, merged: list[BattleExtraction]) -> None:
     Args:
         conn: An open database connection.
         merged: This run's battles, after the overrides were applied.
+        retired_slugs: Parent slugs of articles split into parts this run;
+            their rows are removed before the parts are written.
     """
     counts = ExtractWriteCounts()
     cache: dict[tuple[str, str], int] = {}
+    _retire_split_parents(conn, retired_slugs, counts)
     for record in sorted(merged, key=carries_override):
         # A row that will not go in is a data problem, not a reason to
         # lose the rest of the run's writes; each battle has a savepoint.
@@ -903,6 +1034,8 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
         clear_report("extract", processed_root)
     override_entries = overrides.for_stage("extract")
     outcome_overridden_slugs = outcome_override_slugs(override_entries)
+    split_parts = split_parts_by_slug(override_entries)
+    retired_slugs: list[str] = []
 
     discovered = discover_battles(raw_root)
     output_suffix = ""
@@ -941,6 +1074,24 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
             batch_size=batch_size,
         )
         for battle in batch:
+            parts = split_parts.get(battle.slug.strip().casefold())
+            if parts is not None:
+                try:
+                    children = extract_split_battle(battle, parts)
+                except Exception as exc:
+                    logger.error(
+                        "extract_battle_failed",
+                        slug=battle.slug,
+                        error=str(exc),
+                        error_type=type(exc).__name__,
+                    )
+                    continue
+                # Retire the parent only once its children exist: a failed split
+                # must leave the parent row alone, and the unmatched battle_split
+                # entry then fails the overrides_applied gate.
+                merged.extend(children)
+                retired_slugs.append(battle.slug)
+                continue
             battle_id = (
                 reserve_battle_id(ctx.db_conn, battle.slug, battle.name) if reserve_ids else None
             )
@@ -976,7 +1127,7 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
 
     if ctx.db_conn is not None and not ctx.dry_run:
         _attach_outcome_provenance(ctx.db_conn, merged, outcome_entries)
-        _write_battles(ctx.db_conn, merged)
+        _write_battles(ctx.db_conn, merged, retired_slugs)
     else:
         logger.info("extract_database_write_skipped", dry_run=ctx.dry_run)
 
