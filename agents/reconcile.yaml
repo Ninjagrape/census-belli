@@ -311,6 +311,51 @@ quality_checks:
       force ratios. Kept apart from model_convergence, which reads the
       published fits only.
 
+  - name: troop_span_guard
+    check: >
+      SELECT COALESCE((
+        SELECT (latest.diagnostics -> 'troop_span_guard' ->> 'n_errors')::int
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 0)
+    threshold: "= 0"
+    severity: error
+    description: >
+      No side keeps point totals that differ by more than a factor of e squared
+      (7.4) after the load filters, supersede included. That much disagreement
+      is a scope or unit mix-up, not source noise. The offending sides (battle
+      slug, side label, min, max) are listed in the newest run's diagnostics
+      under troop_span_guard -> sides. A side with a troop_strength override is
+      exempt: a curator settled its figure. Bounds are the load constants
+      SPAN_WARN_LOG_RATIO and SPAN_ERROR_LOG_RATIO, or params troop_span_warn_log
+      and troop_span_error_log.
+
+  - name: troop_span_warnings
+    check: >
+      SELECT COALESCE((
+        SELECT (latest.diagnostics -> 'troop_span_guard' ->> 'n_warnings')::int
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 0)
+    threshold: "= 0"
+    severity: warning
+    description: >
+      Sides whose kept point totals differ by more than a factor of e (2.7) but
+      less than e squared. Listed in the newest run's diagnostics under
+      troop_span_guard -> sides, with the errors.
+
   - name: sides_low_precision
     check: >
       SELECT COALESCE((

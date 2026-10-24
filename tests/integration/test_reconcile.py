@@ -474,7 +474,7 @@ def test_every_quality_check_in_the_reconcile_spec_executes(
     del reconciled
     raw = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))
     checks = raw["quality_checks"]
-    assert len(checks) == 26
+    assert len(checks) == 28
 
     runner = QualityRunner(conn)
     results = runner.run_all(checks)

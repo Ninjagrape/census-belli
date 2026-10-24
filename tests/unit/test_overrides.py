@@ -87,6 +87,12 @@ def _all_kinds() -> list[dict[str, Any]]:
                 {"key": "main", "name": "Battle of the Moskva", "heading": "Main"},
             ],
         ),
+        {
+            **_entry(
+                9, "troop_strength", {"battle": "borodino", "side": "French"}, {"point": 130_000}
+            ),
+            "scope": "deployed",
+        },
     ]
 
 
@@ -119,13 +125,14 @@ def test_enums_match_schema() -> None:
 def test_full_valid_file_covers_every_kind(tmp_path: Path) -> None:
     loaded = load_overrides(_write(tmp_path, _all_kinds()))
 
-    assert len(loaded) == 8
+    assert len(loaded) == 9
     assert {e.kind for e in loaded.entries} == {k for ks in KINDS_BY_STAGE.values() for k in ks}
     assert [e.kind for e in loaded.for_stage("extract")] == [
         "outcome",
         "battle_date",
         "side_polity",
         "battle_split",
+        "troop_strength",
     ]
     assert [e.id for e in loaded.of_kind("attribution")] == ["ov-0007"]
     assert loaded.for_stage("nothing") == []
@@ -344,10 +351,11 @@ def test_overrides_path_prefers_the_spec_param(tmp_path: Path) -> None:
 def test_report_shape_lists_every_kind_even_at_zero(tmp_path: Path) -> None:
     loaded = load_overrides(_write(tmp_path, _all_kinds()))
     report = OverrideReport("extract", loaded)
-    outcome, battle_date, side_polity, split = loaded.for_stage("extract")
+    outcome, battle_date, side_polity, split, strength = loaded.for_stage("extract")
     report.applied(outcome)
     report.applied(battle_date)
     report.applied(split)
+    report.applied(strength)
     report.unmatched(side_polity, "no such side")
 
     path = report.write(tmp_path / "out")
@@ -356,14 +364,15 @@ def test_report_shape_lists_every_kind_even_at_zero(tmp_path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["stage"] == "extract"
     assert payload["file"] == str(loaded.path)
-    assert payload["entries"] == 4
+    assert payload["entries"] == 5
     assert payload["applied"] == {
         "outcome": 1,
         "battle_date": 1,
         "side_polity": 0,
         "battle_split": 1,
+        "troop_strength": 1,
     }
-    assert payload["entry_ids"] == ["ov-0001", "ov-0002", "ov-0003", "ov-0008"]
+    assert payload["entry_ids"] == ["ov-0001", "ov-0002", "ov-0003", "ov-0008", "ov-0009"]
     assert payload["file_sha256"] == file_sha256(loaded.path)
     assert payload["unmatched"] == [
         {"id": "ov-0003", "kind": "side_polity", "reason": "no such side"}

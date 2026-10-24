@@ -17,9 +17,9 @@ what makes the anchor decision below load-bearing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 from pipeline.extractors.records import BRANCHES, CASUALTY_TYPES, SCOPES
 
@@ -242,6 +242,11 @@ class ReconcileCounts:
     sources_updated: int = 0
     lineages: int = 0
     regime_unlabelled: int = 0
+    troop_span_warnings: int = 0
+    troop_span_errors: int = 0
+    # One dict per flagged side (battle, side, severity, min, max, log_span),
+    # for the stage's span-guard diagnostics. Not a counter, so not in as_dict.
+    span_findings: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, int]:
         """Render the counts for a structlog call.
@@ -273,6 +278,8 @@ class ReconcileCounts:
             "sources_updated": self.sources_updated,
             "lineages": self.lineages,
             "regime_unlabelled": self.regime_unlabelled,
+            "troop_span_warnings": self.troop_span_warnings,
+            "troop_span_errors": self.troop_span_errors,
         }
 
 

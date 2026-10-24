@@ -104,6 +104,8 @@ from pipeline.reconcilers.design import (
 )
 from pipeline.reconcilers.load import (
     DEFAULT_MIN_PLAUSIBLE_TROOPS,
+    SPAN_ERROR_LOG_RATIO,
+    SPAN_WARN_LOG_RATIO,
     classify_sides,
     load_reports,
     write_unfillable,
@@ -605,6 +607,25 @@ def _fit_quantity(
     return summary.diagnostics, neutral_diagnostics
 
 
+def _span_guard_diagnostics(counts: ReconcileCounts) -> dict[str, Any]:
+    """Build the span guard's block for the run's diagnostics.
+
+    The ``troop_span_guard`` and ``troop_span_warnings`` checks read the counts;
+    the side list is for whoever opens the failing check.
+
+    Args:
+        counts: The run's counters, after ``load_reports``.
+
+    Returns:
+        Warning and error counts and one entry per flagged side.
+    """
+    return {
+        "n_warnings": counts.troop_span_warnings,
+        "n_errors": counts.troop_span_errors,
+        "sides": list(counts.span_findings),
+    }
+
+
 def _run_body(
     conn: Any,
     *,
@@ -640,6 +661,8 @@ def _run_body(
         ancient_cutoff_year=ancient_cutoff_year,
         counts=counts,
         min_plausible_troops=min_plausible_troops,
+        span_warn_log=float(params.get("troop_span_warn_log", SPAN_WARN_LOG_RATIO)),
+        span_error_log=float(params.get("troop_span_error_log", SPAN_ERROR_LOG_RATIO)),
     )
 
     # Unfillable sides are a fact about the loaded reports, not about
@@ -724,6 +747,7 @@ def _run_body(
             "worst": _combined_worst(per_quantity_diagnostics),
             **per_quantity_diagnostics,
             **neutral_blocks,
+            "troop_span_guard": _span_guard_diagnostics(counts),
         }
         store.complete_model_run(conn, run_id, diagnostics)
         if owns_connection:
