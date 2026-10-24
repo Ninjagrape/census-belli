@@ -22,6 +22,7 @@ __all__ = [
     "imputed_ratio_plausible",
     "imputed_values_plausible",
     "kept_pair_ratio_slope",
+    "require_pair_reference",
     "kept_side_slope",
     "run_gates",
 ]
@@ -261,6 +262,38 @@ def distributional_check(
 def _skipped(name: str, threshold: str, reason: str) -> GateResult:
     """A recovery gate that cannot be judged: passes, and says why."""
     return GateResult(name, True, "error", f"skipped: {reason}", threshold)
+
+
+def require_pair_reference(
+    gates: list[GateResult], reference: float | None, *, reconcile_run_id: int | None
+) -> list[GateResult]:
+    """Fail the kept-pair gate when reconcile recorded no within-battle slope.
+
+    Falling back to the fixed floor would hold impute to a standard reconcile's
+    calibrated fit does not meet, so a missing reference is an error to fix upstream.
+
+    Args:
+        gates: The gate results from :func:`run_gates`.
+        reference: Reconcile's within-battle slope, or None when none was recorded.
+        reconcile_run_id: The reconcile run behind the likelihood, for the message.
+
+    Returns:
+        ``gates`` unchanged when a reference exists, else a copy whose
+        ``kept_pair_ratio_slope`` verdict is a failure.
+    """
+    if reference is not None:
+        return gates
+    failed = GateResult(
+        name="kept_pair_ratio_slope",
+        passed=False,
+        severity="error",
+        actual="no reference slope",
+        threshold="within tolerance of reconcile's within_battle_slope",
+        message=f"reconcile run {reconcile_run_id} has no within_battle_slope; re-run reconcile",
+    )
+    return [failed if g.name == failed.name else g for g in gates] + (
+        [] if any(g.name == failed.name for g in gates) else [failed]
+    )
 
 
 def kept_pair_ratio_slope(

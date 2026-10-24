@@ -267,6 +267,7 @@ if TYPE_CHECKING:  # pragma: no cover - for type checking only
     import pymc as pm
 
 __all__ = [
+    "PINNED_BIAS_SOURCE_TYPE",
     "DEFAULT_PRIORS_PATH",
     "InflationPrior",
     "ModelPriors",
@@ -287,6 +288,10 @@ DEFAULT_PRIORS_PATH: Final[Path] = Path("config/inflation_priors.yaml")
 # documented case, and for an ancient battle with no independent anchor the
 # prior is the estimate. Running without the fitted file is a fallback and the
 # loader says so at warning level.
+# Hand-entered figures (troop_strength overrides) supersede every other total on
+# their side, so this type never co-reports and its bias is not identified.
+# Pinned to exactly zero rather than left to the prior; keeps the modern noise.
+PINNED_BIAS_SOURCE_TYPE: Final[str] = "manual_entry"
 _FALLBACK_MU: Final[float] = 1.15
 _FALLBACK_SD: Final[float] = 0.90
 
@@ -679,7 +684,7 @@ def build_model(
         # section of the module docstring). With none, there is no u_source and
         # no tau_u: a zero-size or all-zero deviation would leave tau_u
         # sampling its prior and report clean convergence on nothing.
-        b_type = pm.ZeroSumNormal("b_type", sigma=priors.bias_prior_sd, dims="source_type")
+        b_type = _source_type_biases(pm, pt, design, priors)
         beta = b_type[source_type_of_key]
         deviation_groups = _deviation_groups(design, source_type_of_key)
         n_deviating_keys = sum(group.keys.size for group in deviation_groups)
@@ -977,6 +982,37 @@ def _source_type_of_key(design: Design) -> np.ndarray:
     return np.array([lookup[key.source_type] for key in design.source_keys], dtype=int)
 
 
+def _source_type_biases(pm_module: Any, pt_module: Any, design: Design, priors: ModelPriors) -> Any:
+    """The per-source-type bias vector, with the pinned type held at exactly zero.
+
+    Without the pinned type this is the plain zero-sum ``b_type``. With it, the
+    free zero-sum vector runs over the other types (``b_type_free``) and a fixed
+    zero is spliced in at the pinned type's position, as the undated era bin is.
+
+    Args:
+        pm_module: The imported pymc module.
+        pt_module: The imported pytensor.tensor module.
+        design: The design, whose ``source_types`` fix the order.
+        priors: Hierarchy scales.
+
+    Returns:
+        A vector over the ``source_type`` dimension, named ``b_type``.
+    """
+    if PINNED_BIAS_SOURCE_TYPE not in design.source_types:
+        return pm_module.ZeroSumNormal("b_type", sigma=priors.bias_prior_sd, dims="source_type")
+    position = design.source_types.index(PINNED_BIAS_SOURCE_TYPE)
+    free_types = [t for t in design.source_types if t != PINNED_BIAS_SOURCE_TYPE]
+    if not free_types:
+        return pm_module.Deterministic("b_type", pt_module.zeros(1), dims="source_type")
+    free = pm_module.ZeroSumNormal(
+        "b_type_free",
+        sigma=priors.bias_prior_sd,
+        shape=len(free_types),
+    )
+    full = pt_module.concatenate([free[:position], pt_module.zeros(1), free[position:]])
+    return pm_module.Deterministic("b_type", full, dims="source_type")
+
+
 class DeviationGroup(NamedTuple):
     """One source type's keys that carry a within-type deviation.
 
@@ -1015,6 +1051,8 @@ def _deviation_groups(design: Design, source_type_of_key: np.ndarray) -> list[De
     """
     groups: list[DeviationGroup] = []
     for type_index, type_name in enumerate(design.source_types):
+        if type_name == PINNED_BIAS_SOURCE_TYPE:
+            continue
         in_type = source_type_of_key == type_index
         own = np.flatnonzero(in_type & design.source_has_own_effect)
         if own.size == 0:

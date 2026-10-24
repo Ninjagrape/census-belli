@@ -66,6 +66,7 @@ from pipeline.reconcilers.design import ERA_BIN_LABELS, Design
 from pipeline.reconcilers.model import (
     _LEVEL_PRIOR_SD,
     _UNLABELLED_WEIGHT,
+    PINNED_BIAS_SOURCE_TYPE,
     InflationPrior,
     ModelPriors,
     _ratio_level_mask,
@@ -1584,7 +1585,7 @@ def _contraction(
 
     b_type_samples = _pooled(idata, "b_type")
     type_labels = _coord_labels(idata, "source_type")
-    n_types = len(type_labels)
+    n_types = len([t for t in type_labels if t != PINNED_BIAS_SOURCE_TYPE])
     # A ZeroSumNormal's n entries are exchangeable by construction, so every
     # entry shares one marginal prior sd: sigma * sqrt((n-1)/n). At n=1 the
     # single entry is forced to exactly zero and has no prior spread to
@@ -1594,7 +1595,9 @@ def _contraction(
         priors.bias_prior_sd * math.sqrt((n_types - 1) / n_types) if n_types > 1 else 0.0
     )
     b_type: dict[str, float | None] = {
-        type_name: _contraction_value(float(np.std(b_type_samples[:, i])), prior_marginal_sd)
+        type_name: None
+        if type_name == PINNED_BIAS_SOURCE_TYPE
+        else _contraction_value(float(np.std(b_type_samples[:, i])), prior_marginal_sd)
         for i, type_name in enumerate(type_labels)
     }
 

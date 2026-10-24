@@ -107,7 +107,6 @@ params:
   era_effect_prior_sd: 1.0
   battle_effect_prior_sd: 1.0         # s_b ~ HalfNormal
   side_deviation_prior_sd: 0.5        # s_d ~ HalfNormal
-  side_prior_nu: 4.0                  # Student-t df of the per-battle effect
   # Under `contaminated` point rows are a two-component Normal mixture (faithful
   # noise plus a wide component, keys below). Kept as an ablation: on the real
   # corpus pi_contam came back at 0.02, so it was not the cause of the collapse.
@@ -233,9 +232,10 @@ params:
   bound_excess_prior_sd: 0.5
 
   # ── latent side-strength prior ────────────────────────────────────────────
-  # Deliberately not era-structured: era and polity priors belong to the
-  # impute stage, and duplicating them here would double-count the same
-  # information in two places in the pipeline.
+  # Troops are era-structured (P1): the side prior carries era means, a shared
+  # battle effect and a side deviation (era_effect_prior_sd and friends above).
+  # The keys below are the casualty side prior; side_prior_nu is shared, and also
+  # the df of the per-battle effect for troops.
   side_prior_mu: 9.2                  # log troops; e^9.2 ~ 10,000
   side_prior_mu_sd: 1.0
   side_prior_sd_scale: 1.5

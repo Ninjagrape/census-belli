@@ -150,7 +150,8 @@ _INSERT_RECONCILE_RUN = text(
     INSERT INTO model_runs (run_id, run_name, model_type, config, started_at, completed_at,
                             diagnostics)
     VALUES (:run_id, 'fake reconcile', 'source_disagreement', '{}'::jsonb, now(), now(),
-            '{"troops_neutral": {"written": true}}'::jsonb)
+            '{"troops_neutral": {"written": true,
+                                "recovery": {"within_battle_slope": 0.9}}}'::jsonb)
     """
 )
 

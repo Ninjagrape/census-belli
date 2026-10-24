@@ -45,7 +45,7 @@ import structlog
 from pipeline.db import get_connection
 from pipeline.imputers.conditional import RoundSet, draw_rounds, extract_posterior
 from pipeline.imputers.design import ImputeDesign, build_design
-from pipeline.imputers.gates import GateResult, run_gates
+from pipeline.imputers.gates import GateResult, require_pair_reference, run_gates
 from pipeline.imputers.likelihood import (
     LikelihoodStats,
     NeutralDraws,
@@ -308,7 +308,11 @@ def _fit_and_write(
     reference_slope = run_store.reconcile_within_battle_slope(
         conn, reconcile_run_id, neutral=ip.scale == "neutral"
     )
-    gates = _gates(ip, design, rounds, reference_slope)
+    gates = require_pair_reference(
+        _gates(ip, design, rounds, reference_slope),
+        reference_slope,
+        reconcile_run_id=reconcile_run_id,
+    )
     kept_side_ids = [int(side_id) for side_id in design.side_ids[design.observed_rows]]
     write_rounds(
         root,
@@ -364,7 +368,8 @@ def _gates(
         design: The impute design.
         rounds: The imputed rounds.
         reference_pair_slope: Reconcile's within-battle slope on this scale, which the
-            kept-pair slope is held to; None falls back to ``min_pair_slope``.
+            kept-pair slope is held to; None leaves the gate on ``min_pair_slope``
+            (the caller fails it; see ``require_pair_reference``).
 
     Returns:
         The gate results.
