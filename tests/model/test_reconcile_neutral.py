@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 
 from pipeline.reconcilers.design import build_design
 from pipeline.reconcilers.model import (
@@ -39,8 +41,15 @@ pytestmark = pytest.mark.model
 SEED = 20261006
 PERSIAN, MACEDONIAN = 1, 2
 CUTOFF = 500
+AGENTS = Path(__file__).resolve().parents[2] / "agents"
 SAMPLER = SamplerSettings(
-    draws=1500, tune=1000, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+    draws=1500,
+    tune=1000,
+    chains=4,
+    cores=1,
+    random_seed=SEED,
+    nuts_sampler="nutpie",
+    target_accept=0.99,
 )
 
 _INFOBOX = SourceKey("wikipedia_infobox", "https://example.org/infobox")
@@ -142,7 +151,8 @@ def _fit_pair(
     from pipeline.reconcilers.summarise import _convergence
 
     design = build_design(reports, quantity="troops", ancient_cutoff_year=CUTOFF)
-    priors = ModelPriors.from_params({}, quantity="troops")
+    params = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))["params"]
+    priors = ModelPriors.from_params(params, quantity="troops")
     published = sample(build_model(design, priors=priors, inflation=inflation), SAMPLER)
     if not fit_neutral:
         return RatioPair(_log_ratio(published, design), math.nan, design.n_obs, {})
@@ -216,31 +226,33 @@ def both_unlabelled(inflation: InflationPrior) -> RatioPair:
     return _fit_pair(_both_unlabelled(), inflation)
 
 
-def test_neutral_fit_matches_the_relabelled_published_fit_plus_faithful_mu(
+def test_neutral_fit_sits_between_the_relabelled_published_fit_and_the_faithful_shift(
     gaugamela: RatioPair, gaugamela_relabelled: RatioPair
 ) -> None:
     # Reading an unlabelled figure as an ordinary modern count is the published
-    # fit with that figure relabelled modern_scholarly, except that the neutral
-    # prior puts the unlabelled offset at faithful_mu rather than at zero, so
-    # the Macedonian side sits that much lower and the ratio that much higher.
-    expected = gaugamela_relabelled.published + FAITHFUL_MU
-    # Measured: neutral 0.838 against 0.865, a gap of 0.027. With the noise prior
-    # at InverseGamma(3, 2) the gap was 0.060: that prior's strength, not the
-    # S3/S4/N1 changes (this fixture's 4 keys are each in their own type, so
-    # none of those touch it), drove the shrinkage of two-report sides and so
-    # the difference between the two fits. Mode-preserving IG(3, 4/3) restores
-    # it. The fits are separate 16-side samples, so the tolerance carries that
-    # spread.
-    assert abs(gaugamela.neutral - expected) < 0.06, (gaugamela.neutral, expected)
+    # fit with that figure relabelled modern_scholarly. Before P1 the neutral fit
+    # equalled that plus faithful_mu to within 0.06, because the unlabelled offset
+    # was prior-only: the neutral prior put it at faithful_mu instead of zero and
+    # the Macedonian side sat that much lower. Under P1 the two sides of a battle
+    # share a battle effect and differ only by s_d, so the Persian side's labelled
+    # rows inform the Macedonian offset and the data pull it back from faithful_mu
+    # (measured: neutral offset 0.025 against a prior mean of 0.129, neutral 0.715
+    # against relabelled 0.685). The ratio therefore lies between the relabelled
+    # fit (no shift) and the full faithful shift, with the old tolerance as slack.
+    shift = gaugamela.neutral - gaugamela_relabelled.published
+    assert -0.06 <= shift <= FAITHFUL_MU + 0.06, (gaugamela.neutral, gaugamela_relabelled.published)
 
 
-def test_gaugamela_published_ratio_is_tilted_above_the_neutral_one(
+def test_gaugamela_published_ratio_is_no_longer_tilted_by_the_unlabelled_prior(
     gaugamela: RatioPair,
 ) -> None:
-    # The published fit leans on the unlabelled offset and reads the Macedonian
-    # side as smaller than its figures, so its ratio is clearly the larger.
-    # Measured: 1.115 against 0.843.
-    assert gaugamela.published - gaugamela.neutral > 0.2, (
+    # Before P1 the published fit leaned on the unlabelled offset's prior mean and
+    # read the Macedonian side as smaller than its figures, so its ratio was the
+    # larger by 0.27 (1.115 against 0.843). The shared battle effect now lets the
+    # data learn that offset (published g_unlabelled -0.21 against a prior mean
+    # near +0.6), so the published ratio is no longer the larger; it sits 0.17
+    # below the neutral one. The check is that the old tilt is gone, in either direction.
+    assert abs(gaugamela.published - gaugamela.neutral) < 0.25, (
         gaugamela.published,
         gaugamela.neutral,
     )

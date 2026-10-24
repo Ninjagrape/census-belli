@@ -83,6 +83,7 @@ class ImputeParams:
     ks_alpha: float = 0.01
     ks_min_n: int = 5
     min_pair_slope: float = 0.8
+    pair_slope_tolerance: float = 0.1
     min_side_slope: float = 0.9
     slope_gate_min_n: int = 10
     model_type: str = "imputation"
@@ -139,6 +140,7 @@ class ImputeParams:
             ks_alpha=float(params.get("ks_alpha", d.ks_alpha)),
             ks_min_n=int(params.get("ks_min_n", d.ks_min_n)),
             min_pair_slope=float(params.get("min_pair_slope", d.min_pair_slope)),
+            pair_slope_tolerance=float(params.get("pair_slope_tolerance", d.pair_slope_tolerance)),
             min_side_slope=float(params.get("min_side_slope", d.min_side_slope)),
             slope_gate_min_n=int(params.get("slope_gate_min_n", d.slope_gate_min_n)),
             model_type=str(params.get("model_type", d.model_type)),

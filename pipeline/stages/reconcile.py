@@ -116,6 +116,7 @@ from pipeline.reconcilers.model import (
     SamplerSettings,
     build_model,
     load_inflation_prior,
+    noise_prior_medians,
     sample,
 )
 from pipeline.reconcilers.neutral import summarise_neutral, write_neutral_draws
@@ -429,6 +430,8 @@ def _fit_neutral_troops(
         year_of_side={r.side_id: r.year_astronomical for r in reports if r.quantity == "troops"},
         recovery=RecoverySettings.from_params(params),
         ancient_cutoff_year=ancient_cutoff_year,
+        noise_medians=noise_prior_medians(priors, inflation),
+        battle_nu=priors.side_prior_nu,
     )
     summary.diagnostics["prior_predictive_neutral"] = prior_predictive
     worst = summary.diagnostics["worst"]

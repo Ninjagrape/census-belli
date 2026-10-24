@@ -40,7 +40,13 @@ YEAR_WEIGHTS = (0.15, 0.10, 0.15, 0.30, 0.30)
 N_BATTLES = 110
 AGENTS = Path(__file__).resolve().parents[2] / "agents"
 SAMPLER = SamplerSettings(
-    draws=1500, tune=1500, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+    draws=1500,
+    tune=1500,
+    chains=4,
+    cores=1,
+    target_accept=0.97,
+    random_seed=SEED,
+    nuts_sampler="nutpie",
 )
 
 
@@ -162,3 +168,54 @@ def test_a_troop_fit_has_no_dispersion_terms_and_records_the_side_prior(fit: Fit
 
     assert {"e", "s_b", "s_d", "tau_e", "zb", "zd", "mu_side"} <= names
     assert not {"s0", "z_side", "sigma_round", "sigma_estimate"} & names
+
+
+def test_the_recorded_singleton_slope_matches_an_independent_computation(
+    fit: Fit, reports: list[Report]
+) -> None:
+    counts: dict[int, int] = {}
+    for r in reports:
+        counts[r.side_id] = counts.get(r.side_id, 0) + 1
+    singles = [s for s, n in counts.items() if n == 1]
+    estimates = {e.side_id: e for e in fit.summary.side_estimates}
+    by_side = {r.side_id: math.log(r.reported_value) for r in reports}
+    x = np.array([by_side[s] for s in singles])
+    y = np.array([math.log(estimates[s].value) for s in singles])
+    slope = float(np.polyfit(x, y, 1)[0])
+
+    recovery = fit.summary.diagnostics["recovery"]
+    assert slope >= 0.85, slope
+    assert recovery["singleton_slope"] == pytest.approx(slope, abs=0.02)
+    assert recovery["gate_singleton_slope"] == pytest.approx(slope, abs=0.02)
+
+
+def test_the_posterior_noise_stays_near_the_generating_value(fit: Fit) -> None:
+    diagnostics = fit.summary.diagnostics
+    modern = diagnostics["sigma_type"]
+    ancient = diagnostics["sigma_type_ancient"]
+
+    assert all(0.10 < v < 0.40 for v in modern.values() if v is not None), modern
+    assert all(0.20 < v < 0.65 for v in ancient.values() if v is not None), ancient
+    assert diagnostics["nu"] is None  # troops are Normal since P1
+
+
+def test_the_gates_that_read_the_recovery_block_pass_on_a_recovered_fit(fit: Fit) -> None:
+    recovery = fit.summary.diagnostics["recovery"]
+
+    assert recovery["gate_singleton_slope"] >= 0.85
+    assert recovery["gate_spread_ratio"] >= 0.85
+    assert recovery["gate_within_battle_slope"] >= 0.5
+    assert recovery["gate_ppc_tail_p"] >= 0.05
+    assert recovery["gate_s_d_median"] >= 0.25
+    assert recovery["gate_noise_ratio"] <= 1.5
+
+
+def test_the_battle_effect_scale_mixes(fit: Fit) -> None:
+    import arviz as az
+
+    rhat = float(az.rhat(fit.idata, var_names=["s_b"])["s_b"].values)
+    ess = float(az.ess(fit.idata, var_names=["s_b"], method="bulk")["s_b"].values)
+    print(f"s_b rhat={rhat:.4f} ess_bulk={ess:.0f}")
+
+    assert rhat < 1.02, rhat
+    assert ess > 400, ess

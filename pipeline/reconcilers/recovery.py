@@ -25,10 +25,28 @@ ratios do not: read those on the published fit).
   intercept would depend on that choice. Sides are ordered by side id.
 - **Ratio** of a group: the geometric mean of ``estimate / report`` over its
   sides.
-- **Between-battle variance check**: the second moment of the reported log ratio
-  across those battles, against its posterior predictive distribution under the
-  fitted noise (a Student-t when the fit has ``nu``). A fit whose noise is
-  larger than the corpus can bear predicts a spread the reports do not show.
+- **Between-battle variance check** (:func:`between_battle_ppc`, the replicate
+  around the fitted ``mu_side``): superseded for the gate by the mixed predictive.
+- **Mixed-predictive check** (:func:`mixed_predictive_ppc`): the second moment of
+  the reported log ratio across those battles, against its distribution when each
+  posterior draw's *side deviations are redrawn* (a new ``zb`` per battle, a new
+  ``zd`` per side, at that draw's ``s_b``, ``s_d``, ``e`` and ``m0``), the fitted
+  offsets (regime, scope, source bias) are kept and fresh observation noise is
+  drawn at that draw's sigmas. Replicating around the fitted ``mu_side`` cannot pass
+  for any non-zero noise, because ``mu_side`` already holds the reports' own spread.
+  The tail probability is two-sided: ``min(1, 2 * min(P(rep >= obs), P(rep <= obs)))``.
+- **Model-implied reliability** of a reported ratio: ``(V - 2 * sigma_eff**2) / V``,
+  with ``V`` the second moment of the observed within-battle reported log ratio and
+  ``sigma_eff**2`` half the posterior-mean noise variance of that ratio. The noise
+  variance of one battle's ratio is, per posterior draw, the mean row variance of
+  side A over its point-row count plus the same for side B (times ``nu / (nu - 2)``
+  under a Student-t fit); ``sigma_eff**2`` averages it over battles and draws and
+  halves it, so it is the per-report noise variance of a side that has one row.
+  The within-battle slope ``wb`` should sit within 0.1 of it: it is what a
+  calibrated fit's slope of estimated on reported ratio is made of.
+- **All-sides ratio**: the geometric mean of ``estimate / report`` over every
+  point-reported side. With the post-1800 large-army ratio it gives the relative
+  level of modern armies, which the neutral fit should leave near 1.
 
 ## Gates skip, loudly
 
@@ -57,6 +75,8 @@ __all__ = [
     "battle_pairs",
     "between_battle_ppc",
     "group_ratio",
+    "implied_reliability",
+    "mixed_predictive_ppc",
     "recovery_diagnostics",
     "side_report_logs",
     "singleton_points",
@@ -83,7 +103,9 @@ class RecoverySettings:
             the between-battle variance check to apply.
         min_post1800_sides: Fewest post-1800 sides reported above 50,000 for the
             ratio band to apply.
-        ratio_band: ``(lo, hi)`` the post-1800 geometric ratio should sit in.
+        ratio_band: ``(lo, hi)`` the post-1800 geometric ratio should sit in, and
+            the band for the post-1800 ratio relative to the all-sides ratio.
+        all_ratio_band: ``(lo, hi)`` the all-sides geometric ratio should sit in.
         ppc_draws: Posterior draws used by the variance check.
         ppc_seed: Seed of the check's own generator, so the fit's is untouched.
     """
@@ -92,6 +114,7 @@ class RecoverySettings:
     min_battles: int = 10
     min_post1800_sides: int = 5
     ratio_band: tuple[float, float] = (0.85, 1.15)
+    all_ratio_band: tuple[float, float] = (0.9, 1.1)
     ppc_draws: int = 500
     ppc_seed: int = 20261022
 
@@ -113,6 +136,10 @@ class RecoverySettings:
             ratio_band=(
                 float(params.get("post1800_ratio_band_lo", d.ratio_band[0])),
                 float(params.get("post1800_ratio_band_hi", d.ratio_band[1])),
+            ),
+            all_ratio_band=(
+                float(params.get("all_ratio_band_lo", d.all_ratio_band[0])),
+                float(params.get("all_ratio_band_hi", d.all_ratio_band[1])),
             ),
             ppc_draws=int(params.get("recovery_ppc_draws", d.ppc_draws)),
             ppc_seed=int(params.get("recovery_ppc_seed", d.ppc_seed)),
@@ -356,6 +383,143 @@ def between_battle_ppc(
     }
 
 
+def mixed_predictive_ppc(
+    pairs: Sequence[BattlePair],
+    y_obs: np.ndarray,
+    rows: np.ndarray,
+    fixed: np.ndarray,
+    var: np.ndarray,
+    side_of_row: np.ndarray,
+    battle_of_side: np.ndarray,
+    s_b: np.ndarray,
+    s_d: np.ndarray,
+    nu: np.ndarray | None,
+    *,
+    battle_nu: float,
+    seed: int,
+) -> dict[str, Any]:
+    """Mixed-predictive check of the between-battle spread of the reported log ratio.
+
+    The statistic is the mean over battles of the squared reported log ratio. For
+    each posterior draw the replicated report of a row is its side-independent
+    location ``fixed`` plus a new battle effect ``s_b * zb`` (``zb`` Student-t
+    with ``battle_nu`` degrees of freedom, shared by the battle's sides), plus a new
+    side effect ``s_d * zd``, plus new noise at that draw's variance. The fitted
+    offsets stay; only the deviations the side prior is a claim about are redrawn.
+
+    Args:
+        pairs: From :func:`battle_pairs`.
+        y_obs: Observed log report of every design row, ``(n_obs,)``.
+        rows: The design rows the other arrays describe.
+        fixed: Per draw and row, ``m0 + e[era_bin]`` plus the row's regime, scope,
+            source and era offsets: everything but the side's own deviations.
+            Shape ``(n_draws, len(rows))``.
+        var: Fitted noise variance of ``rows`` per draw, same shape.
+        side_of_row: Design position of each row's side, ``(len(rows),)``.
+        battle_of_side: Per design side, its battle index.
+        s_b: Battle-effect scale per draw, ``(n_draws,)``.
+        s_d: Side-deviation scale per draw, ``(n_draws,)``.
+        nu: Student-t degrees of freedom of the observation noise per draw, or
+            None for a Normal likelihood.
+        battle_nu: Degrees of freedom of the battle effect's Student-t prior.
+        seed: Seed of the replication, so the fit's own stream is untouched.
+
+    Returns:
+        ``observed``, ``replicated_median``, ``p_upper`` and ``p_lower`` (shares of
+        replicates at or above and at or below the observed statistic), ``tail_p``
+        (the two-sided p-value) and the battle and draw counts.
+    """
+    position = {int(r): i for i, r in enumerate(rows)}
+    rng = np.random.default_rng(seed)
+    n_draws = fixed.shape[0]
+    n_battles = int(battle_of_side.max()) + 1
+    zb = rng.standard_t(battle_nu, size=(n_draws, n_battles))
+    zd = rng.standard_normal((n_draws, battle_of_side.size))
+    location = (
+        fixed
+        + s_b[:, None] * zb[:, battle_of_side[side_of_row]]
+        + s_d[:, None] * zd[:, side_of_row]
+    )
+    noise = rng.standard_normal(fixed.shape)
+    if nu is not None:
+        scale = np.sqrt(
+            np.maximum(rng.chisquare(nu[:, None], size=fixed.shape), 1e-12) / nu[:, None]
+        )
+        noise = noise / scale
+    replicated = location + np.sqrt(var) * noise
+
+    def side_mean(matrix: np.ndarray, side_rows: np.ndarray) -> np.ndarray:
+        columns = [position[int(r)] for r in side_rows]
+        mean: np.ndarray = matrix[:, columns].mean(axis=1)
+        return mean
+
+    observed_x = np.array(
+        [float(np.mean(y_obs[p.rows_a]) - np.mean(y_obs[p.rows_b])) for p in pairs]
+    )
+    replicated_x = np.column_stack(
+        [side_mean(replicated, p.rows_a) - side_mean(replicated, p.rows_b) for p in pairs]
+    )
+    observed = float(np.mean(observed_x**2))
+    statistic = np.mean(replicated_x**2, axis=1)
+    p_upper = float(np.mean(statistic >= observed))
+    p_lower = float(np.mean(statistic <= observed))
+    return {
+        "observed": _finite(observed),
+        "replicated_median": _finite(float(np.median(statistic))),
+        "p_upper": _finite(p_upper),
+        "p_lower": _finite(p_lower),
+        "tail_p": _finite(min(1.0, 2.0 * min(p_upper, p_lower))),
+        "n_battles": len(pairs),
+        "n_draws": int(n_draws),
+    }
+
+
+def implied_reliability(
+    pairs: Sequence[BattlePair],
+    y_obs: np.ndarray,
+    rows: np.ndarray,
+    var: np.ndarray,
+    nu: np.ndarray | None,
+) -> dict[str, float | None]:
+    """Reliability of a reported within-battle log ratio implied by the fitted noise.
+
+    ``(V - 2 * sigma_eff**2) / V``; see the module docstring for the definition of
+    ``V`` and ``sigma_eff``.
+
+    Args:
+        pairs: From :func:`battle_pairs`.
+        y_obs: Observed log report of every design row.
+        rows: The design rows ``var`` describes.
+        var: Fitted noise variance of ``rows`` per draw, ``(n_draws, len(rows))``.
+        nu: Student-t degrees of freedom per draw, or None for a Normal likelihood.
+
+    Returns:
+        ``reliability``, ``ratio_variance`` (``V``) and ``sigma_eff``; the
+        reliability is None when ``V`` is not positive.
+    """
+    position = {int(r): i for i, r in enumerate(rows)}
+    factor = np.ones(var.shape[0]) if nu is None else nu / np.maximum(nu - 2.0, 1e-6)
+
+    def side_noise(side_rows: np.ndarray) -> np.ndarray:
+        columns = [position[int(r)] for r in side_rows]
+        noise: np.ndarray = var[:, columns].mean(axis=1) / len(columns)
+        return noise
+
+    ratio_noise = np.column_stack([side_noise(p.rows_a) + side_noise(p.rows_b) for p in pairs])
+    sigma_eff_sq = float(np.mean(factor[:, None] * ratio_noise)) / 2.0
+    observed_x = np.array(
+        [float(np.mean(y_obs[p.rows_a]) - np.mean(y_obs[p.rows_b])) for p in pairs]
+    )
+    total = float(np.mean(observed_x**2))
+    if not total > 0.0:
+        return {"reliability": None, "ratio_variance": _finite(total), "sigma_eff": None}
+    return {
+        "reliability": _finite((total - 2.0 * sigma_eff_sq) / total),
+        "ratio_variance": _finite(total),
+        "sigma_eff": _finite(math.sqrt(sigma_eff_sq)),
+    }
+
+
 def recovery_diagnostics(
     design: Design,
     log_estimates: Mapping[int, float],
@@ -367,6 +531,7 @@ def recovery_diagnostics(
     singleton_slope: float | None,
     spread_ratio: float | None,
     ppc: dict[str, Any] | None,
+    side_prior: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Pack the recovery statistics and the values the quality gates read.
 
@@ -380,7 +545,12 @@ def recovery_diagnostics(
         ancient_cutoff_year: The stage's ancient cutoff, for the ancient group.
         singleton_slope: From :func:`pipeline.reconcilers.summarise.singleton_slope`.
         spread_ratio: From :func:`pipeline.reconcilers.summarise.spread_ratio`.
-        ppc: From :func:`between_battle_ppc`, or None when it could not run.
+        ppc: From :func:`mixed_predictive_ppc`, or None when it could not run.
+        side_prior: Statistics of the fitted troop side prior, any of which may be
+            absent: ``s_d_median``, ``noise_ratio_modern`` and
+            ``noise_ratio_ancient`` (posterior median over prior median of the
+            noise sd, worst source type) and ``reliability`` (see
+            :func:`implied_reliability`).
 
     Returns:
         A JSON-serialisable mapping. ``gate_*`` entries are the numbers the gates
@@ -410,6 +580,13 @@ def recovery_diagnostics(
     ratio_modern, n_modern = group_ratio(report_logs, log_estimates, modern_large)
     ratio_ancient, n_ancient = group_ratio(report_logs, log_estimates, ancient_large)
     ratio_small, n_small = group_ratio(report_logs, log_estimates, small)
+    ratio_all, n_all = group_ratio(report_logs, log_estimates, list(report_logs))
+    relative_level = (
+        ratio_modern / ratio_all
+        if ratio_modern is not None and ratio_all is not None and ratio_all > 0.0
+        else None
+    )
+    prior_stats: Mapping[str, Any] = side_prior or {}
 
     skipped: dict[str, str] = {}
     gate_singleton = singleton_slope if n_singletons >= settings.min_sides else None
@@ -442,15 +619,53 @@ def recovery_diagnostics(
             f"{n_modern} post-{MODERN_FROM_YEAR} sides reported above {LARGE_ARMY:g}, "
             f"need {settings.min_post1800_sides}"
         )
+    gate_relative: int | None = None
+    if (
+        relative_level is not None
+        and n_modern >= settings.min_post1800_sides
+        and n_all >= settings.min_sides
+    ):
+        lo, hi = settings.ratio_band
+        gate_relative = 0 if lo <= relative_level <= hi else 1
+    else:
+        skipped["post1800_relative_level"] = (
+            f"{n_modern} post-{MODERN_FROM_YEAR} large sides (need {settings.min_post1800_sides}) "
+            f"and {n_all} point-reported sides (need {settings.min_sides})"
+        )
+    gate_all: int | None = None
+    if ratio_all is not None and n_all >= settings.min_sides:
+        lo, hi = settings.all_ratio_band
+        gate_all = 0 if lo <= ratio_all <= hi else 1
+    else:
+        skipped["all_sides_ratio"] = f"{n_all} point-reported sides, need {settings.min_sides}"
     gate_ppc: float | None = None
     if ppc is not None and n_pairs >= settings.min_battles:
-        gate_ppc = ppc.get("extremity")
+        gate_ppc = ppc.get("tail_p")
     if gate_ppc is None:
-        skipped["between_battle_ppc"] = (
+        skipped["mixed_ppc"] = (
             f"{n_pairs} two-sided battles, need {settings.min_battles}"
             if n_pairs < settings.min_battles
             else "check did not run"
         )
+    gate_s_d = prior_stats.get("s_d_median")
+    if gate_s_d is None:
+        skipped["s_d_median"] = "the fit has no side-deviation scale"
+    noise_ratios = [
+        prior_stats[k]
+        for k in ("noise_ratio_modern", "noise_ratio_ancient")
+        if prior_stats.get(k) is not None
+    ]
+    gate_noise = max(noise_ratios) if noise_ratios else None
+    if gate_noise is None:
+        skipped["noise_ratio"] = "the fit has no informative noise scale"
+    reliability = prior_stats.get("reliability")
+    gate_gap = (
+        abs(wb_slope - reliability)
+        if wb_slope is not None and reliability is not None and gate_wb is not None
+        else None
+    )
+    if gate_gap is None:
+        skipped["wb_reliability_gap"] = "no within-battle slope or no implied reliability"
     for gate, reason in skipped.items():
         logger.info("reconcile_recovery_gate_skipped", gate=gate, reason=reason)
 
@@ -468,11 +683,23 @@ def recovery_diagnostics(
         "small_ratio": ratio_small,
         "n_small": n_small,
         "n_rows_per_side_max": int(counts.max()) if counts.size else 0,
-        "between_battle_ppc": ppc,
+        "all_ratio": ratio_all,
+        "n_all": n_all,
+        "relative_level": relative_level,
+        "mixed_ppc": ppc,
+        "s_d_median": gate_s_d,
+        "noise_ratio_modern": prior_stats.get("noise_ratio_modern"),
+        "noise_ratio_ancient": prior_stats.get("noise_ratio_ancient"),
+        "reliability": reliability,
         "gate_singleton_slope": gate_singleton,
         "gate_spread_ratio": gate_spread,
         "gate_within_battle_slope": gate_wb,
         "gate_post1800_band_violation": gate_band,
-        "gate_between_battle_extremity": gate_ppc,
+        "gate_relative_level_violation": gate_relative,
+        "gate_all_ratio_violation": gate_all,
+        "gate_ppc_tail_p": gate_ppc,
+        "gate_s_d_median": gate_s_d,
+        "gate_noise_ratio": gate_noise,
+        "gate_wb_reliability_gap": gate_gap,
         "gates_skipped": skipped,
     }

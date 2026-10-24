@@ -95,7 +95,7 @@ def test_the_one_row_side_mean_is_the_adjusted_report_on_an_unlabelled_row() -> 
     g_mean = 2.0 * float(np.mean(np.arange(4000) / 1000.0))
     a_mean = 3.0 * float(np.mean(np.arange(4000) / 1000.0))
     expected = float(design.log_y[row]) - g_mean - a_mean * float(design.era[row])
-    variance = SIGMA**2 + 0.1**2 * float(design.roundness[row])
+    variance = SIGMA**2
 
     assert lik.mean[side] == pytest.approx(expected)
     assert lik.sd[side] == pytest.approx(math.sqrt(variance * (NU + 3.0) / (NU + 1.0)))
@@ -107,7 +107,7 @@ def test_the_one_row_side_with_a_modern_report_is_its_report_at_the_fisher_sd() 
     assert lik is not None
     side = list(summary.side_ids).index(10)
     row = int(np.flatnonzero(design.side_index == design.side_ids.index(10))[0])
-    variance = SIGMA**2 + 0.1**2 * float(design.roundness[row])
+    variance = SIGMA**2
 
     assert lik.has_point[side]
     assert lik.n_point_rows[side] == 1
@@ -128,7 +128,7 @@ def test_two_rows_combine_by_precision_with_the_unlabelled_offset_removed() -> N
         - (2.0 * index_mean + 3.0 * index_mean * float(design.era[r]) if unlabelled[r] else 0.0)
         for r in rows
     ]
-    variance = np.array([SIGMA**2 + 0.1**2 * float(design.roundness[r]) for r in rows])
+    variance = np.full(len(rows), SIGMA**2)
     info = (NU + 1.0) / (NU + 3.0) / variance
 
     assert lik.n_point_rows[side] == 2

@@ -305,7 +305,10 @@ def _fit_and_write(
         mnar_delta=ip.mnar_delta,
         shared=shared,
     )
-    gates = _gates(ip, design, rounds)
+    reference_slope = run_store.reconcile_within_battle_slope(
+        conn, reconcile_run_id, neutral=ip.scale == "neutral"
+    )
+    gates = _gates(ip, design, rounds, reference_slope)
     kept_side_ids = [int(side_id) for side_id in design.side_ids[design.observed_rows]]
     write_rounds(
         root,
@@ -348,8 +351,24 @@ def _missing_by_cause(counts: ImputeCounts) -> dict[str, int]:
     }
 
 
-def _gates(ip: ImputeParams, design: ImputeDesign, rounds: RoundSet) -> list[GateResult]:
-    """Compute the dataset-level gates for a set of rounds."""
+def _gates(
+    ip: ImputeParams,
+    design: ImputeDesign,
+    rounds: RoundSet,
+    reference_pair_slope: float | None = None,
+) -> list[GateResult]:
+    """Compute the dataset-level gates for a set of rounds.
+
+    Args:
+        ip: Run parameters.
+        design: The impute design.
+        rounds: The imputed rounds.
+        reference_pair_slope: Reconcile's within-battle slope on this scale, which the
+            kept-pair slope is held to; None falls back to ``min_pair_slope``.
+
+    Returns:
+        The gate results.
+    """
     return run_gates(
         rounds.values,
         is_imputed=rounds.is_imputed,
@@ -367,6 +386,8 @@ def _gates(ip: ImputeParams, design: ImputeDesign, rounds: RoundSet) -> list[Gat
         min_pair_slope=ip.min_pair_slope,
         min_side_slope=ip.min_side_slope,
         slope_min_n=ip.slope_gate_min_n,
+        reference_pair_slope=reference_pair_slope,
+        pair_slope_tolerance=ip.pair_slope_tolerance,
     )
 
 

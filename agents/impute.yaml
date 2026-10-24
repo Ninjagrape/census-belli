@@ -119,7 +119,11 @@ params:
   # params override is ignored with a warning (impute_min_lik_precision_ignored).
   # Recovery gate thresholds (kept_pair_ratio_slope, kept_side_slope); a gate
   # skips, with its reason in actual, below slope_gate_min_n pairs or sides.
+  # The kept-pair slope is held to reconcile's own within-battle slope (neutral
+  # fit on the neutral scale), within pair_slope_tolerance either way; min_pair_slope
+  # is the fallback floor when reconcile recorded none (a fixture below its minimum).
   min_pair_slope: 0.8
+  pair_slope_tolerance: 0.1
   min_side_slope: 0.9
   slope_gate_min_n: 10
   published_default_sd: 1.0           # log sd when a published estimate has no interval
@@ -199,11 +203,13 @@ quality_checks:
     description: >
       Over battles with exactly two observed (point-reported) sides, the slope
       through the origin of the across-round mean imputed log ratio on the
-      reported log ratio (the sides' likelihood means) is at least
-      params.min_pair_slope (0.8). The model stage regresses outcome on this
-      ratio, so a compressed ratio attenuates the force effect; it was 0.43 on
-      the 2026-10 corpus. Skips (passes, with the reason in the gate's actual)
-      below params.slope_gate_min_n battles.
+      reported log ratio (the sides' likelihood means) lies within
+      params.pair_slope_tolerance (0.1) of the reconcile run's own within-battle
+      slope on the same scale; a fixed floor of 0.8 asks for more than a
+      calibrated reconcile fit gives. Falls back to params.min_pair_slope when
+      reconcile recorded no slope. The model stage regresses outcome on this
+      ratio; it was 0.43 on the 2026-10 corpus. Skips (passes, with the reason in
+      the gate's actual) below params.slope_gate_min_n battles.
 
   - name: kept_side_slope
     method: imputation_gate

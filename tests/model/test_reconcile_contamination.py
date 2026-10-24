@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
+from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
 import pytest
+import yaml
 
 from pipeline.reconcilers.design import build_design
 from pipeline.reconcilers.model import ModelPriors, SamplerSettings, build_model, sample
@@ -31,18 +33,23 @@ from tests.model.conftest import ANCIENT_CUTOFF_YEAR, Fit, fit_until_converged, 
 pytestmark = pytest.mark.model
 
 SEED = 20261013
+AGENTS = Path(__file__).resolve().parents[2] / "agents"
 N_SIDES = 300
 N_RANGE_SIDES = 90
 P_MULTI = 0.15
-TRUE_SIGMA = 0.35
-BETWEEN_SIDE_SD = 1.2
+# P1: troops carry an informative noise prior (median 0.22) and a side prior of a
+# shared battle effect plus a side deviation, so the scenario is generated that way:
+# two sides per battle, noise at the prior median. (It was independent sides at 0.35.)
+TRUE_SIGMA = 0.22
+BATTLE_SD = 1.0
+SIDE_SD = 0.6
 
 SAMPLER = SamplerSettings(
     draws=2500,
     tune=1000,
     chains=4,
     cores=1,
-    target_accept=0.95,
+    target_accept=0.99,
     random_seed=SEED,
     nuts_sampler="nutpie",
 )
@@ -62,7 +69,7 @@ def _report(
     return Report(
         report_id=report_id,
         side_id=sid,
-        battle_id=sid,
+        battle_id=(sid - 1) // 2 + 1,
         source_id=sid,
         source_key=key,
         source_type=key.source_type,
@@ -79,7 +86,11 @@ def _report(
 
 def _simulate() -> Corpus:
     rng = np.random.default_rng(SEED)
-    true_mu = {sid: float(rng.normal(10.0, BETWEEN_SIDE_SD)) for sid in range(1, N_SIDES + 1)}
+    battle_effect = {b: BATTLE_SD * float(rng.standard_t(4)) for b in range(1, N_SIDES // 2 + 1)}
+    true_mu = {
+        sid: 10.0 + battle_effect[(sid - 1) // 2 + 1] + float(rng.normal(0.0, SIDE_SD))
+        for sid in range(1, N_SIDES + 1)
+    }
     range_ids = sorted(rng.choice(np.arange(1, N_SIDES + 1), N_RANGE_SIDES, replace=False).tolist())
     reports: list[Report] = []
     singleton_ids: list[int] = []
@@ -110,6 +121,12 @@ def corpus() -> Corpus:
     return _simulate()
 
 
+def _troop_priors() -> ModelPriors:
+    """The troop priors as agents/reconcile.yaml sets them (P1)."""
+    params = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))["params"]
+    return ModelPriors.from_params(params, quantity="troops")
+
+
 def _fit(
     corpus: Corpus, inflation: object, *, merge_ranges: bool, seed: int = SEED
 ) -> tuple[Fit, float]:
@@ -120,7 +137,7 @@ def _fit(
     bound = "exgaussian" if merge_ranges else "censored"
     fit = run_fit(
         corpus.reports,
-        priors=replace(ModelPriors.from_params({}, quantity="troops"), bound_likelihood=bound),
+        priors=replace(_troop_priors(), bound_likelihood=bound),
         inflation=inflation,  # type: ignore[arg-type]
         sampler=replace(SAMPLER, random_seed=seed),
         ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
@@ -178,19 +195,22 @@ def test_merged_ranges_keep_sigma_near_truth_and_singletons_unshrunk(
 
     # The fixture only accepts a fit that clears the stage's own predicate.
     assert _passes_global_thresholds(worst, {}), worst
-    assert 0.3 <= sigma <= 0.55, sigma
+    # P1: within 1.5x of the 0.22 prior median, around the 0.22 truth (was 0.3 to 0.55 around 0.35).
+    assert 0.15 <= sigma <= 0.33, sigma
     assert diag["singleton_slope"] >= 0.7, diag["singleton_slope"]
 
 
-def test_unmerged_range_pairs_inflate_sigma(
+def test_unmerged_range_pairs_no_longer_inflate_sigma_under_the_informative_prior(
     unmerged: tuple[Fit, float], record_property: pytest.RecordProperty
 ) -> None:
-    """Positive control: with the merge off, the pairs are two censored rows each.
+    """Control: with the merge off, the pairs are two censored rows each.
 
-    The brief asked for sigma >= 0.9. The scenario was not tuned toward it:
-    measured sigma 0.850 (true 0.35), singleton slope 0.21 and spread ratio 0.27
-    (the stage's collapse gate is 0.25). The pathology reproduces, short of 0.9,
-    so the assertions below sit under what was measured.
+    Before P1 this was a positive control: the pairs inflated sigma to 0.85 (true
+    0.35) and collapsed the singletons (slope 0.21, spread 0.27). Troops now carry
+    an informative noise prior (log-sd 0.2), so sigma cannot escape it and the
+    pathology is defused: measured sigma 0.230, singleton slope 0.79 and spread
+    ratio 0.83 on this corpus. The assertions state that, as a leak guard: sigma
+    stays within 1.5x of its 0.22 prior median, and the estimates are not collapsed.
     """
     fit, seconds = unmerged
     diag = fit.summary.diagnostics
@@ -201,15 +221,15 @@ def test_unmerged_range_pairs_inflate_sigma(
     )
     record_property("unmerged_seconds", round(seconds, 1))
 
-    assert sigma >= 0.8, sigma
-    assert diag["spread_ratio"] <= 0.4, diag["spread_ratio"]
-    assert diag["singleton_slope"] <= 0.4, diag["singleton_slope"]
+    assert sigma <= 1.5 * 0.22, sigma
+    assert diag["spread_ratio"] >= 0.5, diag["spread_ratio"]
+    assert diag["singleton_slope"] >= 0.5, diag["singleton_slope"]
 
 
 def test_neutral_fit_converges_on_the_same_data(
     corpus: Corpus, inflation_prior: object, record_property: pytest.RecordProperty
 ) -> None:
-    priors = ModelPriors.from_params({}, quantity="troops")
+    priors = _troop_priors()
     design = build_design(
         corpus.reports, quantity="troops", ancient_cutoff_year=ANCIENT_CUTOFF_YEAR
     )

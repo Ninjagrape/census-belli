@@ -150,12 +150,15 @@ def test_the_nu_floor_is_read_from_the_spec() -> None:
     assert float(_draw(model, "nu").min()) >= 5.0
 
 
-def test_sigma_round_and_sigma_estimate_are_half_normal_with_scale_point_one() -> None:
-    model = build_model(_design(), priors=ModelPriors(), inflation=_inflation())
+def test_troops_have_no_dispersion_terms_and_casualties_keep_theirs() -> None:
+    troops = build_model(_design(), priors=ModelPriors(), inflation=_inflation())
+    assert not {"sigma_round", "sigma_estimate"} & set(troops.named_vars)
 
+    priors = ModelPriors.from_params({}, quantity="casualties")
+    casualties = build_model(_design("casualties"), priors=priors, inflation=_inflation())
     for name in ("sigma_round", "sigma_estimate"):
-        draws = _draw(model, name)
-        assert float(draws.mean()) == pytest.approx(0.1 * math.sqrt(2 / math.pi), abs=0.004)
+        draws = _draw(casualties, name)
+        assert float(draws.mean()) == pytest.approx(0.3 * math.sqrt(2 / math.pi), abs=0.012)
 
 
 def test_casualties_and_the_legacy_switch_keep_the_inverse_gamma() -> None:

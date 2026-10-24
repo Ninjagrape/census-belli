@@ -271,6 +271,8 @@ def kept_pair_ratio_slope(
     *,
     minimum: float,
     min_n: int,
+    reference: float | None = None,
+    tolerance: float = 0.1,
 ) -> GateResult:
     """Imputed force ratios track the reported ones where both sides carry a report.
 
@@ -287,14 +289,21 @@ def kept_pair_ratio_slope(
         battle_ids: Battle id per side.
         report: Per side, the reported (likelihood mean) log value; NaN if none.
         is_observed: Per side, True if it carried a likelihood.
-        minimum: The slope must be at least this.
+        minimum: The slope must be at least this when there is no ``reference``.
         min_n: Fewest battles for the gate to apply; below it the gate passes
             and says it skipped.
+        reference: Reconcile's own within-battle slope on the same scale. A
+            calibrated reconcile fit shrinks reported ratios by their reliability,
+            so impute is held to that slope rather than to a fixed floor: it must
+            lie within ``tolerance`` of it, in either direction.
+        tolerance: Allowed distance from ``reference``.
 
     Returns:
         The verdict, severity error.
     """
-    threshold = f">= {minimum:g}"
+    threshold = (
+        f">= {minimum:g}" if reference is None else f"within {tolerance:g} of {reference:.3f}"
+    )
     mean = values.mean(axis=0)
     xs: list[float] = []
     ys: list[float] = []
@@ -311,12 +320,13 @@ def kept_pair_ratio_slope(
     if denominator <= 0.0:
         return _skipped("kept_pair_ratio_slope", threshold, "reported ratios are all zero")
     slope = float(np.sum(np.multiply(xs, ys)) / denominator)
-    passed = slope >= minimum
+    passed = slope >= minimum if reference is None else abs(slope - reference) <= tolerance
+    reference_note = "" if reference is None else f", reference={reference:.3f}"
     return GateResult(
         name="kept_pair_ratio_slope",
         passed=passed,
         severity="error",
-        actual=f"slope={slope:.3f}, battles={len(xs)}",
+        actual=f"slope={slope:.3f}, battles={len(xs)}{reference_note}",
         threshold=threshold,
         message=""
         if passed
@@ -382,6 +392,8 @@ def run_gates(
     min_pair_slope: float = 0.8,
     min_side_slope: float = 0.9,
     slope_min_n: int = 10,
+    reference_pair_slope: float | None = None,
+    pair_slope_tolerance: float = 0.1,
 ) -> list[GateResult]:
     """Compute every dataset-level gate.
 
@@ -403,6 +415,9 @@ def run_gates(
         min_pair_slope: See :func:`kept_pair_ratio_slope`.
         min_side_slope: See :func:`kept_side_slope`.
         slope_min_n: Fewest pairs or sides for a slope gate to apply.
+        reference_pair_slope: Reconcile's within-battle slope, if known; see
+            :func:`kept_pair_ratio_slope`.
+        pair_slope_tolerance: Allowed distance from it.
 
     Returns:
         The gate results, in spec order.
@@ -418,7 +433,14 @@ def run_gates(
     if report is not None and is_observed is not None:
         results.append(
             kept_pair_ratio_slope(
-                finite, battle_ids, report, is_observed, minimum=min_pair_slope, min_n=slope_min_n
+                finite,
+                battle_ids,
+                report,
+                is_observed,
+                minimum=min_pair_slope,
+                min_n=slope_min_n,
+                reference=reference_pair_slope,
+                tolerance=pair_slope_tolerance,
             )
         )
         results.append(

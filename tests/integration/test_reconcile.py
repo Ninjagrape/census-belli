@@ -474,7 +474,7 @@ def test_every_quality_check_in_the_reconcile_spec_executes(
     del reconciled
     raw = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))
     checks = raw["quality_checks"]
-    assert len(checks) == 21
+    assert len(checks) == 26
 
     runner = QualityRunner(conn)
     results = runner.run_all(checks)
@@ -1186,7 +1186,7 @@ def _recovery(**gates: object) -> str:
     ("gate", "key", "bad", "good"),
     [
         ("singleton_slope_recovers", "gate_singleton_slope", 0.61, 0.9),
-        ("within_battle_ratio_recovers", "gate_within_battle_slope", 0.6, 0.85),
+        ("within_battle_ratio_recovers", "gate_within_battle_slope", 0.4, 0.85),
     ],
 )
 def test_the_slope_gates_fail_a_compressed_fit_and_pass_a_recovered_one(
@@ -1224,7 +1224,8 @@ def test_the_recovery_gates_skip_when_their_inputs_are_too_few(conn: Connection,
 def test_the_post_1800_band_and_the_variance_check_are_warnings(conn: Connection) -> None:
     band = _quality_check("post1800_ratio_in_band")
     ppc = _quality_check("between_battle_variance_is_plausible")
-    assert band["severity"] == ppc["severity"] == "warning"
+    assert band["severity"] == "warning"
+    assert ppc["severity"] == "error"  # the mixed predictive is a gate since P1
 
     _fabricate_run(conn, _recovery(gate_post1800_band_violation=1))
     assert not QualityRunner(conn).run_one(band).passed
@@ -1233,8 +1234,8 @@ def test_the_post_1800_band_and_the_variance_check_are_warnings(conn: Connection
 
     _fabricate_run(
         conn,
-        '{"troops": {"recovery": {"between_battle_ppc": {"extremity": 0.004}}}, '
-        '"troops_neutral": {"recovery": {"between_battle_ppc": {"extremity": 0.4}}}}',
+        '{"troops": {"recovery": {"gate_ppc_tail_p": 0.004}}, '
+        '"troops_neutral": {"recovery": {"gate_ppc_tail_p": 0.4}}}',
     )
     assert not QualityRunner(conn).run_one(ppc).passed
 
@@ -1258,7 +1259,7 @@ def test_a_run_records_its_spread_ratio_and_source_effect_counts(
         "singleton_slope",
         "within_battle_slope",
         "post1800_large_ratio",
-        "between_battle_ppc",
+        "mixed_ppc",
         "gate_singleton_slope",
         "gate_within_battle_slope",
         "gate_post1800_band_violation",
@@ -1268,11 +1269,12 @@ def test_a_run_records_its_spread_ratio_and_source_effect_counts(
     assert recovery["gate_singleton_slope"] is None
     assert "singleton_slope" in recovery["gates_skipped"]
     assert troops["noise_prior"]["applies"] is True
-    assert troops["nu"]["mean"] is not None and troops["nu"]["mean"] >= 3.0
+    assert troops["nu"] is None  # troops use a Normal likelihood since P1
+    assert {"s_b", "s_d", "tau_e"} <= set(troops["side_prior"])
     assert "recovery" in diagnostics["troops_neutral"]
     honoured = troops["reports_honoured"]
     assert set(honoured) == {"n_checked", "n_violations", "violating_side_ids", "within_side_mad"}
-    assert "s0" in troops and "sigma_type" in troops
+    assert "sigma_type" in troops
     assert (
         troops["n_source_keys_own_effect"] + troops["n_source_keys_pooled"] == troops["n_sources"]
     )

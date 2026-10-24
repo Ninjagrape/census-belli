@@ -39,6 +39,7 @@ from pipeline.reconcilers.likelihood_export import (
     LikelihoodExport,
     likelihood_export,
 )
+from pipeline.reconcilers.model import level_anchor_mask
 from pipeline.reconcilers.records import NeutralSideEstimate
 from pipeline.reconcilers.recovery import RecoverySettings
 from pipeline.reconcilers.summarise import (
@@ -49,6 +50,7 @@ from pipeline.reconcilers.summarise import (
     _finite,
     _pooled,
     _scalar_stats,
+    _side_prior_stats,
     recovery_block,
     widen_bounds,
     widening_margins,
@@ -83,7 +85,8 @@ class NeutralSummary:
         battle_ids: Each side's battle id, aligned with ``side_ids``.
         draws: Thinned pooled draws of ``mu_side``, shape ``(n_draws, n_sides)``.
         m0_mean: Posterior mean of ``m0``.
-        s0_mean: Posterior mean of ``s0``.
+        s0_mean: Posterior mean of the side prior's scale: ``s0`` for the old prior,
+            ``sqrt(s_b**2 + s_d**2)`` (the side-to-side sd within a period) for P1.
         g_unlabelled: The unlabelled regime's ``g_regime`` draws, shape
             ``(n_draws,)``, row-aligned with ``draws``; zeros when the design
             has no unlabelled regime. None if the posterior lacks ``g_regime``.
@@ -139,7 +142,8 @@ def _side_regime_loading(design: Design) -> tuple[np.ndarray, np.ndarray]:
     """Per side, the era value and unlabelled-row share the design applied.
 
     The model adds ``a_era * era`` on unlabelled rows only and ``g_unlabelled``
-    on the same rows, so these two numbers say how strongly a side's reports
+    on the same rows, except under the level anchor (unlabelled rows dated 1800 or
+    later carry neither), so these two numbers say how strongly a side's reports
     load on the shared regime parameters.
 
     Args:
@@ -153,7 +157,9 @@ def _side_regime_loading(design: Design) -> tuple[np.ndarray, np.ndarray]:
     share = np.zeros(design.n_sides, dtype=np.float64)
     if "unlabelled" not in design.regimes:
         return era, share
-    unlabelled = design.regime_index == design.regimes.index("unlabelled")
+    unlabelled = (design.regime_index == design.regimes.index("unlabelled")) & (
+        level_anchor_mask(design) == 0.0
+    )
     for position in range(design.n_sides):
         on_side = design.side_index == position
         n_rows = int(on_side.sum())
@@ -164,6 +170,21 @@ def _side_regime_loading(design: Design) -> tuple[np.ndarray, np.ndarray]:
         if n_unlabelled:
             era[position] = float(np.mean(design.era[rows]))
     return era, share
+
+
+def _side_prior_scale(idata: az.InferenceData) -> np.ndarray:
+    """Pooled draws of the side prior's scale, whichever prior the fit used.
+
+    Args:
+        idata: Posterior from the neutral fit.
+
+    Returns:
+        ``s0`` for the old prior, ``sqrt(s_b**2 + s_d**2)`` for P1.
+    """
+    if "s0" in idata.posterior.data_vars:
+        return _pooled(idata, "s0")
+    scale: np.ndarray = np.sqrt(_pooled(idata, "s_b") ** 2 + _pooled(idata, "s_d") ** 2)
+    return scale
 
 
 def _shared_draws(
@@ -208,6 +229,8 @@ def summarise_neutral(
     year_of_side: Mapping[int, int | None] | None = None,
     recovery: RecoverySettings | None = None,
     ancient_cutoff_year: int = 500,
+    noise_medians: tuple[float, float] | None = None,
+    battle_nu: float = 4.0,
 ) -> NeutralSummary:
     """Summarise the neutral troops fit.
 
@@ -225,6 +248,9 @@ def summarise_neutral(
             recovery diagnostics' era groups; omitted sides count as undated.
         recovery: Sizes and thresholds of the recovery diagnostics.
         ancient_cutoff_year: The stage's ancient cutoff.
+        noise_medians: ``(modern, ancient)`` prior medians of the noise sd, for the
+            recovery block's leak guard.
+        battle_nu: Degrees of freedom of the battle effect's prior.
 
     Returns:
         The estimates, diagnostics block and draws.
@@ -260,7 +286,11 @@ def summarise_neutral(
             )
         )
     m0 = _scalar_stats(idata, "m0")
-    s0 = _scalar_stats(idata, "s0")
+    side_scale = _side_prior_scale(idata)
+    s0 = {
+        "mean": _finite(float(np.mean(side_scale))),
+        "sd": _finite(float(np.std(side_scale))),
+    }
     diagnostics: dict[str, Any] = {
         "quantity": design.quantity,
         "n_obs": design.n_obs,
@@ -278,6 +308,7 @@ def summarise_neutral(
         "worst_side": worst["worst_side"],
         "m0": m0,
         "s0": s0,
+        "side_prior": _side_prior_stats(idata),
         "sigma_type": _sigma_summary(idata, "sigma_sq_type", square_root=True),
         "sigma_type_ancient": _sigma_summary(idata, "sigma_type_ancient"),
         "nu": _scalar_stats(idata, "nu") if "nu" in idata.posterior.data_vars else None,
@@ -289,6 +320,8 @@ def summarise_neutral(
             year_of_side=dict(year_of_side or {}),
             settings=recovery or RecoverySettings(),
             ancient_cutoff_year=ancient_cutoff_year,
+            noise_medians=noise_medians,
+            battle_nu=battle_nu,
         ),
     }
     shared = _shared_draws(idata, design)
@@ -300,7 +333,7 @@ def summarise_neutral(
         battle_ids=tuple(battle_of_side[s] for s in design.side_ids),
         draws=_thin(mu, MAX_NEUTRAL_DRAWS),
         m0_mean=_finite(float(np.mean(_pooled(idata, "m0")))) or 0.0,
-        s0_mean=_finite(float(np.mean(_pooled(idata, "s0")))) or 0.0,
+        s0_mean=_finite(float(np.mean(side_scale))) or 0.0,
         g_unlabelled=None if shared is None else _thin(shared[0], MAX_NEUTRAL_DRAWS),
         a_era=None if shared is None else _thin(shared[1], MAX_NEUTRAL_DRAWS),
         offset_bar=None if shared is None else _thin(shared[2], MAX_NEUTRAL_DRAWS),

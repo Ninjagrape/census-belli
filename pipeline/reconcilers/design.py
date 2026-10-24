@@ -53,9 +53,12 @@ from pipeline.reconcilers.records import CLAIM_REGIMES, ReconcileCounts, Report,
 __all__ = [
     "CASUALTY_TYPE_ORDER",
     "DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT",
+    "ERA_BIN_LABELS",
     "SCOPE_ORDER",
+    "UNDATED_ERA_BIN",
     "Design",
     "build_design",
+    "era_bin",
 ]
 
 logger = structlog.get_logger()
@@ -83,6 +86,38 @@ CASUALTY_TYPE_ORDER: Final[tuple[str, ...]] = (
 
 _TROOPS: Final[str] = "troops"
 _UNLABELLED: Final[str] = "unlabelled"
+
+# Era bins of the troop side prior (P1), by the battle's astronomical year. The
+# lower edges are the first year of the bin; the first bin is open below.
+_ERA_BIN_EDGES: Final[tuple[int, ...]] = (500, 1500, 1800, 1900)
+ERA_BIN_LABELS: Final[tuple[str, ...]] = (
+    "before_500",
+    "500_1499",
+    "1500_1799",
+    "1800_1899",
+    "from_1900",
+)
+# An undated battle has no bin of its own. It takes this sixth index, which the
+# model maps to a zero era effect rather than to a member of the zero-sum
+# vector: no evidence about the period is not evidence that it is average.
+UNDATED_ERA_BIN: Final[int] = len(ERA_BIN_LABELS)
+
+
+def era_bin(year: int | None) -> int:
+    """Era bin of a battle year.
+
+    Args:
+        year: ``battles.year_astronomical`` (astronomical numbering, so 331 BC is
+            -330), or None for an undated battle.
+
+    Returns:
+        0 to 4 for the five bins in :data:`ERA_BIN_LABELS`, or
+        :data:`UNDATED_ERA_BIN` for None.
+    """
+    if year is None:
+        return UNDATED_ERA_BIN
+    return int(sum(year >= edge for edge in _ERA_BIN_EDGES))
+
 
 # A source key earns its own bias (u_source) and noise scale (sigma_source) only
 # when it co-reports, in at least this many battles: another source key reports
@@ -152,6 +187,15 @@ class Design:
         regimes: Labels ``regime_index`` points into.
         levels: Labels ``level_index`` points into.
         lineage_ids: Labels ``lineage_index`` points into.
+        side_battle_index: Per side, the position of its battle in ``battle_ids``
+            (the troop side prior's shared battle effect); None on a hand-built
+            design, read as one battle per side through :attr:`battle_of_side`.
+        side_era_bin: Per side, the era bin of its battle (0 to 4, or
+            :data:`UNDATED_ERA_BIN`); None reads as all undated through
+            :attr:`era_bin_of_side`.
+        battle_ids: Labels ``side_battle_index`` points into.
+        row_year: Per row, the battle's astronomical year (NaN if undated); None
+            reads as all NaN through :attr:`year_of_row`. The level anchor reads it.
     """
 
     quantity: str
@@ -180,6 +224,10 @@ class Design:
     lineage_ids: tuple[int, ...]
     era_centre_rows: int = 0
     noise_ancient: np.ndarray | None = None
+    side_battle_index: np.ndarray | None = None
+    side_era_bin: np.ndarray | None = None
+    battle_ids: tuple[int, ...] = ()
+    row_year: np.ndarray | None = None
 
     @property
     def ancient_rows(self) -> np.ndarray:
@@ -194,6 +242,44 @@ class Design:
         if self.noise_ancient is None:
             return np.zeros(self.n_obs, dtype=float)
         return self.noise_ancient
+
+    @property
+    def battle_of_side(self) -> np.ndarray:
+        """Per side, its battle's position in :attr:`battle_labels`.
+
+        A design built without battle information has one battle per side, which
+        leaves the battle effect confounded with the side effect (both priors
+        still apply) instead of failing.
+        """
+        if self.side_battle_index is None:
+            return np.arange(self.n_sides, dtype=int)
+        return self.side_battle_index
+
+    @property
+    def era_bin_of_side(self) -> np.ndarray:
+        """Per side, its era bin; :data:`UNDATED_ERA_BIN` when none was recorded."""
+        if self.side_era_bin is None:
+            return np.full(self.n_sides, UNDATED_ERA_BIN, dtype=int)
+        return self.side_era_bin
+
+    @property
+    def year_of_row(self) -> np.ndarray:
+        """Per row, the battle's astronomical year as a float, NaN where undated."""
+        if self.row_year is None:
+            return np.full(self.n_obs, np.nan)
+        return self.row_year
+
+    @property
+    def n_battles(self) -> int:
+        """Number of distinct battles the sides belong to."""
+        return int(self.battle_of_side.max()) + 1 if self.n_sides else 0
+
+    @property
+    def battle_labels(self) -> list[str]:
+        """Coordinate labels of the battle dimension."""
+        if self.battle_ids:
+            return [str(b) for b in self.battle_ids]
+        return [str(i) for i in range(self.n_battles)]
 
     @property
     def n_obs(self) -> int:
@@ -234,6 +320,8 @@ class Design:
             "regime": list(self.regimes),
             "level": list(self.levels),
             "lineage": [str(x) for x in self.lineage_ids],
+            "battle": self.battle_labels,
+            "era_bin": list(ERA_BIN_LABELS),
         }
 
 
@@ -401,6 +489,14 @@ def build_design(
         counts.ranges_merged += n_ranges
         counts.ranges_degenerate += n_degenerate
 
+    battle_ix = _index_map([r.battle_id for r in rows])
+    battle_of_side_id: dict[int, int] = {}
+    year_of_side_id: dict[int, int | None] = {}
+    for r in rows:
+        battle_of_side_id.setdefault(r.side_id, battle_ix[r.battle_id])
+        year_of_side_id.setdefault(r.side_id, r.year_astronomical)
+    side_order = sorted(side_ix, key=lambda k: side_ix[k])
+
     design = Design(
         quantity=quantity,
         log_y=log_y,
@@ -433,6 +529,13 @@ def build_design(
         lineage_ids=tuple(sorted(lineage_ix, key=lambda k: lineage_ix[k])),
         era_centre_rows=era_centre_rows,
         noise_ancient=noise_ancient,
+        side_battle_index=np.array([battle_of_side_id[s] for s in side_order], dtype=int),
+        side_era_bin=np.array([era_bin(year_of_side_id[s]) for s in side_order], dtype=int),
+        battle_ids=tuple(sorted(battle_ix, key=lambda k: battle_ix[k])),
+        row_year=np.array(
+            [np.nan if r.year_astronomical is None else float(r.year_astronomical) for r in rows],
+            dtype=float,
+        ),
     )
 
     logger.info(

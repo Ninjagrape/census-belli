@@ -218,13 +218,18 @@ def test_gates_skip_with_a_reason_on_a_small_fixture() -> None:
     for gate in ("gate_singleton_slope", "gate_spread_ratio", "gate_within_battle_slope"):
         assert block[gate] is None
     assert block["gate_post1800_band_violation"] is None
-    assert block["gate_between_battle_extremity"] is None
+    assert block["gate_ppc_tail_p"] is None
     assert set(block["gates_skipped"]) == {
         "singleton_slope",
         "spread_ratio",
         "within_battle_slope",
         "post1800_ratio",
-        "between_battle_ppc",
+        "post1800_relative_level",
+        "all_sides_ratio",
+        "mixed_ppc",
+        "s_d_median",
+        "noise_ratio",
+        "wb_reliability_gap",
     }
     # The statistic itself is still recorded.
     assert block["within_battle_slope"] == pytest.approx(0.3)

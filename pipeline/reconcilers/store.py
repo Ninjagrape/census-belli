@@ -463,6 +463,31 @@ def log_withheld_sides(
     return logged
 
 
+def reconcile_within_battle_slope(conn: Any, run_id: int | None, *, neutral: bool) -> float | None:
+    """Read a reconcile run's within-battle log-ratio slope.
+
+    Args:
+        conn: An open database connection.
+        run_id: The ``model_runs.run_id`` of the reconcile run, or None.
+        neutral: Read the regime-neutral fit's slope rather than the published one.
+
+    Returns:
+        The slope, or None when the run, the block or the value is absent (a
+        fixture below the minimum battle count records none).
+    """
+    if run_id is None:
+        return None
+    block = "troops_neutral" if neutral else "troops"
+    value = conn.execute(
+        text(
+            "SELECT diagnostics -> :block -> 'recovery' ->> 'within_battle_slope' "
+            "FROM model_runs WHERE run_id = :run_id"
+        ),
+        {"block": block, "run_id": run_id},
+    ).scalar_one_or_none()
+    return None if value is None else float(value)
+
+
 def run_fingerprint(conn: Any, run_id: int) -> tuple[str, str]:
     """Identify a ``model_runs`` row across databases.
 

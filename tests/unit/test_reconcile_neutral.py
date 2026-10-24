@@ -22,7 +22,11 @@ from pipeline.reconcilers.records import Report, SourceKey
 
 
 def _report(
-    report_id: int, side_id: int, battle_id: int, regime: str = "modern_scholarly"
+    report_id: int,
+    side_id: int,
+    battle_id: int,
+    regime: str = "modern_scholarly",
+    year: int = 1800,
 ) -> Report:
     return Report(
         report_id=report_id,
@@ -35,7 +39,7 @@ def _report(
         reported_value=10_000.0 * report_id,
         scope="engaged",
         claim_regime=regime,
-        year_astronomical=1800,
+        year_astronomical=year,
     )
 
 
@@ -192,14 +196,16 @@ def _shared_summary(n_draws: int = 4000):  # type: ignore[no-untyped-def]
     """A neutral summary whose shared-parameter draws are exact multiples of a row index.
 
     Side 20 carries one unlabelled and one modern report, side 30 only an
-    unlabelled one dated 1800, side 10 only a modern one.
+    unlabelled one dated 300 BC, side 10 only a modern one. The unlabelled rows are
+    dated before 1800 (side 20's in 1700) because from 1800 on the level anchor
+    removes both shared offsets from them.
     """
     import arviz as az
 
     reports = [
-        _report(1, 30, 3, "unlabelled"),
+        _report(1, 30, 3, "unlabelled", year=-300),
         _report(2, 10, 1),
-        _report(3, 20, 1, "unlabelled"),
+        _report(3, 20, 1, "unlabelled", year=1700),
         _report(4, 20, 1),
     ]
     design = build_design(reports, quantity="troops", ancient_cutoff_year=500)
@@ -220,8 +226,6 @@ def _shared_summary(n_draws: int = 4000):  # type: ignore[no-untyped-def]
         "beta_source": np.zeros((chains, per_chain, design.n_sources)),
         "delta_level": np.zeros((chains, per_chain, len(design.levels))),
         "sigma_source": np.full((chains, per_chain, design.n_sources), SIGMA),
-        "sigma_estimate": np.full((chains, per_chain), 0.1),
-        "sigma_round": np.full((chains, per_chain), 0.1),
         "nu": np.full((chains, per_chain), NU),
     }
     idata = az.from_dict(

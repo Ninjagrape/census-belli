@@ -108,11 +108,15 @@ def test_the_battle_effect_cancels_in_the_ratio_but_the_side_effect_does_not() -
         "seed": 5,
     }
 
-    big_battle = mixed_predictive_ppc(**kwargs, s_b=np.full(N_DRAWS, 5.0), s_d=np.full(N_DRAWS, S_D))
+    big_battle = mixed_predictive_ppc(
+        **kwargs, s_b=np.full(N_DRAWS, 5.0), s_d=np.full(N_DRAWS, S_D)
+    )
     no_battle = mixed_predictive_ppc(**kwargs, s_b=np.zeros(N_DRAWS), s_d=np.full(N_DRAWS, S_D))
     no_side = mixed_predictive_ppc(**kwargs, s_b=np.zeros(N_DRAWS), s_d=np.zeros(N_DRAWS))
 
-    assert big_battle["replicated_median"] == pytest.approx(no_battle["replicated_median"], rel=0.25)
+    assert big_battle["replicated_median"] == pytest.approx(
+        no_battle["replicated_median"], rel=0.25
+    )
     assert no_side["replicated_median"] < 0.5 * no_battle["replicated_median"]
 
 

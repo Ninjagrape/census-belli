@@ -127,7 +127,10 @@ def test_a_masked_row_ignores_the_unlabelled_offset_and_the_era_term() -> None:
 
     eta_a = _eval(model, [model.row_eta], base)[0]
     eta_b = _eval(model, [model.row_eta], shifted)[0]
-    moved = {s: eta_b[i] - eta_a[i] for s, i in _row_order(design).items()}
+    raw = {s: eta_b[i] - eta_a[i] for s, i in _row_order(design).items()}
+    # m0 is derived from the sampled corpus level, so moving g shifts every row by the
+    # same amount; the anchor-regime row (no g, no era term) measures that shift.
+    moved = {s: v - raw[5] for s, v in raw.items()}
 
     assert moved[1] == pytest.approx(0.0, abs=1e-12)  # unlabelled 1850
     assert moved[6] == pytest.approx(0.0, abs=1e-12)  # unlabelled 1800
@@ -236,10 +239,11 @@ def test_battle_effects_are_shared_by_the_two_sides_of_a_battle() -> None:
     point["s_b_log__"] = np.asarray(0.0)  # s_b = 1
 
     (mu,) = _eval(model, [model["mu_side"]], point)
+    by_id = dict(zip(design.side_ids, mu, strict=True))
 
-    # Sides 0 and 1 are one battle: same era bin, same zb, zd zero, so the same mu.
-    assert mu[0] == pytest.approx(mu[1])
-    assert mu[0] != pytest.approx(mu[2])
+    # Sides 1 and 2 are one battle: same era bin, same zb, zd zero, so the same mu.
+    assert by_id[1] == pytest.approx(by_id[2])
+    assert by_id[1] != pytest.approx(by_id[3])
 
 
 def test_the_default_noise_priors_come_from_the_spec_and_the_family_is_normal() -> None:

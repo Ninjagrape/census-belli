@@ -58,7 +58,7 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 import structlog
 
-from pipeline.reconcilers.design import Design
+from pipeline.reconcilers.design import ERA_BIN_LABELS, Design
 
 # Reaching into model.py's private constants rather than re-declaring them:
 # these are judgement calls documented once, in model.py, and a second copy
@@ -72,12 +72,15 @@ from pipeline.reconcilers.model import (
     _ratio_pairs,
     _unknown_level_mask,
     _unlabelled_mask,
+    level_anchor_mask,
+    noise_prior_medians,
 )
 from pipeline.reconcilers.records import Quantity, Report, SideEstimate, SourceBias, SourceKey
 from pipeline.reconcilers.recovery import (
     RecoverySettings,
     battle_pairs,
-    between_battle_ppc,
+    implied_reliability,
+    mixed_predictive_ppc,
     recovery_diagnostics,
     singleton_points,
 )
@@ -216,7 +219,9 @@ def summarise_fit(
         "n_source_keys_own_effect": design.n_source_keys_own_effect,
         "n_source_keys_pooled": design.n_source_keys_pooled,
         "reports_honoured": reports_honoured(idata, design, ci_mass=ci_mass),
-        "s0": _scalar_stats(idata, "s0"),
+        # Casualties keep s0; troops have the P1 side prior instead (side_prior).
+        "s0": _scalar_stats(idata, "s0") if "s0" in idata.posterior.data_vars else None,
+        "side_prior": _side_prior_stats(idata),
         # Type-level observation scale: sqrt(sigma_sq_type) per source type, the
         # sigma a pooled key uses.
         "sigma_type": _sigma_type_stats(idata),
@@ -275,6 +280,8 @@ def summarise_fit(
             year_of_side={r.side_id: r.year_astronomical for r in rows},
             settings=recovery or RecoverySettings(),
             ancient_cutoff_year=ancient_cutoff_year,
+            noise_medians=noise_prior_medians(priors, inflation),
+            battle_nu=priors.side_prior_nu,
         )
 
     logger.info(
@@ -453,8 +460,10 @@ def recovery_block(
     year_of_side: dict[int, int | None],
     settings: RecoverySettings,
     ancient_cutoff_year: int,
+    noise_medians: tuple[float, float] | None = None,
+    battle_nu: float = 4.0,
 ) -> dict[str, Any]:
-    """Recovery diagnostics for one troop fit, including its posterior predictive check.
+    """Recovery diagnostics for one troop fit, including its mixed-predictive check.
 
     Args:
         idata: The fit's posterior.
@@ -465,11 +474,15 @@ def recovery_block(
         year_of_side: ``side_id`` to the battle's astronomical year.
         settings: Sizes and thresholds.
         ancient_cutoff_year: The stage's ancient cutoff.
+        noise_medians: ``(modern, ancient)`` prior medians of the noise sd, for the
+            leak guard; None skips it.
+        battle_nu: Degrees of freedom of the battle effect's prior.
 
     Returns:
         See :func:`pipeline.reconcilers.recovery.recovery_diagnostics`.
     """
     ppc: dict[str, Any] | None = None
+    side_prior = _side_prior_gate_inputs(idata, noise_medians)
     pairs = battle_pairs(design, battle_of_side)
     if len(pairs) >= settings.min_battles:
         rows = np.unique(np.concatenate([np.concatenate([p.rows_a, p.rows_b]) for p in pairs]))
@@ -484,7 +497,34 @@ def recovery_block(
 
         eta, var = _row_eta_and_var(draw, design, rows)
         nu = draw("nu") if "nu" in idata.posterior.data_vars else None
-        ppc = between_battle_ppc(pairs, design.log_y, eta, var, rows, nu, seed=settings.ppc_seed)
+        if {"e", "s_b", "s_d", "m0"} <= set(idata.posterior.data_vars):
+            side_of_row = design.side_index[rows]
+            era_labels = _coord_labels(idata, "era_bin")
+            era = draw("e")[:, [era_labels.index(label) for label in ERA_BIN_LABELS]]
+            era_with_undated = np.concatenate([era, np.zeros((era.shape[0], 1))], axis=1)
+            fixed = (
+                eta
+                - draw("mu_side")[:, side_of_row]
+                + draw("m0")[:, None]
+                + era_with_undated[:, design.era_bin_of_side[side_of_row]]
+            )
+            ppc = mixed_predictive_ppc(
+                pairs,
+                design.log_y,
+                rows,
+                fixed,
+                var,
+                side_of_row,
+                design.battle_of_side,
+                draw("s_b"),
+                draw("s_d"),
+                nu,
+                battle_nu=battle_nu,
+                seed=settings.ppc_seed,
+            )
+            side_prior["reliability"] = implied_reliability(pairs, design.log_y, rows, var, nu)[
+                "reliability"
+            ]
     return recovery_diagnostics(
         design,
         log_estimates,
@@ -495,7 +535,51 @@ def recovery_block(
         singleton_slope=singleton_slope(design, log_estimates),
         spread_ratio=spread_ratio(design, log_estimates),
         ppc=ppc,
+        side_prior=side_prior,
     )
+
+
+def _side_prior_gate_inputs(
+    idata: az.InferenceData, noise_medians: tuple[float, float] | None
+) -> dict[str, Any]:
+    """The side-prior statistics the collapse and leak gates read.
+
+    Args:
+        idata: The fit's posterior.
+        noise_medians: ``(modern, ancient)`` prior medians of the noise sd, or None.
+
+    Returns:
+        ``s_d_median`` and, with ``noise_medians``, ``noise_ratio_modern`` and
+        ``noise_ratio_ancient``: the largest posterior median over prior median across
+        source types. Keys the fit cannot supply are absent.
+    """
+    names = set(idata.posterior.data_vars)
+    stats: dict[str, Any] = {}
+    if "s_d" in names:
+        stats["s_d_median"] = _finite(float(np.median(_pooled(idata, "s_d"))))
+    if noise_medians is not None:
+        for key, variable, prior_median in (
+            ("noise_ratio_modern", "sigma_type_modern", noise_medians[0]),
+            ("noise_ratio_ancient", "sigma_type_ancient", noise_medians[1]),
+        ):
+            if variable in names:
+                medians = np.median(_pooled(idata, variable), axis=0)
+                stats[key] = _finite(float(np.max(medians)) / prior_median)
+    return stats
+
+
+def _side_prior_stats(idata: az.InferenceData) -> dict[str, Any] | None:
+    """Posterior summaries of the P1 side prior's scales, or None for casualties."""
+    names = set(idata.posterior.data_vars)
+    if not {"s_b", "s_d", "tau_e"} <= names:
+        return None
+    return {
+        name: {
+            **_scalar_stats(idata, name),
+            "median": _finite(float(np.median(_pooled(idata, name)))),
+        }
+        for name in ("s_b", "s_d", "tau_e")
+    }
 
 
 def _log_normal_pdf(y: np.ndarray, mu: np.ndarray, sd: np.ndarray) -> np.ndarray:
@@ -554,24 +638,26 @@ def _row_eta_and_var(
     Returns:
         ``(eta, var)``, each of shape ``(n_draws, len(rows))``.
     """
+    keep = 1.0 - level_anchor_mask(design)
     eta = (
         draw("mu_side")[:, design.side_index[rows]]
         + draw("beta_source")[:, design.source_index[rows]]
-        + draw("g_regime")[:, design.regime_index[rows]]
+        + draw("g_regime")[:, design.regime_index[rows]] * keep[rows]
         + draw("delta_level")[:, design.level_index[rows]]
-        + draw("a_era")[:, None] * (design.era * _unlabelled_mask(design))[rows]
+        + draw("a_era")[:, None] * (design.era * _unlabelled_mask(design) * keep)[rows]
     )
     ratio = _ratio_level_mask(design)
     if ratio.any():
         pair_of_row, _ = _ratio_pairs(design)
         offsets = draw("sigma_ratio")[:, None] * draw("z_ratio")[:, pair_of_row[rows]]
         eta = eta + offsets * ratio[rows]
-    var = (
-        _row_sigma(draw, design, rows) ** 2
-        + draw("sigma_estimate")[:, None] ** 2 * design.is_estimate.astype(float)[rows]
-        + draw("sigma_round")[:, None] ** 2 * design.roundness[rows]
-        + design.range_var[rows]
-    )
+    var = _row_sigma(draw, design, rows) ** 2 + design.range_var[rows]
+    if design.quantity != "troops":
+        var = (
+            var
+            + draw("sigma_estimate")[:, None] ** 2 * design.is_estimate.astype(float)[rows]
+            + draw("sigma_round")[:, None] ** 2 * design.roundness[rows]
+        )
     unknown = _unknown_level_mask(design)
     if unknown.any():
         var = var + draw("sigma_unknown")[:, None] ** 2 * unknown[rows]
@@ -713,9 +799,10 @@ def reports_honoured(
     g_regime = _pooled(idata, "g_regime")
     delta = _pooled(idata, "delta_level")
     a_era = _pooled(idata, "a_era")
+    keep = 1.0 - level_anchor_mask(design)
     era = design.era.copy()
     if "unlabelled" in design.regimes:
-        era = era * (design.regime_index == design.regimes.index("unlabelled"))
+        era = era * (design.regime_index == design.regimes.index("unlabelled")) * keep
     else:
         era = era * 0.0
 
@@ -743,7 +830,7 @@ def reports_honoured(
             eta = (
                 mu[:, column]
                 + beta[:, int(design.source_index[row])]
-                + g_regime[:, int(design.regime_index[row])]
+                + g_regime[:, int(design.regime_index[row])] * keep[row]
                 + delta[:, int(design.level_index[row])]
                 + a_era * era[row]
             )
@@ -1052,7 +1139,7 @@ def _convergence(
         if values.size == 0:
             continue
         candidate = float(values.min())
-        if "side" in data_array.dims or "ratio_pair" in data_array.dims:
+        if any(dim in data_array.dims for dim in ("side", "ratio_pair", "battle")):
             min_ess_side = min(min_ess_side, candidate)
         elif candidate < min_ess:
             min_ess = candidate
@@ -1332,7 +1419,8 @@ def _side_offsets(idata: az.InferenceData, design: Design) -> np.ndarray:
         if "unlabelled" in design.regimes
         else np.zeros(design.n_obs, dtype=bool)
     )
-    era_row = design.era * unlabelled
+    keep = 1.0 - level_anchor_mask(design)
+    era_row = design.era * unlabelled * keep
     regime_weight = np.zeros((design.n_sides, len(design.regimes)))
     level_weight = np.zeros((design.n_sides, len(design.levels)))
     era_weight = np.zeros(design.n_sides)
@@ -1342,7 +1430,7 @@ def _side_offsets(idata: az.InferenceData, design: Design) -> np.ndarray:
     row_weight = _row_precision(idata, design)
     totals = np.bincount(design.side_index, weights=row_weight, minlength=design.n_sides)
     totals[totals == 0] = 1.0
-    np.add.at(regime_weight, (design.side_index, design.regime_index), row_weight)
+    np.add.at(regime_weight, (design.side_index, design.regime_index), row_weight * keep)
     np.add.at(level_weight, (design.side_index, design.level_index), row_weight)
     np.add.at(era_weight, design.side_index, row_weight * era_row)
     regime_weight /= totals[:, None]
