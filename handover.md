@@ -11,9 +11,58 @@ would otherwise get it wrong. Session narratives go in
 Code comments cite "handover §9.3" (a file in `docs/handover/`) and
 "handover-log §16" (a file in `docs/handover-log/`).
 
-Last updated: 2026-10-22 (night, mid-session; workstream A in progress).
+Last updated: 2026-10-25 02:40 (overnight run done; awaiting the user).
 
-## 0. In flight (2026-10-22): workstream A, troop numbers
+## 0. In flight (2026-10-25): P1 validated on a corpus copy, NOT merged
+
+**Read handover-log §34 first.** `wip/troop-p1` at 07f529c (P1 + troop-scope
++ 39 approved overrides + manual_entry bias pin). On a corpus copy, the base
+(noise 0.22/0.40) passes every reconcile error gate. wb 0.63, implied
+reliability 0.67, impute kept-pair 0.67 (corpus2 had 0.60 / 0.43). The ranking
+barely moves between noise 0.22 and a free prior. Khalid #4 and Pyrrhus #14
+are unchanged; their cause is the §29 ancient figures, which P1 does not
+address.
+
+**User decisions, 2026-10-25 (all as recommended):**
+1. **P1 approved at noise 0.22 / 0.40** as the default. Disclose the
+   sensitivity table (§34) with the ranking.
+2. **All three model-review MAJORs are fixed before the corpus2 refit:**
+   - (a) centred `e` (ZeroSumNormal sigma=tau_e) and a centred battle
+     effect, with zd non-centred; re-measure divergences at target_accept 0.9;
+   - (b) store the g_regime posteriors (mean, sd, prior sd) in diagnostics,
+     then measure cross-side learning per regime against an independent-sides
+     fit; cut in two stages if any regime moves by more than 0.5 prior sd from
+     across sides; replace the Gaugamela `abs < 0.25` test with a direct leak
+     test;
+   - (c) tests/model/conftest.py draws `is_ancient` per battle.
+3. **The five python-review MEDIUMs are fixed in the same pass,** before the
+   merge. Restore the casualty `student_t_nu_floor` to 2 (casualty-prefixed),
+   so casualties are unchanged.
+4. **Corpus3 waits until after the corpus2 refit,** one corpus change at a
+   time.
+
+Order: fixes on `wip/troop-p1` (tests first) -> P1 model tests plus a re-run
+of the base reconcile on `general_war_wt_p1_corpus` (expect wb about 0.63,
+0 divergences) -> both reviewers -> full non-model suite -> merge to main
+(no suite running on the main checkout) -> back up corpus2 -> refit corpus2
+in stage order with `--continue-past-deferred` -> both reviewers -> report.
+
+Classify on corpus2 will need the same 25 Sonnet answers; they're in
+`.claude/worktrees/w-p1run/data/llm_responses/classify_20261024T142520Z/`.
+Re-import them with `python -m scripts.llm_offline import --dir ...` against
+corpus2. The 4 resolve answers are in `.../resolve_20261024T134330Z/`.
+
+Scratch DBs, all from this session: `general_war_wt_p1`, `general_war_wt_scope`,
+`general_war_wt_p1_corpus`, `general_war_wt_p1_s015`, `general_war_wt_p1_s030`
+and `general_war_wt_p1_sfree`. Ask the user before dropping any of them.
+
+Worktrees, also from this session: `w-p1`, `w-scope`, `w-p1run`, `w-s015`,
+`w-s030` and `w-sfree`. Each has a data/raw junction; remove it with
+`cmd /c rmdir` before `git worktree remove`.
+
+The 2026-10-22/23 notes below are kept for the record.
+
+## 0a. Earlier (2026-10-22): workstream A, troop numbers
 
 Approved design and user decisions: `docs/handover/07-next-sessions-plan.md`
 "A: approved design (2026-10-22)"; diagnosis: handover-log §31.
@@ -27,8 +76,30 @@ Approved design and user decisions: `docs/handover/07-next-sessions-plan.md`
   recovery gate on the corpus**, and so did all four noise variants in the
   experiment (worktree `w-exp`, branch `wip/noise-exp` = recon + main, DB
   `general_war_wt_exp_corpus`). Do not merge it as is.
-- **NEXT SESSION STARTS HERE: the user decides on the redesign in
-  handover-log §32** (bayesian-model-reviewer, 2026-10-23). Decisions to ask:
+- **2026-10-23 session: the user approved all four as recommended** (P1; new
+  wb gate; historiography-drafted `troop_strength` overrides + span guard,
+  drafts shown to the user first; explicit level anchor = unmarked post-1800
+  figures at face value, g_unlabelled and a_era zero there) and Phase 2b
+  ov-0055..0081, 0085, 0086 (0072..0074 retargeted to the Jena/Auerstedt
+  children); ov-0082..0084, 0087, 0088 held. Plan:
+  `C:\Users\LeeMo\.claude\plans\pasted-content-id-ce35-resume-the-synthetic-scone.md`.
+  Branches: `wip/troop-p1` (worktree `w-p1`, recon + main, P1 model, DB
+  `general_war_wt_p1`), `wip/troop-scope` (worktree `w-scope`, from p1, the
+  override kind + span guard, DB `general_war_wt_scope`).
+- **Corpus widening (user, 2026-10-23):** the corpus is Arsht's 22 generals'
+  battles (`config/sources_seed_arsht.yaml`), so anyone outside that roster
+  (Montgomery: only Alam el Halfa, 2nd Alamein, Bulge, Overlord) is missing
+  most battles. Decision: **complete the campaigns** (every battle sharing a
+  Wikidata `P361` parent with a corpus battle, frozen into a seed file), into
+  a new `general_war_corpus3`, **after P1 is validated** on corpus2. Size
+  measurement in progress (scratchpad `campaigns\`).
+- `wip/troop-scope` done (1c5c213): `troop_strength` kind + span guard; suite
+  2630 passed, 1 failed (hard-coded check count, fixed, file re-run green;
+  full suite not re-run). Approved entries staged in
+  `docs/handover-log/33-troop-strength-drafts-approved-2026-10-23.yaml`.
+  Override rows share source type `manual_entry`: ask the model reviewer
+  whether that type's bias term should be pinned.
+- Decisions that were asked (kept for the record):
   1. Approve design P1: side prior with era means plus a shared battle effect
      (opposing armies' reported sizes correlate at 0.80), Normal likelihood,
      noise LogNormal(log 0.22, 0.2) / ancient (log 0.40, 0.2), no

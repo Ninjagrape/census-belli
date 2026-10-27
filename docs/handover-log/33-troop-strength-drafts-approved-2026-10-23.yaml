@@ -1,0 +1,97 @@
+# troop_strength entries approved by the user on 2026-10-23 (handover-log §33).
+# Drafted by historiography-reviewer from current Wikipedia wikitext; page
+# numbers are as cited by Wikipedia, not checked in the books. ov-0093 (PLO,
+# Lebanon 1982) was not approved. Wars stored as battles (ov-0090, 0091, 0092,
+# 0099) and Stalingrad (ov-0095, 0096, counter-offensive phase) are stopgaps
+# with TODOs to exclude or split. Copy into config/overrides.yaml in the final
+# format of the troop_strength kind (wip/troop-scope).
+
+  - id: ov-0090
+    kind: troop_strength
+    target: {battle: Yom_Kippur_War-3c934020bf, side: Egypt}
+    value: {low: 914000, high: 1067500}
+    scope: deployed
+    source: "Wikipedia, 'Yom Kippur War', infobox strength1 'Total' row, the sum of the cited national figures (Egypt 650,000 Rabinovich 2004 p. 54 to 850,000 Herzog 1975 p. 239; Syria 150,000 Rabinovich 2004 p. 54 to 300,000 Gilbert 2008 p. 436; expeditionary forces 120,000 Rabinovich 2004 p. 54)"
+    note: "The side carries the whole Arab coalition's infobox: eleven 'total' rows from Cuba's 500 to the coalition's 1,067,500, all read as rival claims for one side, so reconcile settled at 73,684. The Israel side is the IDF's mobilised 375,000-415,000 (Rabinovich p. 54), so the coalition's total strength is the like-for-like figure. Stopgap: this is a war, not a battle."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0091
+    kind: troop_strength
+    target: {battle: Six-Day_War-0ec081a400, side: United Arab Republic}
+    value: {point: 465000}
+    scope: deployed
+    source: "Herzog, The Arab-Israeli Wars (rev. 1984), p. 149, as cited in Wikipedia, 'Six-Day War', infobox strength2 'Total'"
+    note: "The rows mix Jordan 45,000 deployed / 55,000 total, Syria 75,000, Egypt 100,000 deployed / 160,000 total and the Arab total of 465,000. Israel's only figure is '264,000 total' (Stone 2004 p. 217), so the Arab total is the like-for-like figure. Stopgap: this is a war, not a battle."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0092
+    kind: troop_strength
+    target: {battle: 1982_Lebanon_War-16c1972218, side: Israel}
+    value: {point: 78000}
+    scope: deployed
+    source: "Library of Congress Federal Research Division, Lebanon: A Country Study, as cited in Wikipedia, '1982 Lebanon War', section 'Israel and allies' ('IDF forces totalled 78,000 men ... deployed in five divisions and two reinforced brigade-size units')"
+    note: "The rows were IDF 78,000, Lebanese Forces 30,000 and SLA 5,000, read as rival totals, so reconcile settled at 32,630. The Lebanese Forces 'took a small role in the fighting', so the IDF invasion force is the figure."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0094
+    kind: troop_strength
+    target: {battle: Siege_of_Toulon_1793-b5c04ccbb0, side: French Royalists}
+    value: {point: 22000}
+    scope: deployed
+    source: "Smith 1999, pp. 63-64, as cited in Wikipedia, 'Siege of Toulon (1793)', section 'Order of battle' ('Allied Forces (total 22,000)'); infobox strength2 gives 22,000-23,000"
+    note: "The side is the whole Allied garrison but its rows were Royalist French 1,500 and the 22,000-23,000 total; the British, Spanish and Neapolitan contingents were mis-coded branch=naval. Reconcile settled at 18,601."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0095
+    kind: troop_strength
+    target: {battle: Battle_of_Stalingrad-9e41ff979f, side: Soviet Union}
+    value: {low: 1103000, high: 1143500}
+    scope: deployed
+    source: "Glantz and House, When Titans Clashed (1995), p. 134, and Istoriya Vtoroi Mirovoi Voiny 1939-1945, vol. 6 (Voenizdat 1976), p. 35, as cited in Wikipedia, 'Battle of Stalingrad', infobox strength2, 'During the Soviet counter-offensive'"
+    note: "The rows were 187,000 (opening of the Axis offensive, July 1942) and 1,103,000-1,143,500 (start of Uranus, 19 November 1942): same scope, different phases. The counter-offensive decided the battle, so its figures are used for both sides (ov-0096). Stopgap until the battle is split by phase."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0096
+    kind: troop_strength
+    target: {battle: Battle_of_Stalingrad-9e41ff979f, side: Nazi Germany}
+    value: {point: 1011000}
+    scope: deployed
+    source: "Glantz and House, When Titans Clashed (1995), p. 346, and Istoriya Vtoroi Mirovoi Voiny 1939-1945, vol. 6 (Voenizdat 1976), p. 35, as cited in Wikipedia, 'Battle of Stalingrad', infobox strength1, 'During the Soviet counter-offensive'"
+    note: "The rows were 270,000 (opening of the Axis offensive) and 1,011,000 (19 November 1942), the latter all Axis forces on the Stalingrad axis including Romanian, Italian and Hungarian armies. Paired with ov-0095. Credits the side's commanders with allied armies they did not command; disclosed."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0097
+    kind: troop_strength
+    target: {battle: Battle_of_Smolensk_1812-947e24d5ba, side: First French Empire}
+    value: {point: 45000}
+    scope: deployed
+    source: "Bodart, Militär-historisches Kriegs-Lexikon (1908), p. 436; Nafziger, Napoleon's Invasion of Russia (1988), pp. 185-186; as cited in Wikipedia, 'Battle of Smolensk (1812)', infobox and lead"
+    note: "The rows were 180,000 (the Grande Armée's main body present) and '45,000 engaged', both stored as scope=engaged. The engaged figure is the force that fought."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0098
+    kind: troop_strength
+    target: {battle: Battle_of_Smolensk_1812-947e24d5ba, side: Russian Empire}
+    value: {point: 30000}
+    scope: deployed
+    source: "Bodart, Militär-historisches Kriegs-Lexikon (1908), p. 436; Nafziger, Napoleon's Invasion of Russia (1988), pp. 185-186; as cited in Wikipedia, 'Battle of Smolensk (1812)', infobox and lead"
+    note: "The rows were 120,000 (the combined 1st and 2nd Western Armies in the area) and '30,000 engaged'. Most of Bagration's army had marched east before the main assault."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0099
+    kind: troop_strength
+    target: {battle: Operation_Torch-047bfa5615, side: United States}
+    value: {point: 107000}
+    scope: deployed
+    source: "Wikipedia, 'Operation Torch', infobox strength1 (Ground forces 107,000: 35,000 Morocco, 39,000 and 33,000 Algiers/Oran); Western Task Force 35,000 per Hague 2000 pp. 179-180 in the article body"
+    note: "The side is the whole Allied landing force (no UK side). Its total rows were 35,000 (Western Task Force only) and 107,000. The 107,000 is uncited in the infobox but equals the three task forces' sum; the assault-wave alternative is 73,500 (Rohwer 2005 p. 209). Stopgap: a multi-landing operation stored as one battle."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0100
+    kind: troop_strength
+    target: {battle: Battle_of_Hohenfriedberg-1d308b61b6, side: Habsburg Monarchy}
+    value: {low: 59000, high: 65754}
+    scope: deployed
+    source: "Chandler, The Art of Warfare in the Age of Marlborough, p. 306 (59,000-62,500); Duffy, The Army of Frederick the Great (1974), p. 234 (Austrians 37,654 regulars plus 2,000-3,000 hussars and Croats; Saxons 22,500 regulars plus 2,600 uhlans); as cited in Wikipedia, 'Battle of Hohenfriedberg', infobox strength2"
+    note: "The combined Austro-Saxon army. Its rows were the Saxon 22,500, the Austrian 37,654 and the combined 59,000-62,500, read as rival totals, so reconcile settled at 29,687 against Prussia's 43,066, inverting a battle of near parity."
+    reviewed: {by: lee, "on": 2026-10-23}

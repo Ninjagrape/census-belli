@@ -96,6 +96,13 @@ Part of the handover; the index is `handover.md` at the repo root.
   folding `translate()` in resolve's gates); run those through SQLAlchemy.
 - `remove_orphan_generals` keeps generals that old model runs reference, so a
   general resolve stopped linking survives with no battle links ("zombie").
+- **No personal details in web request headers.** On 2026-10-23
+  historiography-reviewer's first `curl` batch to Wikipedia sent a User-Agent
+  containing the user's email address. Wikimedia 403s a contact-free UA, so
+  the user approved the repo URL as the contact:
+  `GeneralWARBot/0.1 (https://github.com/Ninjagrape/census-belli) httpx/<ver>`
+  (concurrency 1, < 5 req/s, maxlag, honour Retry-After). `agents/crawl.yaml`
+  still has a placeholder UA; change it before the corpus3 crawl.
 - `claude-haiku-5-5` thinks unless told not to (handled by the
   `thinking_on_by_default` trait) and cannot take temperature 0.
 

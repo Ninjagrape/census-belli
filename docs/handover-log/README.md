@@ -49,3 +49,5 @@ Last updated: 2026-10-10. §21 to §23 are committed (`a9abeba`, `401e1c7`, `3c6
 | §30 | Bayesian review of the Phase 2 refit (runs 84, 86, 108), 2026-10-18 | [30-phase2-refit-bayesian-review-2026-10-18.md](30-phase2-refit-bayesian-review-2026-10-18.md) |
 | §31 | Troop numbers: reconcile shrinkage and impute weak-side diagnosis (run 84/86), 2026-10-22 | [31-troop-numbers-diagnosis-2026-10-22.md](31-troop-numbers-diagnosis-2026-10-22.md) |
 | §32 | Troop-number redesign review: noise experiment V1-V4 and proposed design P1 (era + battle side prior), 2026-10-23 | [32-troop-redesign-review-2026-10-23.md](32-troop-redesign-review-2026-10-23.md) |
+| §33 | Ten troop_strength override entries approved by the user (yaml), 2026-10-23 | [33-troop-strength-drafts-approved-2026-10-23.yaml](33-troop-strength-drafts-approved-2026-10-23.yaml) |
+| §34 | P1 implemented, reviewed, and sensitivity on a corpus copy (noise 0.15/0.22/0.30/free), 2026-10-25 | [34-p1-sensitivity-2026-10-25.md](34-p1-sensitivity-2026-10-25.md) |
