@@ -25,10 +25,10 @@ particular source's number differs from it.
 Casualties draw ``mu_side = m0 + s0 * z_side`` with a Student-t ``z_side``, as
 before. Troops use a prior built from the battle and its period::
 
-    mu_side[s] = m0 + e[era_bin(s)] + s_b * zb[battle(s)] + s_d * zd[s]
-    e  = tau_e * ZeroSumNormal(era_bin)          tau_e ~ HalfNormal(1)
-    zb ~ StudentT(nu=4, 0, 1)   per battle       s_b ~ HalfNormal(1)
-    zd ~ Normal(0, 1)           per side         s_d ~ HalfNormal(0.5)
+    mu_side[s] = m0 + e[era_bin(s)] + b[battle(s)] + s_d * zd[s]
+    e  = tau_e * z_era, z_era ~ ZeroSumNormal(1) over era_bin  tau_e ~ HalfNormal(1)
+    b  = s_b * zb, zb ~ StudentT(nu=4, 0, 1)  per battle  s_b ~ HalfNormal(1)
+    zd ~ Normal(0, 1)                per side         s_d ~ HalfNormal(0.5)
 
 The old prior drew a battle's two sides independently from one corpus mean, while
 the reported log sizes of the two sides correlate at 0.80 (ICC) and the means
@@ -38,12 +38,21 @@ failed everywhere (``docs/handover-log/32-troop-redesign-review-2026-10-23.md``)
 The era bins are fixed by the battle's astronomical year (``design.ERA_BIN_LABELS``);
 ``e`` is zero-sum so ``m0`` keeps its meaning. A side whose battle is undated takes
 a sixth index that maps to a zero era effect: it is not a member of the zero-sum
-vector, because no date is no evidence that its period is average. ``zb`` is shared
+vector, because no date is no evidence that its period is average. ``b`` is shared
 by the two sides of a battle and cancels in their log ratio; ``s_d`` is what is left
 of the ratio's variance once the noise is removed, and a collapse of ``s_d`` is a
 gate. Troops also use a Normal likelihood, ``sigma_type_*`` priors with log-sd 0.2 and
 no ``sigma_round`` or ``sigma_estimate`` term at all (they let noise leak around its
 prior, 0.67 under a Normal fit).
+
+``e``, ``b`` and ``zd`` are all non-centred. Both centred forms were tried in the
+2026-10-28 pass and made sampling worse: a centred ``b`` gave 2081 divergences on the
+main recovery corpus, and a centred ``e`` gave convergence failures on ``tau_e``/``e``
+in test_reconcile_recovery and test_reconcile_contamination at target_accept
+0.97-0.99. The non-centred form stays and target_accept stays 0.99.
+``side_prior_independent`` drops ``b`` and widens ``s_d`` to
+``sqrt(battle_effect_prior_sd^2 + side_deviation_prior_sd^2)``, an ablation for
+comparing P1 against independent sides.
 
 ## The level anchor (an explicit assumption)
 
@@ -260,7 +269,7 @@ import numpy as np
 import structlog
 import yaml
 
-from pipeline.reconcilers.design import Design
+from pipeline.reconcilers.design import MODERN_FROM_YEAR, Design
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     import arviz as az
@@ -320,7 +329,7 @@ _UNLABELLED: Final[str] = "unlabelled"
 
 # Unlabelled troop rows from this astronomical year on are read at face value;
 # see "The level anchor" in the module docstring.
-ANCHOR_FROM_YEAR: Final[int] = 1800
+ANCHOR_FROM_YEAR: Final[int] = MODERN_FROM_YEAR
 
 
 @dataclass(frozen=True)
@@ -411,6 +420,7 @@ class ModelPriors:
     era_effect_prior_sd: float = 1.0
     battle_effect_prior_sd: float = 1.0
     side_deviation_prior_sd: float = 0.5
+    side_prior_independent: bool = False
 
     @property
     def informative_noise(self) -> bool:
@@ -472,10 +482,14 @@ class ModelPriors:
             noise_modern_log_sd=float(params.get("noise_modern_log_sd", 0.3)),
             noise_ancient_median=float(params.get("noise_ancient_median", 0.40)),
             noise_ancient_log_sd=float(params.get("noise_ancient_log_sd", 0.35)),
-            student_t_nu_floor=float(params.get("student_t_nu_floor", 3.0)),
+            # Casualties keep the floor of 2 they had before P1 raised it for troops.
+            student_t_nu_floor=float(
+                params.get(f"{prefix}student_t_nu_floor", 3.0 if is_troops else 2.0)
+            ),
             era_effect_prior_sd=float(params.get("era_effect_prior_sd", 1.0)),
             battle_effect_prior_sd=float(params.get("battle_effect_prior_sd", 1.0)),
             side_deviation_prior_sd=float(params.get("side_deviation_prior_sd", 0.5)),
+            side_prior_independent=bool(params.get("side_prior_independent", False)),
         )
 
 
@@ -884,9 +898,14 @@ def _troop_side_prior(
 ) -> Any:
     """The P1 side prior: era mean, shared battle effect and side deviation.
 
-    ``mu_side = m0 + e[era_bin] + s_b * zb[battle] + s_d * zd``, all non-centred.
-    An undated side maps to a sixth, appended zero rather than to a member of the
-    zero-sum vector; see the module docstring.
+    ``mu_side = m0 + e[era_bin] + b[battle] + s_d * zd``, all non-centred: ``e = tau_e * z_era``,
+    ``b = s_b * zb``. Centring either made sampling worse (module docstring). An undated
+    side maps to a sixth, appended zero rather than to a member of the zero-sum vector;
+    see the module docstring.
+
+    With ``priors.side_prior_independent`` the battle effect is dropped and the
+    side deviation takes the combined scale, so total side variance stays
+    comparable: ``mu_side = m0 + e[era_bin] + s_d * zd``.
 
     Args:
         pm_module: The imported pymc module.
@@ -902,19 +921,28 @@ def _troop_side_prior(
     z_era = pm_module.ZeroSumNormal("z_era", sigma=1.0, dims="era_bin")
     era_effect = pm_module.Deterministic("e", tau_e * z_era, dims="era_bin")
     era_with_undated = pt_module.concatenate([era_effect, pt_module.zeros(1)])
-
-    s_b = pm_module.HalfNormal("s_b", sigma=priors.battle_effect_prior_sd)
-    s_d = pm_module.HalfNormal("s_d", sigma=priors.side_deviation_prior_sd)
-    zb = pm_module.StudentT("zb", nu=priors.side_prior_nu, mu=0.0, sigma=1.0, dims="battle")
-    zd = pm_module.Normal("zd", mu=0.0, sigma=1.0, dims="side")
-
-    battle_of_side = _data(pm_module, "data_side_battle", design.battle_of_side)
     era_of_side = _data(pm_module, "data_side_era_bin", design.era_bin_of_side)
-    return pm_module.Deterministic(
-        "mu_side",
-        m0 + era_with_undated[era_of_side] + s_b * zb[battle_of_side] + s_d * zd,
-        dims="side",
-    )
+
+    deviation_sd = priors.side_deviation_prior_sd
+    if priors.side_prior_independent:
+        deviation_sd = float(
+            np.hypot(priors.battle_effect_prior_sd, priors.side_deviation_prior_sd)
+        )
+    s_d = pm_module.HalfNormal("s_d", sigma=deviation_sd)
+    zd = pm_module.Normal("zd", mu=0.0, sigma=1.0, dims="side")
+    location = m0 + era_with_undated[era_of_side] + s_d * zd
+
+    if not priors.side_prior_independent:
+        s_b = pm_module.HalfNormal("s_b", sigma=priors.battle_effect_prior_sd)
+        # Non-centred on purpose: centring the Student-t battle effect gave 2081
+        # divergences (rhat 1.57) on the main recovery corpus at target_accept 0.9,
+        # against 82 with it non-centred.
+        zb = pm_module.StudentT("zb", nu=priors.side_prior_nu, mu=0.0, sigma=1.0, dims="battle")
+        battle_effect = pm_module.Deterministic("b", s_b * zb, dims="battle")
+        battle_of_side = _data(pm_module, "data_side_battle", design.battle_of_side)
+        location = location + battle_effect[battle_of_side]
+
+    return pm_module.Deterministic("mu_side", location, dims="side")
 
 
 def noise_prior_medians(priors: ModelPriors, inflation: InflationPrior) -> tuple[float, float]:
@@ -1318,7 +1346,7 @@ def _attach_likelihood(
         # so Gamma(2, 0.1) would have mean 20, where StudentT is visually
         # Normal -- the robustness the family is here for would be asserted and
         # not delivered. Gamma(2, 0.5) has mean 4, so nu sits near 7 with the
-        # floor at 3 and the tails stay genuinely heavy. The floor is 3
+        # floor at 3 and the tails stay genuinely heavy. The troop floor is 3
         # (student_t_nu_floor), not 2: at 2 the variance is infinite and the
         # sampler used it to absorb disagreement as noise, which inflated every
         # singleton's scale (nu 3.4 with sigma 0.51 on the corpus). Registered as

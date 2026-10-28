@@ -24,12 +24,14 @@ import re
 from collections import defaultdict
 from typing import Final
 
+from pipeline.extractors.store import OVERRIDE_SOURCE_PREFIX
 from pipeline.reconcilers.records import ReconcileCounts, Report, SourceKey
 
 __all__ = [
     "NON_PERSONNEL_TERMS",
     "drop_components_of_stated_totals",
     "drop_orphan_parenthetical_rows",
+    "is_override_report",
     "exclusion_reason",
     "filter_troop_reports",
     "is_stated_total",
@@ -313,6 +315,18 @@ def drop_components_of_stated_totals(
     return kept
 
 
+def is_override_report(report: Report) -> bool:
+    """Whether a report is a figure a ``troop_strength`` override wrote.
+
+    Args:
+        report: Any loaded report.
+
+    Returns:
+        True when its source url carries the override prefix.
+    """
+    return report.source_key.url.startswith(OVERRIDE_SOURCE_PREFIX)
+
+
 def filter_troop_reports(
     reports: list[Report], counts: ReconcileCounts, *, min_plausible_troops: float
 ) -> list[Report]:
@@ -326,7 +340,20 @@ def filter_troop_reports(
 
     Returns:
         The reports that survive, in their original order.
+
+    Raises:
+        ValueError: If a ``troop_strength`` override is below the floor. A curator
+            entered it on purpose, so dropping it as implausible would discard the
+            correction without a trace.
     """
+    for report in reports:
+        if is_override_report(report) and report.reported_value < min_plausible_troops:
+            entry_id = report.source_key.url.removeprefix(OVERRIDE_SOURCE_PREFIX)
+            raise ValueError(
+                f"troop_strength override {entry_id}"
+                f" gives {report.reported_value:g} troops, below min_plausible_troops "
+                f"({min_plausible_troops:g}); fix the override or lower the floor"
+            )
     reason_counter = {
         "date_context": "excluded_date_context",
         "parenthetical_subfigure": "excluded_parenthetical_subfigure",

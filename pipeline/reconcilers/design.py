@@ -87,9 +87,14 @@ CASUALTY_TYPE_ORDER: Final[tuple[str, ...]] = (
 _TROOPS: Final[str] = "troops"
 _UNLABELLED: Final[str] = "unlabelled"
 
+# First astronomical year of the modern period. One constant for the three places
+# that mean it: the 1800 era bin edge below, the level anchor (model.py) and the
+# post-1800 recovery gates (recovery.py).
+MODERN_FROM_YEAR: Final[int] = 1800
+
 # Era bins of the troop side prior (P1), by the battle's astronomical year. The
 # lower edges are the first year of the bin; the first bin is open below.
-_ERA_BIN_EDGES: Final[tuple[int, ...]] = (500, 1500, 1800, 1900)
+_ERA_BIN_EDGES: Final[tuple[int, ...]] = (500, 1500, MODERN_FROM_YEAR, 1900)
 ERA_BIN_LABELS: Final[tuple[str, ...]] = (
     "before_500",
     "500_1499",
@@ -465,6 +470,15 @@ def build_design(
     # zeroed so the stored column is exactly what the model uses.
     unlabelled = np.array([r.claim_regime == _UNLABELLED for r in rows], dtype=bool)
     known = ~np.isnan(era_raw) & unlabelled
+    if quantity == _TROOPS:
+        # The level anchor (model.level_anchor_mask) removes the era term from
+        # unlabelled troop rows dated MODERN_FROM_YEAR or later, so they must not
+        # pull the centre of the rows that keep it.
+        years = np.array(
+            [np.nan if r.year_astronomical is None else r.year_astronomical for r in rows],
+            dtype=float,
+        )
+        known &= ~(years >= MODERN_FROM_YEAR)
     era_mean = float(era_raw[known].mean()) if bool(known.any()) else 0.0
     era = np.where(known, era_raw - era_mean, 0.0)
     era_centre_rows = int(known.sum())

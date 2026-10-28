@@ -56,7 +56,10 @@ params:
   # design called for 1500; set 1500 here to move the wide scale to the medieval
   # rows too.
   noise_ancient_cutoff_year: null
-  student_t_nu_floor: 3.0             # nu = floor + Gamma(2, 0.5); the old floor was 2
+  # nu = floor + Gamma(2, 0.5). Troops moved to 3 with P1; casualties keep the
+  # original floor of 2 (the casualty_ prefix, like the other per-quantity keys).
+  student_t_nu_floor: 3.0
+  casualty_student_t_nu_floor: 2.0
   # Half-normal scales of the hedged-figure and rounded-figure variance terms.
   # 0.1 for troops (they were 0.3, below under their old names); casualties
   # keep 0.3 via the casualty_ names.
@@ -107,6 +110,10 @@ params:
   era_effect_prior_sd: 1.0
   battle_effect_prior_sd: 1.0         # s_b ~ HalfNormal
   side_deviation_prior_sd: 0.5        # s_d ~ HalfNormal
+  # true drops the shared battle effect: sides are independent given their era,
+  # with s_d ~ HalfNormal(sqrt(battle_effect_prior_sd^2 + side_deviation_prior_sd^2)).
+  # An ablation, used to compare P1 against independent sides per regime.
+  side_prior_independent: false
   # Under `contaminated` point rows are a two-component Normal mixture (faithful
   # noise plus a wide component, keys below). Kept as an ablation: on the real
   # corpus pi_contam came back at 0.02, so it was not the cause of the collapse.
@@ -314,7 +321,7 @@ quality_checks:
   - name: troop_span_guard
     check: >
       SELECT COALESCE((
-        SELECT (latest.diagnostics -> 'troop_span_guard' ->> 'n_errors')::int
+        SELECT COALESCE((latest.diagnostics -> 'troop_span_guard' ->> 'n_errors')::int, -1)
         FROM (
           SELECT diagnostics
           FROM model_runs
@@ -331,8 +338,11 @@ quality_checks:
       (7.4) after the load filters, supersede included. That much disagreement
       is a scope or unit mix-up, not source noise. The offending sides (battle
       slug, side label, min, max) are listed in the newest run's diagnostics
-      under troop_span_guard -> sides. A side with a troop_strength override is
-      exempt: a curator settled its figure. Bounds are the load constants
+      under troop_span_guard -> sides. A side with a troop_strength override
+      (a report whose url starts "override:") is exempt: a curator settled its
+      figure. A run whose diagnostics lack troop_span_guard -> n_errors fails
+      (the query returns -1): the guard did not run, which is not the same as
+      finding nothing. Bounds are the load constants
       SPAN_WARN_LOG_RATIO and SPAN_ERROR_LOG_RATIO, or params troop_span_warn_log
       and troop_span_error_log.
 
@@ -605,6 +615,38 @@ quality_checks:
       pipeline/reconcilers/recovery.py). A calibrated fit's slope is the
       reliability of a reported ratio; a gap means the noise and the shrinkage
       disagree. Published and neutral fit, whichever is worse.
+
+  - name: recovery_gates_skipped
+    check: >
+      SELECT COALESCE((
+        SELECT
+          CASE WHEN jsonb_typeof(latest.diagnostics -> 'troops' -> 'recovery' -> 'gates_skipped') = 'object'
+               THEN (SELECT COUNT(*) FROM jsonb_object_keys(
+                       latest.diagnostics -> 'troops' -> 'recovery' -> 'gates_skipped'))
+               ELSE 0 END
+          + CASE WHEN jsonb_typeof(latest.diagnostics -> 'troops_neutral' -> 'recovery' -> 'gates_skipped') = 'object'
+               THEN (SELECT COUNT(*) FROM jsonb_object_keys(
+                       latest.diagnostics -> 'troops_neutral' -> 'recovery' -> 'gates_skipped'))
+               ELSE 0 END
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 0)
+    threshold: "= 0"
+    severity: warning
+    description: >
+      No recovery gate was skipped. A skipped gate (too few sides, singletons or
+      battles for its statistic, or a fit without the parameter it reads) passes
+      at its sentinel, so a run can look green while having checked nothing. The
+      count is over the published and the neutral fit; each skipped gate and its
+      reason are in diagnostics -> troops -> recovery -> gates_skipped (and the
+      neutral equivalent), and in the reconcile_recovery_gates_skipped warning.
+      A small fixture skipping gates is legitimate, hence a warning.
 
   - name: neutral_post1800_level_relative
     check: >

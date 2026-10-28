@@ -29,7 +29,7 @@ ratios do not: read those on the published fit).
   around the fitted ``mu_side``): superseded for the gate by the mixed predictive.
 - **Mixed-predictive check** (:func:`mixed_predictive_ppc`): the second moment of
   the reported log ratio across those battles, against its distribution when each
-  posterior draw's *side deviations are redrawn* (a new ``zb`` per battle, a new
+  posterior draw's *side deviations are redrawn* (a new ``b`` per battle, a new
   ``zd`` per side, at that draw's ``s_b``, ``s_d``, ``e`` and ``m0``), the fitted
   offsets (regime, scope, source bias) are kept and fresh observation noise is
   drawn at that draw's sigmas. Replicating around the fitted ``mu_side`` cannot pass
@@ -67,7 +67,7 @@ from typing import Any, Final
 import numpy as np
 import structlog
 
-from pipeline.reconcilers.design import Design
+from pipeline.reconcilers.design import MODERN_FROM_YEAR, Design
 
 __all__ = [
     "BattlePair",
@@ -88,7 +88,6 @@ logger = structlog.get_logger()
 
 LARGE_ARMY: Final[float] = 50_000.0
 SMALL_ARMY: Final[float] = 10_000.0
-MODERN_FROM_YEAR: Final[int] = 1800
 _MIN_SLOPE_POINTS: Final[int] = 3
 
 
@@ -402,7 +401,7 @@ def mixed_predictive_ppc(
 
     The statistic is the mean over battles of the squared reported log ratio. For
     each posterior draw the replicated report of a row is its side-independent
-    location ``fixed`` plus a new battle effect ``s_b * zb`` (``zb`` Student-t
+    location ``fixed`` plus a new battle effect ``b`` (``s_b`` times a Student-t
     with ``battle_nu`` degrees of freedom, shared by the battle's sides), plus a new
     side effect ``s_d * zd``, plus new noise at that draw's variance. The fitted
     offsets stay; only the deviations the side prior is a claim about are redrawn.
@@ -668,6 +667,10 @@ def recovery_diagnostics(
         skipped["wb_reliability_gap"] = "no within-battle slope or no implied reliability"
     for gate, reason in skipped.items():
         logger.info("reconcile_recovery_gate_skipped", gate=gate, reason=reason)
+    if skipped:
+        # A skipped gate passes at its sentinel, so name them all at warning
+        # level; the recovery_gates_skipped check counts the same entries.
+        logger.warning("reconcile_recovery_gates_skipped", gates=skipped)
 
     return {
         "singleton_slope": singleton_slope,

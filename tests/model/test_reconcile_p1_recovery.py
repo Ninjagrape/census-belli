@@ -3,7 +3,9 @@
 The corpus follows the generative process the redesign fits
 (``docs/handover-log/32-troop-redesign-review-2026-10-23.md``)::
 
-    log y = m0 + e[era_bin] + s_b * zb[battle] + s_d * zd[side] + b_type + noise
+    log y = m0 + e[era_bin] + b[battle] + s_d * zd[side] + b_type + noise
+
+with ``b`` Student-t(4) of scale ``s_b``
 
 with noise 0.22 on modern rows and 0.40 on rows before the noise cutoff, the two
 medians the informative prior is centred on. Sides are mostly singletons in
@@ -50,9 +52,14 @@ SAMPLER = SamplerSettings(
 )
 
 
-def simulate_p1_corpus(rng: np.random.Generator) -> list[Report]:
-    """Two-sided battles from the P1 process; about a third of sides have two reports."""
+def simulate_p1(rng: np.random.Generator) -> tuple[list[Report], dict[int, float]]:
+    """Two-sided battles from the P1 process; about a third of sides have two reports.
+
+    Returns:
+        The reports and each side's true ``mu_side`` (``m0 + e + b + s_d * zd``).
+    """
     reports: list[Report] = []
+    true_level: dict[int, float] = {}
     report_id = 1
     for battle in range(N_BATTLES):
         bin_ = int(rng.choice(5, p=YEAR_WEIGHTS))
@@ -61,6 +68,7 @@ def simulate_p1_corpus(rng: np.random.Generator) -> list[Report]:
         for side_in_battle in (0, 1):
             side_id = 2 * battle + side_in_battle + 1
             level = TRUE_M0 + TRUE_E[bin_] + TRUE_S_B * zb + TRUE_S_D * rng.standard_normal()
+            true_level[side_id] = float(level)
             n_reports = 2 if rng.random() < 0.33 else 1
             for _ in range(n_reports):
                 source_type = ("wikipedia_infobox", "wikidata")[report_id % 2]
@@ -83,12 +91,27 @@ def simulate_p1_corpus(rng: np.random.Generator) -> list[Report]:
                     )
                 )
                 report_id += 1
-    return reports
+    return reports, true_level
+
+
+def simulate_p1_corpus(rng: np.random.Generator) -> list[Report]:
+    """The reports of :func:`simulate_p1`, for callers that need no truth."""
+    return simulate_p1(rng)[0]
 
 
 @pytest.fixture(scope="module")
-def reports() -> list[Report]:
-    return simulate_p1_corpus(np.random.default_rng(SEED))
+def corpus() -> tuple[list[Report], dict[int, float]]:
+    return simulate_p1(np.random.default_rng(SEED))
+
+
+@pytest.fixture(scope="module")
+def reports(corpus: tuple[list[Report], dict[int, float]]) -> list[Report]:
+    return corpus[0]
+
+
+@pytest.fixture(scope="module")
+def true_level(corpus: tuple[list[Report], dict[int, float]]) -> dict[int, float]:
+    return corpus[1]
 
 
 @pytest.fixture(scope="module")
@@ -219,3 +242,47 @@ def test_the_battle_effect_scale_mixes(fit: Fit) -> None:
 
     assert rhat < 1.02, rhat
     assert ess > 400, ess
+
+
+def _interval(samples: np.ndarray, mass: float) -> tuple[float, float]:
+    tail = (1.0 - mass) / 2.0
+    return float(np.quantile(samples, tail)), float(np.quantile(samples, 1.0 - tail))
+
+
+def test_the_battle_effect_scale_is_recovered(fit: Fit) -> None:
+    s_b = np.asarray(fit.idata.posterior["s_b"].values).ravel()
+    lo, hi = _interval(s_b, 0.95)
+    print(f"s_b true={TRUE_S_B} mean={s_b.mean():.3f} 95%=({lo:.3f}, {hi:.3f})")
+
+    assert lo <= TRUE_S_B <= hi, (lo, hi)
+
+
+def test_era_contrasts_between_unanchored_bins_are_recovered(fit: Fit) -> None:
+    # Bins 3 and 4 (1800 on) carry no regime or era offset (the level anchor), and
+    # bins 1 and 2 share the same offsets (neither is ancient), so each pair's
+    # difference is identified. The level of the pre-1800 bins against the anchored
+    # ones is traded against g_unlabelled and a_era by design, so e itself is not.
+    e = np.asarray(fit.idata.posterior["e"].values).reshape(-1, 5)
+    for high, low in ((4, 3), (2, 1)):
+        lo, hi = _interval(e[:, high] - e[:, low], 0.95)
+        truth = TRUE_E[high] - TRUE_E[low]
+        print(f"e[{high}]-e[{low}] true={truth:.2f} mean={np.mean(e[:, high] - e[:, low]):.3f}")
+        assert lo <= truth <= hi, (high, low, lo, hi)
+
+
+def test_the_side_intervals_cover_the_true_side_sizes_at_ninety_percent(
+    fit: Fit, true_level: dict[int, float]
+) -> None:
+    mu = np.asarray(fit.idata.posterior["mu_side"].values)
+    mu = mu.reshape(-1, mu.shape[-1])
+    positions = {int(side): i for i, side in enumerate(fit.design.side_ids)}
+    covered = [
+        _interval(mu[:, positions[side]], 0.90)[0]
+        <= truth
+        <= _interval(mu[:, positions[side]], 0.90)[1]
+        for side, truth in true_level.items()
+    ]
+    fraction = float(np.mean(covered))
+    print(f"mu_side 90% coverage = {fraction:.3f} over {len(covered)} sides")
+
+    assert 0.82 <= fraction <= 0.97, fraction

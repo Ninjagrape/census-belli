@@ -269,6 +269,7 @@ def summarise_fit(
         "n_identifying_sides": n_identifying_sides(design, inflation.anchor_regime),
         "identified_width": identified_width_stats(idata, design, side_estimates, ci_mass),
         "contraction": _contraction(idata, design, priors, inflation),
+        "g_regime": g_regime_stats(idata, design, inflation),
         "bound_excess": _bound_excess_stats(idata, priors),
     }
     diagnostics.update(_contamination_diagnostics(idata, design, priors.contamination_sd))
@@ -498,7 +499,7 @@ def recovery_block(
 
         eta, var = _row_eta_and_var(draw, design, rows)
         nu = draw("nu") if "nu" in idata.posterior.data_vars else None
-        if {"e", "s_b", "s_d", "m0"} <= set(idata.posterior.data_vars):
+        if {"e", "s_d", "m0"} <= set(idata.posterior.data_vars):
             side_of_row = design.side_index[rows]
             era_labels = _coord_labels(idata, "era_bin")
             era = draw("e")[:, [era_labels.index(label) for label in ERA_BIN_LABELS]]
@@ -517,7 +518,8 @@ def recovery_block(
                 var,
                 side_of_row,
                 design.battle_of_side,
-                draw("s_b"),
+                # No s_b under side_prior_independent: no battle effect to redraw.
+                draw("s_b") if "s_b" in idata.posterior.data_vars else np.zeros(fixed.shape[0]),
                 draw("s_d"),
                 nu,
                 battle_nu=battle_nu,
@@ -572,7 +574,7 @@ def _side_prior_gate_inputs(
 def _side_prior_stats(idata: az.InferenceData) -> dict[str, Any] | None:
     """Posterior summaries of the P1 side prior's scales, or None for casualties."""
     names = set(idata.posterior.data_vars)
-    if not {"s_b", "s_d", "tau_e"} <= names:
+    if not {"s_d", "tau_e"} <= names:
         return None
     return {
         name: {
@@ -580,6 +582,7 @@ def _side_prior_stats(idata: az.InferenceData) -> dict[str, Any] | None:
             "median": _finite(float(np.median(_pooled(idata, name)))),
         }
         for name in ("s_b", "s_d", "tau_e")
+        if name in names
     }
 
 
@@ -1544,6 +1547,52 @@ def _contraction_value(posterior_sd: float, prior_sd: float) -> float | None:
     if prior_sd <= 0 or not math.isfinite(posterior_sd) or not math.isfinite(prior_sd):
         return None
     return _finite(1.0 - posterior_sd / prior_sd)
+
+
+def g_regime_stats(
+    idata: az.InferenceData,
+    design: Design,
+    inflation: InflationPrior,
+    *,
+    neutral: bool = False,
+) -> dict[str, dict[str, float | None]]:
+    """Posterior mean and sd of each regime's bias, with its prior sd.
+
+    A regime whose posterior sd matches its prior sd is carrying its prior, and
+    one whose mean moved when only the opposing side's reports changed is being
+    pulled across sides by the shared battle effect. Both are visible here.
+
+    Args:
+        idata: The fit's posterior; needs ``g_regime`` over ``regime``.
+        design: The design, for the regime vocabulary.
+        inflation: The fitted claim-regime prior the model was built with.
+        neutral: The fit is the regime-neutral variant, whose unlabelled prior is
+            the faithful component.
+
+    Returns:
+        ``{regime: {"mean", "sd", "prior_sd"}}``. The prior is the Normal the
+        model uses for a free regime, so it is analytic; the anchor is pinned, so
+        its sd and prior sd are zero. Empty when the posterior has no
+        ``g_regime``.
+    """
+    if "g_regime" not in idata.posterior.data_vars:
+        return {}
+    samples = _pooled(idata, "g_regime")
+    labels = _coord_labels(idata, "regime")
+    stats: dict[str, dict[str, float | None]] = {}
+    for position, regime in enumerate(labels):
+        if regime == inflation.anchor_regime:
+            prior_sd = 0.0
+        elif neutral and regime == "unlabelled":
+            prior_sd = inflation.faithful_sd
+        else:
+            _, prior_sd = inflation.moments_for(regime)
+        stats[regime] = {
+            "mean": _finite(float(np.mean(samples[:, position]))),
+            "sd": _finite(float(np.std(samples[:, position]))),
+            "prior_sd": _finite(float(prior_sd)),
+        }
+    return stats
 
 
 def _contraction(

@@ -173,3 +173,31 @@ def test_impute_reads_the_reconcile_runs_within_battle_slope(conn: Connection) -
     assert store.reconcile_within_battle_slope(conn, run_id, neutral=False) == pytest.approx(0.62)
     assert store.reconcile_within_battle_slope(conn, run_id + 999, neutral=True) is None
     assert store.reconcile_within_battle_slope(conn, None, neutral=True) is None
+
+
+def test_a_run_without_a_span_guard_block_fails_the_span_gate(conn: Connection) -> None:
+    gate = "troop_span_guard"
+    guard = '{"n_errors": 0, "n_warnings": 0}'
+
+    _fabricate_run(conn, f'{{"troops": {{}}, "troop_span_guard": {guard}}}')
+    assert QualityRunner(conn).run_one(_quality_check(gate)).passed
+
+    _fabricate_run(conn, '{"troops": {}, "troop_span_guard": {"n_errors": 1}}')
+    assert not QualityRunner(conn).run_one(_quality_check(gate)).passed
+
+    _fabricate_run(conn, '{"troops": {}}')
+    assert not QualityRunner(conn).run_one(_quality_check(gate)).passed, "a missing key is not 0"
+
+    _fabricate_run(conn, '{"troops": {}, "troop_span_guard": {}}')
+    assert not QualityRunner(conn).run_one(_quality_check(gate)).passed, "a missing n_errors"
+
+
+def test_skipped_recovery_gates_surface_as_a_warning(conn: Connection) -> None:
+    gate = "recovery_gates_skipped"
+    assert _quality_check(gate)["severity"] == "warning"
+
+    assert _passes(conn, gate, _payload())
+    assert _passes(conn, gate, _payload({"gates_skipped": {}}, {"gates_skipped": {}}))
+    skipped = {"singleton_slope": "3 singletons, need 20"}
+    assert not _passes(conn, gate, _payload({"gates_skipped": skipped}))
+    assert not _passes(conn, gate, _payload(neutral={"gates_skipped": skipped}))

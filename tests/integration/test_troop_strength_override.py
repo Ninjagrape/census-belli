@@ -396,7 +396,8 @@ def _stamp_run(conn: Any, guard: dict[str, Any] | None) -> None:
 @pytest.mark.parametrize(
     ("guard", "error_passes", "warning_passes"),
     [
-        (None, True, True),
+        # No troop_span_guard key: the guard did not run, which must fail, not pass.
+        (None, False, True),
         ({"n_warnings": 0, "n_errors": 0, "sides": []}, True, True),
         ({"n_warnings": 2, "n_errors": 0, "sides": []}, True, False),
         ({"n_warnings": 0, "n_errors": 1, "sides": []}, False, True),

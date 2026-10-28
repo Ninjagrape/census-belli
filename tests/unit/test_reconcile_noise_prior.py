@@ -213,3 +213,24 @@ def test_each_row_uses_its_own_era_scale() -> None:
     keys = design.source_index
     assert row_sd[is_ancient].mean() > row_sd[~is_ancient].mean()
     np.testing.assert_allclose(row_sd[is_ancient], ancient[keys][is_ancient], rtol=0.5)
+
+
+def test_the_nu_floor_is_prefixed_so_casualties_keep_their_original_two() -> None:
+    assert ModelPriors.from_params({}, quantity="casualties").student_t_nu_floor == 2.0
+    assert ModelPriors.from_params({}, quantity="troops").student_t_nu_floor == 3.0
+
+    params = {"student_t_nu_floor": 4.0, "casualty_student_t_nu_floor": 2.5}
+    assert ModelPriors.from_params(params, quantity="troops").student_t_nu_floor == 4.0
+    assert ModelPriors.from_params(params, quantity="casualties").student_t_nu_floor == 2.5
+
+
+def test_the_spec_sets_a_floor_of_three_for_troops_and_two_for_casualties() -> None:
+    from pathlib import Path
+
+    import yaml
+
+    spec = Path(__file__).resolve().parents[2] / "agents" / "reconcile.yaml"
+    params = yaml.safe_load(spec.read_text(encoding="utf-8"))["params"]
+
+    assert ModelPriors.from_params(params, quantity="troops").student_t_nu_floor == 3.0
+    assert ModelPriors.from_params(params, quantity="casualties").student_t_nu_floor == 2.0

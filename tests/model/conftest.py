@@ -305,7 +305,7 @@ def simulate_corpus(
         start_battle_id: First battle id to assign (two sides per battle).
         start_report_id: First report id to assign.
         battle_sd: Log-scale sd of a Student-t(4) effect shared by the two sides of
-            a battle (the P1 ``s_b * zb``). Zero reproduces independent sides, which
+            a battle (the P1 battle effect ``b``). Zero reproduces independent sides, which
             the P1 prior cannot represent: with no battle effect to find, ``s_b`` is
             pinned against zero and mixes poorly (ESS 131, rhat 1.036 on the main
             corpus), so the recovery corpora generate the structure the model fits.
@@ -328,6 +328,7 @@ def simulate_corpus(
     # exactly as build_design computes it).
     pending: list[dict[str, object]] = []
     battle_effect: dict[int, float] = {}
+    battle_is_ancient: dict[int, bool] = {}
     for n_sides, n_reports in side_groups:
         for _ in range(n_sides):
             z = rng.normal()
@@ -336,9 +337,13 @@ def simulate_corpus(
                 battle_effect[battle] = battle_sd * float(rng.standard_t(4)) if battle_sd else 0.0
             true_log_side[side_id] = m0 + battle_effect[battle] + s0 * z
             side_ids_by_report_count.setdefault(n_reports, []).append(side_id)
-            is_ancient = bool(rng.random() < ancient_fraction)
+            # One era per battle: both sides fought at the same time, so the era bin
+            # (and the level anchor) cannot differ between them.
+            if battle not in battle_is_ancient:
+                battle_is_ancient[battle] = bool(rng.random() < ancient_fraction)
+            is_ancient = battle_is_ancient[battle]
             year = ANCIENT_YEAR if is_ancient else modern_year
-            battle_id = start_battle_id + (side_id - start_side_id) // 2
+            battle_id = battle
 
             chosen_sources = rng.choice(
                 len(SOURCES), size=n_reports, replace=n_reports > len(SOURCES)
@@ -370,12 +375,15 @@ def simulate_corpus(
                 report_id += 1
             side_id += 1
 
-    # Centre over dated unlabelled rows only, as build_design does: the era term
-    # applies to no other regime, so including them would shift the truth.
+    # Centre over dated unlabelled rows that keep the era term, as build_design
+    # does: the term applies to no other regime and the level anchor removes it
+    # from 1800 on, so including either would shift the truth.
     era_flags = [
         row["ancient_flag"]
         for row in pending
-        if row["regime"] == "unlabelled" and row["year"] is not None
+        if row["regime"] == "unlabelled"
+        and row["year"] is not None
+        and int(row["year"]) < ANCHOR_FROM_YEAR  # type: ignore[call-overload]
     ]
     era_mean = float(np.mean(era_flags)) if era_flags else 0.0
 

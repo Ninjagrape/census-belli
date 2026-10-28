@@ -1196,3 +1196,45 @@ def test_zero_valued_estimates_are_counted_and_logged_rather_than_dropped_silent
     assert set(logs) == {1}
     dropped = [e for e in captured if e["event"] == "reconcile_estimates_without_a_log"]
     assert [e["n_dropped"] for e in dropped] == [1]
+
+
+def test_g_regime_diagnostics_hold_mean_sd_and_prior_sd_per_regime() -> None:
+    reports = [
+        _report(1, side_id=1, regime="unlabelled"),
+        _report(2, side_id=2, regime="chronicle", url="https://example/b"),
+        _report(3, side_id=3, regime="modern_scholarly", url="https://example/c"),
+    ]
+    design = _design(reports)
+    inflation = InflationPrior()
+    positions = {name: i for i, name in enumerate(design.regimes)}
+    g = np.zeros((2, 400, len(design.regimes)))
+    g[:, :, positions["chronicle"]] = np.random.default_rng(5).normal(0.7, 0.2, size=(2, 400))
+    g[:, :, positions["unlabelled"]] = np.random.default_rng(6).normal(-0.1, 0.4, size=(2, 400))
+    idata = _build_idata(
+        design,
+        inflation,
+        seed=21,
+        n_draws=400,
+        extra_posterior={"g_regime": (["regime"], g)},
+    )
+
+    result = summarise_fit(
+        idata,
+        design,
+        reports,
+        run_id=1,
+        ci_mass=0.95,
+        inflation=inflation,
+        priors=ModelPriors(),
+        computed_at=_COMPUTED_AT,
+    )
+
+    block = result.diagnostics["g_regime"]
+    assert set(block) == set(design.regimes)
+    assert block["chronicle"]["mean"] == pytest.approx(0.7, abs=0.05)
+    assert block["chronicle"]["sd"] == pytest.approx(0.2, abs=0.03)
+    assert block["chronicle"]["prior_sd"] == pytest.approx(inflation.moments_for("chronicle")[1])
+    # The anchor is pinned: no spread in the posterior and none in the prior.
+    anchor = block[inflation.anchor_regime]
+    assert (anchor["sd"], anchor["prior_sd"]) == (0.0, 0.0)
+    json.dumps(result.diagnostics)

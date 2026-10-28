@@ -1,7 +1,7 @@
 """P1 troop side prior: structure of the built model, no sampling.
 
-Troops take ``mu_side = m0 + e[era_bin] + s_b * zb[battle] + s_d * zd[side]`` with a
-Normal likelihood, informative noise and no ``sigma_round`` / ``sigma_estimate`` /
+Troops take ``mu_side = m0 + e[era_bin] + b[battle] + s_d * zd[side]`` (``e``, ``b``
+centred) with a Normal likelihood, informative noise and no ``sigma_round`` / ``sigma_estimate`` /
 ``s0``. Casualties keep their original model exactly. Unlabelled rows from 1800 on
 are read at face value (the level anchor), which the compiled graph must honour.
 """
@@ -138,7 +138,7 @@ def test_a_masked_row_ignores_the_unlabelled_offset_and_the_era_term() -> None:
     assert abs(moved[3]) > 0.5  # undated unlabelled
     assert moved[4] == pytest.approx(1.0)  # chronicle: g only, no era term
     assert moved[5] == pytest.approx(0.0, abs=1e-12)  # anchor regime
-    assert abs(moved[7]) > 0.5  # unlabelled 1799
+    assert moved[7] == pytest.approx(0.5)  # unlabelled 1799: g (+1) and the recentred era (-0.5)
 
 
 def test_the_rotation_weights_count_only_the_offsets_actually_applied() -> None:
@@ -181,8 +181,10 @@ def test_troops_use_the_era_battle_deviation_prior_and_drop_the_old_terms() -> N
     model = build_model(_mixed_design("troops"), priors=ModelPriors(), inflation=InflationPrior())
 
     free = _free_names(model)
-    assert {"tau_e", "zb", "zd", "s_b", "s_d"} <= free
-    assert "e" in model.named_vars
+    assert {"tau_e", "z_era", "zb", "zd", "s_b", "s_d"} <= free
+    assert "e" not in free
+    assert "z_era" in model.named_vars
+    assert "b" in model.named_vars
     assert not {"s0", "z_side", "sigma_round", "sigma_estimate"} & set(model.named_vars)
     assert "mu_side" in model.named_vars
 
@@ -236,7 +238,6 @@ def test_battle_effects_are_shared_by_the_two_sides_of_a_battle() -> None:
     point = model.initial_point()
     point["zd"] = np.zeros_like(point["zd"])
     point["zb"] = np.linspace(-1.0, 1.0, np.size(point["zb"]))
-    point["s_b_log__"] = np.asarray(0.0)  # s_b = 1
 
     (mu,) = _eval(model, [model["mu_side"]], point)
     by_id = dict(zip(design.side_ids, mu, strict=True))
@@ -274,3 +275,56 @@ def test_troop_noise_priors_are_lognormal_at_the_stated_medians() -> None:
         mu, sigma = model.named_vars[name].owner.inputs[-2:]
         assert float(np.mean(mu.eval())) == pytest.approx(np.log(median))
         assert float(np.mean(sigma.eval())) == pytest.approx(0.2)
+
+
+def _logp_of(model: Any, name: str, point: dict[str, Any]) -> float:
+    return float(model.compile_logp(vars=[model[name]])(point))
+
+
+def test_the_era_effect_stays_non_centred_because_centring_it_failed_to_converge() -> None:
+    model = build_model(_mixed_design("troops"), priors=ModelPriors(), inflation=InflationPrior())
+    point = model.initial_point()
+    point["z_era_zerosum__"] = np.array([0.4, -0.2, 0.3, 0.1])
+    point["tau_e_log__"] = np.asarray(0.0)
+    (at_one,) = _eval(model, [model["e"]], point)
+    point["tau_e_log__"] = np.asarray(np.log(2.0))
+    (at_two,) = _eval(model, [model["e"]], point)
+
+    # e is tau_e times a fixed zero-sum vector, so it has no density of its own.
+    assert at_two.sum() == pytest.approx(0.0, abs=1e-9)
+    assert at_two == pytest.approx(2.0 * at_one)
+
+
+def test_the_battle_effect_stays_non_centred_because_centring_it_diverged() -> None:
+    model = build_model(_mixed_design("troops"), priors=ModelPriors(), inflation=InflationPrior())
+    point = model.initial_point()
+    point["zb"] = np.linspace(-1.0, 1.0, np.size(point["zb"]))
+    point["s_b_log__"] = np.asarray(np.log(2.0))
+
+    (b,) = _eval(model, [model["b"]], point)
+
+    assert b == pytest.approx(2.0 * point["zb"])
+
+
+def test_the_independent_sides_variant_drops_the_battle_effect() -> None:
+    from scipy import stats
+
+    priors = ModelPriors(
+        side_prior_independent=True, battle_effect_prior_sd=1.0, side_deviation_prior_sd=0.5
+    )
+    model = build_model(_mixed_design("troops"), priors=priors, inflation=InflationPrior())
+
+    assert not {"b", "zb", "s_b"} & set(model.named_vars)
+    assert {"e", "zd", "s_d", "mu_side"} <= set(model.named_vars)
+    # s_d ~ HalfNormal(sqrt(1.0**2 + 0.5**2)): total side variance matches P1's.
+    point = model.initial_point()
+    point["s_d_log__"] = np.asarray(0.0)  # s_d = 1
+    scale = float(np.sqrt(1.0**2 + 0.5**2))
+    expected = float(stats.halfnorm.logpdf(1.0, scale=scale)) + 0.0  # + log jacobian (s_d = 1)
+    assert _logp_of(model, "s_d", point) == pytest.approx(expected, abs=1e-6)
+
+
+def test_side_prior_independent_reads_from_the_spec_and_defaults_off() -> None:
+    assert ModelPriors().side_prior_independent is False
+    on = ModelPriors.from_params({"side_prior_independent": True}, quantity="troops")
+    assert on.side_prior_independent is True

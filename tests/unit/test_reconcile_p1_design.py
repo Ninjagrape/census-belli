@@ -1,6 +1,6 @@
 """P1 troop side prior: the battle and era-bin indices the design carries.
 
-The side prior is ``m0 + e[era_bin] + s_b * zb[battle] + s_d * zd[side]``, so the
+The side prior is ``m0 + e[era_bin] + b[battle] + s_d * zd[side]``, so the
 design must say which battle each side belongs to and which of five era bins its
 battle falls in. An undated battle has no bin of its own: it takes a sixth index
 that the model maps to a zero era effect.
@@ -135,3 +135,12 @@ def test_a_hand_built_design_defaults_to_one_battle_per_side_and_no_era() -> Non
     assert (design.era_bin_of_side == UNDATED_ERA_BIN).all()
     assert np.isnan(design.year_of_row).all()
     assert len(design.coords()["battle"]) == design.n_sides
+
+
+def test_the_modern_cutoff_year_is_one_constant_shared_by_design_anchor_and_recovery() -> None:
+    from pipeline.reconcilers import design, model, recovery
+
+    assert design.MODERN_FROM_YEAR == 1800
+    assert model.ANCHOR_FROM_YEAR is design.MODERN_FROM_YEAR
+    assert recovery.MODERN_FROM_YEAR is design.MODERN_FROM_YEAR
+    assert design.ERA_BIN_LABELS[design.era_bin(design.MODERN_FROM_YEAR)] == "1800_1899"

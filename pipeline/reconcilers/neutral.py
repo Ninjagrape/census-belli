@@ -39,7 +39,7 @@ from pipeline.reconcilers.likelihood_export import (
     LikelihoodExport,
     likelihood_export,
 )
-from pipeline.reconcilers.model import level_anchor_mask
+from pipeline.reconcilers.model import InflationPrior, level_anchor_mask
 from pipeline.reconcilers.records import NeutralSideEstimate
 from pipeline.reconcilers.recovery import RecoverySettings
 from pipeline.reconcilers.summarise import (
@@ -51,6 +51,7 @@ from pipeline.reconcilers.summarise import (
     _pooled,
     _scalar_stats,
     _side_prior_stats,
+    g_regime_stats,
     recovery_block,
     widen_bounds,
     widening_margins,
@@ -183,7 +184,10 @@ def _side_prior_scale(idata: az.InferenceData) -> np.ndarray:
     """
     if "s0" in idata.posterior.data_vars:
         return _pooled(idata, "s0")
-    scale: np.ndarray = np.sqrt(_pooled(idata, "s_b") ** 2 + _pooled(idata, "s_d") ** 2)
+    s_d = _pooled(idata, "s_d")
+    # Absent under side_prior_independent, where s_d already carries both scales.
+    s_b = _pooled(idata, "s_b") if "s_b" in idata.posterior.data_vars else np.zeros_like(s_d)
+    scale: np.ndarray = np.sqrt(s_b**2 + s_d**2)
     return scale
 
 
@@ -231,6 +235,7 @@ def summarise_neutral(
     ancient_cutoff_year: int = 500,
     noise_medians: tuple[float, float] | None = None,
     battle_nu: float = 4.0,
+    inflation: InflationPrior | None = None,
 ) -> NeutralSummary:
     """Summarise the neutral troops fit.
 
@@ -251,6 +256,8 @@ def summarise_neutral(
         noise_medians: ``(modern, ancient)`` prior medians of the noise sd, for the
             recovery block's leak guard.
         battle_nu: Degrees of freedom of the battle effect's prior.
+        inflation: The claim-regime prior the fit used, for the ``g_regime`` block;
+            without it the block is empty.
 
     Returns:
         The estimates, diagnostics block and draws.
@@ -309,6 +316,9 @@ def summarise_neutral(
         "m0": m0,
         "s0": s0,
         "side_prior": _side_prior_stats(idata),
+        "g_regime": (
+            {} if inflation is None else g_regime_stats(idata, design, inflation, neutral=True)
+        ),
         "sigma_type": _sigma_summary(idata, "sigma_sq_type", square_root=True),
         "sigma_type_ancient": _sigma_summary(idata, "sigma_type_ancient"),
         "nu": _scalar_stats(idata, "nu") if "nu" in idata.posterior.data_vars else None,

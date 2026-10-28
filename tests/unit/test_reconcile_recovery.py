@@ -235,6 +235,17 @@ def test_gates_skip_with_a_reason_on_a_small_fixture() -> None:
     assert block["within_battle_slope"] == pytest.approx(0.3)
 
 
+def test_skipped_gates_are_named_in_one_warning() -> None:
+    from structlog.testing import capture_logs
+
+    with capture_logs() as logs:
+        block = _diagnostics(_battles(3), 0.3)
+
+    (warning,) = [e for e in logs if e["event"] == "reconcile_recovery_gates_skipped"]
+    assert warning["log_level"] == "warning"
+    assert warning["gates"] == block["gates_skipped"]
+
+
 def test_the_minimum_sizes_come_from_the_settings() -> None:
     settings = RecoverySettings.from_params(
         {"recovery_min_sides": 3, "recovery_min_battles": 3, "post1800_ratio_band_hi": 1.3}

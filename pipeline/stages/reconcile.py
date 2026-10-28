@@ -434,6 +434,7 @@ def _fit_neutral_troops(
         ancient_cutoff_year=ancient_cutoff_year,
         noise_medians=noise_prior_medians(priors, inflation),
         battle_nu=priors.side_prior_nu,
+        inflation=inflation,
     )
     summary.diagnostics["prior_predictive_neutral"] = prior_predictive
     worst = summary.diagnostics["worst"]

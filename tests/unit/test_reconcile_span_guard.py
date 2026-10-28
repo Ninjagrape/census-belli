@@ -20,6 +20,7 @@ def _report(
     *,
     side_id: int = 1,
     source_type: str = "wikipedia_infobox",
+    url: str = "",
     lower: bool = False,
     upper: bool = False,
     quantity: str = "troops",
@@ -29,7 +30,7 @@ def _report(
         side_id=side_id,
         battle_id=side_id,
         source_id=1,
-        source_key=SourceKey.from_row(source_type, ""),
+        source_key=SourceKey.from_row(source_type, url),
         source_type=source_type,
         quantity=quantity,  # type: ignore[arg-type]
         reported_value=value,
@@ -109,7 +110,7 @@ def test_a_side_with_a_manual_override_row_is_skipped() -> None:
     reports = [
         _report(1, 10_000.0),
         _report(2, 100_000.0),
-        _report(3, 50_000.0, source_type="manual_entry"),
+        _report(3, 50_000.0, source_type="manual_entry", url="override:ov-0001"),
     ]
 
     assert troop_span_findings(reports) == []
@@ -119,8 +120,8 @@ def test_a_range_override_skips_the_guard_too() -> None:
     reports = [
         _report(1, 10_000.0),
         _report(2, 100_000.0),
-        _report(3, 40_000.0, source_type="manual_entry", lower=True),
-        _report(4, 60_000.0, source_type="manual_entry", upper=True),
+        _report(3, 40_000.0, source_type="manual_entry", url="override:ov-0001", lower=True),
+        _report(4, 60_000.0, source_type="manual_entry", url="override:ov-0001", upper=True),
     ]
 
     assert troop_span_findings(reports) == []
@@ -130,7 +131,7 @@ def test_the_override_skips_only_its_own_side() -> None:
     reports = [
         _report(1, 10_000.0, side_id=1),
         _report(2, 100_000.0, side_id=1),
-        _report(3, 50_000.0, side_id=1, source_type="manual_entry"),
+        _report(3, 50_000.0, side_id=1, source_type="manual_entry", url="override:ov-0001"),
         _report(4, 10_000.0, side_id=2),
         _report(5, 100_000.0, side_id=2),
     ]
@@ -153,3 +154,15 @@ def test_the_counters_are_reported() -> None:
 
     assert reported["troop_span_warnings"] == 2
     assert reported["troop_span_errors"] == 1
+
+
+def test_a_manual_entry_source_that_is_not_an_override_is_not_exempt() -> None:
+    reports = [
+        _report(1, 10_000.0),
+        _report(2, 100_000.0),
+        _report(3, 50_000.0, source_type="manual_entry", url="https://example/hand-entered"),
+    ]
+
+    (finding,) = troop_span_findings(reports)
+
+    assert finding.severity == "error"

@@ -46,7 +46,11 @@ import structlog
 from sqlalchemy import text
 
 from pipeline.reconcilers.claims import assign_lineages, classify_regime, roundness
-from pipeline.reconcilers.plausibility import exclusion_reason, filter_troop_reports
+from pipeline.reconcilers.plausibility import (
+    exclusion_reason,
+    filter_troop_reports,
+    is_override_report,
+)
 from pipeline.reconcilers.records import Quantity, ReconcileCounts, Report, SourceKey
 
 __all__ = [
@@ -89,8 +93,6 @@ DEFAULT_MIN_PLAUSIBLE_TROOPS: Final[float] = 100.0
 # scope or unit mix-up until a curator says otherwise.
 SPAN_WARN_LOG_RATIO: Final[float] = 1.0
 SPAN_ERROR_LOG_RATIO: Final[float] = 2.0
-# A side holding a troop_strength override row has had its figure settled by hand.
-_OVERRIDE_SOURCE_TYPE: Final[str] = "manual_entry"
 
 _FIELD_NAME_BY_QUANTITY: Final[dict[Quantity, str]] = {
     "troops": "troop_total",
@@ -334,7 +336,9 @@ def troop_span_findings(
     for report in reports:
         if report.quantity != "troops":
             continue
-        if report.source_type == _OVERRIDE_SOURCE_TYPE:
+        # Keyed on the override url, not the manual_entry source type: other hand
+        # entries have not had their disagreement settled by a curator.
+        if is_override_report(report):
             overridden.add(report.side_id)
         if not report.is_lower_bound and not report.is_upper_bound:
             points[report.side_id].append(report)

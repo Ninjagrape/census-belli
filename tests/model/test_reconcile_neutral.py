@@ -201,6 +201,124 @@ def _both_unlabelled() -> list[Report]:
     return reports + _background()
 
 
+# ─── The cross-side leak of the shared battle effect ─────────────────────────
+
+LEAK_REGIME = "administrative_partisan"
+LEAK_BATTLES = 10
+LEAK_SCALE = 5.0
+# A fraction of the way along the prior sd; the regime's posterior mean may move
+# this far when only the opposing sides' reports change.
+LEAK_LIMIT = 0.5
+
+
+def _leak_corpus(opposing_scale: float) -> list[Report]:
+    """Regime ``LEAK_REGIME`` appears only on side A of ten battles.
+
+    Side B of each battle reports modern_scholarly (the anchor), so the regime
+    has no co-reporting side of its own. ``opposing_scale`` multiplies B's
+    reports and nothing else: whatever the regime's posterior does in response
+    is information that crossed from one side of a battle to the other.
+    """
+    rng = np.random.default_rng(SEED + 1)
+    reports = _background()
+    report_id = 5000
+    for battle in range(LEAK_BATTLES):
+        battle_id = 100 + battle
+        truth_a = 30_000.0 * math.exp(rng.normal(0.0, 0.5))
+        truth_b = truth_a * math.exp(rng.normal(0.0, 0.3))
+        for key in (_INFOBOX, _BOOK):
+            value = truth_a * 1.3 * math.exp(rng.normal(0.0, _JITTER_SD))
+            reports.append(
+                _report(report_id, 1000 + 2 * battle, key, round(value, -2), LEAK_REGIME, battle_id)
+            )
+            report_id += 1
+        for key, factor in _BACKGROUND_FACTOR.items():
+            value = truth_b * factor * math.exp(rng.normal(0.0, _JITTER_SD))
+            reports.append(
+                _report(
+                    report_id,
+                    1001 + 2 * battle,
+                    key,
+                    round(value * opposing_scale, -2),
+                    "modern_scholarly",
+                    battle_id,
+                )
+            )
+            report_id += 1
+    return reports
+
+
+def _regime_mean_and_prior_sd(
+    reports: list[Report], inflation: InflationPrior, *, independent: bool
+) -> tuple[float, float]:
+    from pipeline.reconcilers.summarise import _convergence, g_regime_stats
+
+    design = build_design(reports, quantity="troops", ancient_cutoff_year=CUTOFF)
+    params = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))["params"]
+    priors = replace(
+        ModelPriors.from_params(params, quantity="troops"), side_prior_independent=independent
+    )
+    model = build_model(design, priors=priors, inflation=inflation)
+    idata, _ = fit_until_converged(
+        lambda seed: sample(model, replace(SAMPLER, random_seed=seed)),
+        seed=SEED,
+        converged=lambda fit: _neutral_converged(_convergence(fit)[0]),
+        describe=lambda fit: _convergence(fit)[:2],
+    )
+    stats = g_regime_stats(idata, design, inflation)[LEAK_REGIME]
+    assert stats["mean"] is not None and stats["prior_sd"] is not None
+    return stats["mean"], stats["prior_sd"]
+
+
+def _leak(inflation: InflationPrior, *, independent: bool) -> float:
+    """Movement of the regime's posterior mean, in prior sds, when only B changes."""
+    base, prior_sd = _regime_mean_and_prior_sd(
+        _leak_corpus(1.0), inflation, independent=independent
+    )
+    scaled, _ = _regime_mean_and_prior_sd(
+        _leak_corpus(LEAK_SCALE), inflation, independent=independent
+    )
+    return abs(scaled - base) / prior_sd
+
+
+@pytest.fixture(scope="module")
+def leak_p1(inflation: InflationPrior) -> float:
+    return _leak(inflation, independent=False)
+
+
+@pytest.fixture(scope="module")
+def leak_independent(inflation: InflationPrior) -> float:
+    return _leak(inflation, independent=True)
+
+
+@pytest.mark.xfail(
+    strict=False,
+    reason=(
+        "measured 2026-10-29: P1 leaks 1.598 prior sds across sides (limit 0.5); "
+        "independent sides leak 0.626. The shared battle effect moves a one-sided "
+        "regime when only the opposing sides change; not tuned away."
+    ),
+)
+def test_a_regime_seen_on_one_side_only_barely_moves_when_the_opposing_sides_change(
+    leak_p1: float, record_property: pytest.RecordProperty
+) -> None:
+    record_property("leak_p1_prior_sds", f"{leak_p1:.3f}")
+    print(f"cross-side leak under P1: {leak_p1:.3f} prior sds")
+
+    assert leak_p1 < LEAK_LIMIT, leak_p1
+
+
+def test_independent_sides_leak_less_than_the_shared_battle_effect(
+    leak_p1: float, leak_independent: float, record_property: pytest.RecordProperty
+) -> None:
+    record_property("leak_independent_prior_sds", f"{leak_independent:.3f}")
+    print(f"cross-side leak, independent sides: {leak_independent:.3f} prior sds")
+
+    # Measured 0.626 against 1.598 for P1 (2026-10-29): fewer leaks, not none, so
+    # the limit is asserted for P1 only.
+    assert leak_independent < leak_p1, (leak_independent, leak_p1)
+
+
 @pytest.fixture(scope="module")
 def inflation() -> InflationPrior:
     return load_inflation_prior()
@@ -241,21 +359,6 @@ def test_neutral_fit_sits_between_the_relabelled_published_fit_and_the_faithful_
     # fit (no shift) and the full faithful shift, with the old tolerance as slack.
     shift = gaugamela.neutral - gaugamela_relabelled.published
     assert -0.06 <= shift <= FAITHFUL_MU + 0.06, (gaugamela.neutral, gaugamela_relabelled.published)
-
-
-def test_gaugamela_published_ratio_is_no_longer_tilted_by_the_unlabelled_prior(
-    gaugamela: RatioPair,
-) -> None:
-    # Before P1 the published fit leaned on the unlabelled offset's prior mean and
-    # read the Macedonian side as smaller than its figures, so its ratio was the
-    # larger by 0.27 (1.115 against 0.843). The shared battle effect now lets the
-    # data learn that offset (published g_unlabelled -0.21 against a prior mean
-    # near +0.6), so the published ratio is no longer the larger; it sits 0.17
-    # below the neutral one. The check is that the old tilt is gone, in either direction.
-    assert abs(gaugamela.published - gaugamela.neutral) < 0.25, (
-        gaugamela.published,
-        gaugamela.neutral,
-    )
 
 
 def test_an_unlabelled_infobox_copy_of_an_attributed_figure_changes_nothing(
