@@ -474,3 +474,329 @@ entries:
     source: "Wikipedia, 'Battle of the Bulge', infobox (First Army under 21st Army Group 20 December - 16 January) and section 'Strategy and leadership' (subsections 'Allied high-command controversy' and 'Montgomery's actions')"
     note: "The LLM made Eisenhower the rank-0 theatre_commander at 0.28; as SHAEF commander he is supreme_commander at 0.05. The battle was fought by Bradley's 12th Army Group and, north of the salient from 20 December, Montgomery's 21st Army Group with US First Army under it (so Hodges reports to Montgomery); Patton's Third Army relieved Bastogne."
     reviewed: {by: historiography-reviewer, "on": 2026-10-17}
+
+  # --- Phase 2b entries (approved 2026-10-23) ---
+  - id: ov-0055
+    kind: commander_link
+    target: {battle: Battle_of_Waterloo-059b45c1f1, side: United Kingdom of Great Britain and Ireland, mention: August von Gneisenau}
+    value: Q165519
+    source: "Wikipedia, 'Battle of Waterloo', infobox; Wikidata Q165519 (August Neidhardt von Gneisenau, 1760-1831) and Q135401853 (P22 father = Q165519)"
+    note: "Linked to Q135401853, the field marshal's son. Blucher's chief of staff is Q165519. Link every Gneisenau mention (ov-0056, ov-0057) so no twin appears."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0056
+    kind: commander_link
+    target: {battle: Battle_of_Laon-5b24851299, side: Prussia, mention: August von Gneisenau}
+    value: Q165519
+    source: "Wikipedia, 'Battle of Laon', infobox; Wikidata Q165519"
+    note: "Same wrong link (the son, Q135401853)."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0057
+    kind: commander_link
+    target: {battle: Battle_of_Ligny-6140805ede, side: Prussia, mention: Graf von Gneisenau}
+    value: Q165519
+    source: "Wikipedia, 'Battle of Ligny', infobox; Wikidata Q165519"
+    note: "Corpus-local twin of the same man."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0058
+    kind: commander_link
+    target: {battle: Battle_of_Ligny-6140805ede, side: Prussia, mention: Graf von Zieten}
+    value: Q67913
+    source: "Wikipedia, 'Battle of Ligny', order of battle (I Corps, Zieten); Wikidata Q67913 (Hans Ernst Karl von Zieten, 1770-1848)"
+    note: "Corpus-local; the same man is Q67913 at Dresden."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0059
+    kind: commander_link
+    target: {battle: Battle_of_Waterloo-059b45c1f1, side: United Kingdom of Great Britain and Ireland, mention: Graf von Zieten}
+    value: Q67913
+    source: "Wikipedia, 'Battle of Waterloo', infobox (Prussian I Corps); Wikidata Q67913"
+    note: "Companion to ov-0058."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0060
+    kind: commander_link
+    target: {battle: Battle_of_Bautzen_1813-49d36886e7, side: Russian Empire, mention: Friedrich von Kleist}
+    value: Q213784
+    source: "Wikipedia, 'Battle of Bautzen (1813)', infobox; Wikidata Q213784 (Friedrich Graf Kleist von Nollendorf, 1762-1823)"
+    note: "Linked to Q58739712 (1746-1820), a namesake. Kleist von Nollendorf is already Q213784 at Dresden."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0061
+    kind: commander_link
+    target: {battle: Battle_of_Vauchamps-41896f739a, side: Prussia, mention: Friedrich von Kleist}
+    value: Q213784
+    source: "Wikipedia, 'Battle of Vauchamps', infobox; Wikidata Q213784"
+    note: "Companion to ov-0060; Kleist's II Corps at Vauchamps."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0062
+    kind: commander_link
+    target: {battle: Battle_of_Dresden-471cbcb35c, side: Austrian Empire, mention: Ivan Dibich}
+    value: Q703307
+    source: "Wikipedia, 'Battle of Dresden', infobox; Wikidata Q703307 (Hans Karl von Diebitsch, 1785-1831)"
+    note: "Linked to Q15065850, his father Hans Ehrenfried (1738-1822). 'Ivan Dibich' is the Russian form of Hans Karl."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0063
+    kind: commander_link
+    target: {battle: Battle_of_Borodino-8c0686ddbc, side: Russian Empire, mention: Fyodor Uvarov}
+    value: Q3072696
+    source: "Wikipedia, 'Battle of Borodino' (Uvarov's cavalry raid); Wikidata Q3072696 (Fyodor Petrovich Uvarov, general of cavalry)"
+    note: "Linked to Q15068544 (1786-1845), a namesake; Q3072696 is already linked at Krasnoi."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0064
+    kind: commander_link
+    target: {battle: Battle_of_Friedland-d4d7d40b1e, side: Russian Empire, mention: Fyodor Uvarov}
+    value: Q3072696
+    source: "Wikipedia, 'Battle of Friedland', infobox; Wikidata Q3072696"
+    note: "Companion to ov-0063."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0065
+    kind: commander_link
+    target: {battle: Battle_of_Marengo-811cf0c0d7, side: France, mention: Louis Berthier}
+    value: Q155734
+    source: "Wikipedia, 'Battle of Marengo', infobox (Berthier, nominal commander of the Army of the Reserve); Wikidata Q155734"
+    note: "Linked to Q140078072 (Louis de Berthier de Bizy, an undated stub), splitting the marshal from his other four battles."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0066
+    kind: commander_link
+    target: {battle: Battle_of_Somosierra-3d88fbab34, side: France, mention: Joseph I}
+    value: Q7726
+    source: "Wikipedia, 'Battle of Somosierra', infobox; Wikidata Q7726 (Joseph Bonaparte, King of Spain 1808-13)"
+    note: "Linked to Q17631178, an Idumean nobleman (Herod's uncle); the item has no dates, so the date gate passed it."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0067
+    kind: commander_link
+    target: {battle: Battle_of_the_Granicus-523fffa4fb, side: Achaemenid Empire, mention: Dimitriadis}
+    value: none
+    source: "Wikipedia, 'Battle of the Granicus', infobox (Persian commanders); Wikidata Q138847466 (a Greek futures-studies consultant)"
+    note: "Not a Persian commander; almost certainly a citation author parsed as a name. Unlinked."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0068
+    kind: commander_link
+    target: {battle: Siege_of_Toulon_1793-b5c04ccbb0, side: French First Republic, mention: Jean de La Poype}
+    value: Q1685527
+    source: "Wikipedia, 'Siege of Toulon (1793)', infobox; Wikidata Q1685527 (Jean Francois Cornu de La Poype, 1758-1851)"
+    note: "Linked to Q108742379, a man who lived after 1450."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0069
+    kind: commander_link
+    target: {battle: Siege_of_Toulon_1793-b5c04ccbb0, side: French First Republic, mention: Jean Carteaux}
+    value: Q573519
+    source: "Wikipedia, 'Jean Francois Carteaux' (painter turned general; commanded at Toulon until November 1793); Wikidata Q573519"
+    note: "Corpus-local. The Wikidata description says 'painter', which is correct: Carteaux was a painter before the Revolution."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0070
+    kind: commander_link
+    target: {battle: Siege_of_Toulon_1793-b5c04ccbb0, side: French Royalists, mention: Samuel Hood}
+    value: Q332623
+    source: "Wikipedia, 'Siege of Toulon (1793)', infobox; Wikidata Q332623 (Samuel Hood, 1st Viscount Hood)"
+    note: "Corpus-local."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0071
+    kind: commander_link
+    target: {battle: Battle_of_Arcole-794209f261, side: French Republic, mention: "Józef Sułkowski"}
+    value: Q946928
+    source: "Wikipedia, 'Józef Sułkowski' (Bonaparte's aide-de-camp at Arcole, 1773-1798); Wikidata Q946928"
+    note: "Linked to Q140763329, an undated stub. Check the slug: the battle row is named 'Battle of the Bridge of Arcole'."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0072
+    kind: commander_link
+    target: {battle: Battle_of_Jena_Auerstedt-7e1600f782#auerstedt, side: Prussia, mention: Friedrich Wilhelm von Schmettau}
+    value: Q121684
+    source: "Wikipedia, 'Battle of Jena-Auerstedt' (Schmettau's division at Auerstedt, mortally wounded); Wikidata Q121684 (1743-1806)"
+    note: "Linked to Q136281732 (1661-1732). Retargeted to the '#auerstedt' child after ov-0089 split the battle."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0073
+    kind: commander_link
+    target: {battle: Battle_of_Jena_Auerstedt-7e1600f782#jena, side: Prussia, mention: Prince of Hohenlohe}
+    value: Q696782
+    source: "Wikipedia, 'Battle of Jena-Auerstedt', infobox; Wikidata Q696782 (Friedrich Ludwig, Prince of Hohenlohe-Ingelfingen, 1746-1818)"
+    note: "Corpus-local; he is a rank-0 field commander on this side. Retargeted to the '#jena' child after ov-0089 split the battle."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0074
+    kind: commander_link
+    target: {battle: Battle_of_Jena_Auerstedt-7e1600f782#auerstedt, side: Prussia, mention: Count of Kalckreuth}
+    value: Q73253
+    source: "Wikipedia, 'Battle of Jena-Auerstedt', infobox (Kalckreuth, reserve at Auerstedt); Wikidata Q73253 (Friedrich Adolf von Kalckreuth)"
+    note: "Corpus-local. Retargeted to the '#auerstedt' child after ov-0089 split the battle."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0075
+    kind: commander_link
+    target: {battle: Battle_of_Kursk-045b980c2f, side: Soviet Union, mention: Pavel Belov}
+    value: Q4082219
+    source: "Wikipedia, 'Battle of Kursk', infobox; Wikidata Q4082219 (Pavel Alexeyevich Belov, Soviet general, 1897-1962)"
+    note: "Linked to Q89565157, a 'researcher'."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0076
+    kind: commander_link
+    target: {battle: Battle_of_Okpo-4d21e18160, side: Kingdom of Joseon, mention: "Wŏn Kyun"}
+    value: Q379659
+    source: "Wikipedia, 'Battle of Okpo', infobox; Wikidata Q379659 (Won Gyun, 1540-1597)"
+    note: "Headline general (#77) left corpus-local. Link all three mentions (ov-0077, ov-0078)."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0077
+    kind: commander_link
+    target: {battle: Battle_of_Hansan_Island-bb4f6a36fc, side: Joseon navy, mention: "Wŏn Kyun"}
+    value: Q379659
+    source: "Wikipedia, 'Battle of Hansan Island', infobox; Wikidata Q379659"
+    note: "Companion to ov-0076."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0078
+    kind: commander_link
+    target: {battle: Battle_of_Busan-6dedfbac4a, side: Joseon navy, mention: "Wŏn Kyun"}
+    value: Q379659
+    source: "Wikipedia, 'Battle of Busan (1592)', infobox; Wikidata Q379659"
+    note: "Companion to ov-0076."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0079
+    kind: commander_link
+    target: {battle: Battle_of_Austerlitz-36474a0291, side: Russian Empire, mention: Francis I}
+    value: Q130834
+    source: "Wikipedia, 'Battle of Austerlitz', infobox; Wikidata Q130834 (Francis II, Holy Roman Emperor / Francis I of Austria)"
+    note: "Headline general (#303) left corpus-local. Link all three mentions (ov-0080, ov-0081)."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0080
+    kind: commander_link
+    target: {battle: Battle_of_Dresden-471cbcb35c, side: Austrian Empire, mention: Francis I}
+    value: Q130834
+    source: "Wikipedia, 'Battle of Dresden', infobox; Wikidata Q130834"
+    note: "Companion to ov-0079."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0081
+    kind: commander_link
+    target: {battle: Battle_of_Leipzig-d1490afa75, side: Russian Empire, mention: Francis I}
+    value: Q130834
+    source: "Wikipedia, 'Battle of Leipzig', infobox; Wikidata Q130834"
+    note: "Companion to ov-0079."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+
+  - id: ov-0085
+    kind: side_polity
+    target: {battle: Siege_of_Toulon_1793-b5c04ccbb0, side: French Royalists}
+    value: First Coalition
+    source: "Wikipedia, 'Siege of Toulon (1793)', infobox (Belligerents: Great Britain, Spain, Naples, Sardinia, French Royalists)"
+    note: "All seven commanders on this side are British or Spanish (Hood, Langara, O'Hara, Mulgrave, Smith, Dundas, Gravina)."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0086
+    kind: side_polity
+    target: {battle: Battle_of_Heraclea-3a35306e60, side: Epiru}
+    value: Epirus
+    source: "Wikipedia, 'Battle of Heraclea', infobox"
+    note: "A truncated label. Pyrrhus' three sides read 'Epiru', 'Epirotes' and 'Epirus'; better fixed by the canonicalisation map (M5), in which case drop this entry."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+
+  # --- troop_strength (approved 2026-10-23) ---
+  - id: ov-0090
+    kind: troop_strength
+    target: {battle: Yom_Kippur_War-3c934020bf, side: Egypt}
+    value: {low: 914000, high: 1067500}
+    scope: deployed
+    source: "Wikipedia, 'Yom Kippur War', infobox strength1 'Total' row, the sum of the cited national figures (Egypt 650,000 Rabinovich 2004 p. 54 to 850,000 Herzog 1975 p. 239; Syria 150,000 Rabinovich 2004 p. 54 to 300,000 Gilbert 2008 p. 436; expeditionary forces 120,000 Rabinovich 2004 p. 54)"
+    note: "The side carries the whole Arab coalition's infobox: eleven 'total' rows from Cuba's 500 to the coalition's 1,067,500, all read as rival claims for one side, so reconcile settled at 73,684. The Israel side is the IDF's mobilised 375,000-415,000 (Rabinovich p. 54), so the coalition's total strength is the like-for-like figure. Stopgap: this is a war, not a battle."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0091
+    kind: troop_strength
+    target: {battle: Six-Day_War-0ec081a400, side: United Arab Republic}
+    value: {point: 465000}
+    scope: deployed
+    source: "Herzog, The Arab-Israeli Wars (rev. 1984), p. 149, as cited in Wikipedia, 'Six-Day War', infobox strength2 'Total'"
+    note: "The rows mix Jordan 45,000 deployed / 55,000 total, Syria 75,000, Egypt 100,000 deployed / 160,000 total and the Arab total of 465,000. Israel's only figure is '264,000 total' (Stone 2004 p. 217), so the Arab total is the like-for-like figure. Stopgap: this is a war, not a battle."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0092
+    kind: troop_strength
+    target: {battle: 1982_Lebanon_War-16c1972218, side: Israel}
+    value: {point: 78000}
+    scope: deployed
+    source: "Library of Congress Federal Research Division, Lebanon: A Country Study, as cited in Wikipedia, '1982 Lebanon War', section 'Israel and allies' ('IDF forces totalled 78,000 men ... deployed in five divisions and two reinforced brigade-size units')"
+    note: "The rows were IDF 78,000, Lebanese Forces 30,000 and SLA 5,000, read as rival totals, so reconcile settled at 32,630. The Lebanese Forces 'took a small role in the fighting', so the IDF invasion force is the figure."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0094
+    kind: troop_strength
+    target: {battle: Siege_of_Toulon_1793-b5c04ccbb0, side: French Royalists}
+    value: {point: 22000}
+    scope: deployed
+    source: "Smith 1999, pp. 63-64, as cited in Wikipedia, 'Siege of Toulon (1793)', section 'Order of battle' ('Allied Forces (total 22,000)'); infobox strength2 gives 22,000-23,000"
+    note: "The side is the whole Allied garrison but its rows were Royalist French 1,500 and the 22,000-23,000 total; the British, Spanish and Neapolitan contingents were mis-coded branch=naval. Reconcile settled at 18,601."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0095
+    kind: troop_strength
+    target: {battle: Battle_of_Stalingrad-9e41ff979f, side: Soviet Union}
+    value: {low: 1103000, high: 1143500}
+    scope: deployed
+    source: "Glantz and House, When Titans Clashed (1995), p. 134, and Istoriya Vtoroi Mirovoi Voiny 1939-1945, vol. 6 (Voenizdat 1976), p. 35, as cited in Wikipedia, 'Battle of Stalingrad', infobox strength2, 'During the Soviet counter-offensive'"
+    note: "The rows were 187,000 (opening of the Axis offensive, July 1942) and 1,103,000-1,143,500 (start of Uranus, 19 November 1942): same scope, different phases. The counter-offensive decided the battle, so its figures are used for both sides (ov-0096). Stopgap until the battle is split by phase."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0096
+    kind: troop_strength
+    target: {battle: Battle_of_Stalingrad-9e41ff979f, side: Nazi Germany}
+    value: {point: 1011000}
+    scope: deployed
+    source: "Glantz and House, When Titans Clashed (1995), p. 346, and Istoriya Vtoroi Mirovoi Voiny 1939-1945, vol. 6 (Voenizdat 1976), p. 35, as cited in Wikipedia, 'Battle of Stalingrad', infobox strength1, 'During the Soviet counter-offensive'"
+    note: "The rows were 270,000 (opening of the Axis offensive) and 1,011,000 (19 November 1942), the latter all Axis forces on the Stalingrad axis including Romanian, Italian and Hungarian armies. Paired with ov-0095. Credits the side's commanders with allied armies they did not command; disclosed."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0097
+    kind: troop_strength
+    target: {battle: Battle_of_Smolensk_1812-947e24d5ba, side: First French Empire}
+    value: {point: 45000}
+    scope: deployed
+    source: "Bodart, Militär-historisches Kriegs-Lexikon (1908), p. 436; Nafziger, Napoleon's Invasion of Russia (1988), pp. 185-186; as cited in Wikipedia, 'Battle of Smolensk (1812)', infobox and lead"
+    note: "The rows were 180,000 (the Grande Armée's main body present) and '45,000 engaged', both stored as scope=engaged. The engaged figure is the force that fought."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0098
+    kind: troop_strength
+    target: {battle: Battle_of_Smolensk_1812-947e24d5ba, side: Russian Empire}
+    value: {point: 30000}
+    scope: deployed
+    source: "Bodart, Militär-historisches Kriegs-Lexikon (1908), p. 436; Nafziger, Napoleon's Invasion of Russia (1988), pp. 185-186; as cited in Wikipedia, 'Battle of Smolensk (1812)', infobox and lead"
+    note: "The rows were 120,000 (the combined 1st and 2nd Western Armies in the area) and '30,000 engaged'. Most of Bagration's army had marched east before the main assault."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0099
+    kind: troop_strength
+    target: {battle: Operation_Torch-047bfa5615, side: United States}
+    value: {point: 107000}
+    scope: deployed
+    source: "Wikipedia, 'Operation Torch', infobox strength1 (Ground forces 107,000: 35,000 Morocco, 39,000 and 33,000 Algiers/Oran); Western Task Force 35,000 per Hague 2000 pp. 179-180 in the article body"
+    note: "The side is the whole Allied landing force (no UK side). Its total rows were 35,000 (Western Task Force only) and 107,000. The 107,000 is uncited in the infobox but equals the three task forces' sum; the assault-wave alternative is 73,500 (Rohwer 2005 p. 209). Stopgap: a multi-landing operation stored as one battle."
+    reviewed: {by: lee, "on": 2026-10-23}
+
+  - id: ov-0100
+    kind: troop_strength
+    target: {battle: Battle_of_Hohenfriedberg-1d308b61b6, side: Habsburg Monarchy}
+    value: {low: 59000, high: 65754}
+    scope: deployed
+    source: "Chandler, The Art of Warfare in the Age of Marlborough, p. 306 (59,000-62,500); Duffy, The Army of Frederick the Great (1974), p. 234 (Austrians 37,654 regulars plus 2,000-3,000 hussars and Croats; Saxons 22,500 regulars plus 2,600 uhlans); as cited in Wikipedia, 'Battle of Hohenfriedberg', infobox strength2"
+    note: "The combined Austro-Saxon army. Its rows were the Saxon 22,500, the Austrian 37,654 and the combined 59,000-62,500, read as rival totals, so reconcile settled at 29,687 against Prussia's 43,066, inverting a battle of near parity."
+    reviewed: {by: lee, "on": 2026-10-23}

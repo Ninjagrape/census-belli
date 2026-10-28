@@ -30,6 +30,7 @@ from pipeline.extractors.records import (
 from pipeline.extractors.wars import classify_part_of
 
 __all__ = [
+    "OVERRIDE_SOURCE_PREFIX",
     "ExtractWriteCounts",
     "reserve_battle_id",
     "retire_battle",
@@ -49,9 +50,21 @@ _OWNED_METHODS: Final[tuple[str, ...]] = (
     "dbpedia_rdf",
 )
 
+# Troop figures a ``troop_strength`` override wrote carry a ``manual_entry``
+# source whose url starts with this prefix and ends with the entry id, so each
+# citation is its own source key and a re-run can tell its rows from any other
+# manual correction.
+OVERRIDE_SOURCE_PREFIX: Final[str] = "override:"
+_MANUAL_SOURCE_TYPE: Final[str] = "manual_entry"
+
 _FIND_SOURCE = text(
     "SELECT source_id FROM sources WHERE source_type = CAST(:source_type AS source_type) "
     "AND COALESCE(url, '') = COALESCE(:url, '') LIMIT 1"
+)
+# An edited citation must reach the stored row: the find above ignores titles.
+_REFRESH_MANUAL_TITLE = text(
+    "UPDATE sources SET title = :title WHERE source_id = :source_id "
+    "AND title IS DISTINCT FROM :title"
 )
 _INSERT_SOURCE = text(
     "INSERT INTO sources (source_type, title, url) "
@@ -169,6 +182,15 @@ _UPDATE_SIDE_KEEP_OUTCOME = text(
 _CLEAR_TROOPS = text(
     "DELETE FROM troop_reports WHERE side_id = :side_id "
     "AND extraction_method = ANY(CAST(:methods AS extraction_method[]))"
+)
+# Rows a troop_strength override wrote are rewritten from the entry on every
+# run, so a removed or edited entry leaves nothing behind. Other 'manual' rows
+# are not ours to clear.
+_CLEAR_OVERRIDE_TROOPS = text(
+    "DELETE FROM troop_reports WHERE side_id = :side_id "
+    "AND extraction_method = CAST('manual' AS extraction_method) "
+    "AND source_id IN (SELECT source_id FROM sources "
+    "WHERE source_type = CAST('manual_entry' AS source_type) AND url LIKE :prefix)"
 )
 _CLEAR_CASUALTIES = text(
     "DELETE FROM casualty_reports WHERE side_id = :side_id "
@@ -324,6 +346,8 @@ def source_id(conn: Any, provenance: Provenance, cache: dict[tuple[str, str], in
         row = conn.execute(_INSERT_SOURCE, params).fetchone()
 
     source_id = int(row[0])
+    if provenance.source_type == _MANUAL_SOURCE_TYPE:
+        conn.execute(_REFRESH_MANUAL_TITLE, {"title": params["title"], "source_id": source_id})
     cache[key] = source_id
     return source_id
 
@@ -702,6 +726,10 @@ def write_battle(
         tally.sides += 1
 
         conn.execute(_CLEAR_TROOPS, {"side_id": side_id, "methods": list(_OWNED_METHODS)})
+        conn.execute(
+            _CLEAR_OVERRIDE_TROOPS,
+            {"side_id": side_id, "prefix": f"{OVERRIDE_SOURCE_PREFIX}%"},
+        )
         conn.execute(_CLEAR_CASUALTIES, {"side_id": side_id, "methods": list(_OWNED_METHODS)})
 
         for report in side.troop_reports:

@@ -1,4 +1,4 @@
-"""Unit tests for dividing reconcile's side prior out of a posterior."""
+"""Unit tests for the likelihood impute reads from reconcile's neutral draws file."""
 
 from __future__ import annotations
 
@@ -8,214 +8,179 @@ import numpy as np
 import pytest
 
 from pipeline.imputers.likelihood import (
-    divide_prior,
+    StaleDrawsFileError,
     likelihoods_from_draws,
     likelihoods_from_published,
     load_neutral_draws,
 )
 from pipeline.imputers.records import SideRow
 
-M0 = 0.5
-S0 = 2.0
-MIN_PRECISION = 0.5
+N_DRAWS = 40
 
 
-def _posterior_from_likelihood(
-    precision: np.ndarray, m_lik: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    """The posterior reconcile would report for a known likelihood and prior."""
-    n = len(m_lik)
-    posterior_precision = precision + np.eye(n) / S0**2
-    cov = np.linalg.inv(posterior_precision)
-    mu = cov @ (precision @ m_lik + (M0 / S0**2) * np.ones(n))
-    return mu, cov
-
-
-def test_known_posterior_gives_back_the_known_likelihood() -> None:
-    precision = np.array([[2.0, 0.5], [0.5, 3.0]])
-    m_lik = np.array([1.0, 2.0])
-    mu, cov = _posterior_from_likelihood(precision, m_lik)
-
-    result = divide_prior(mu, cov, M0, S0, MIN_PRECISION)
-
-    assert result.method == "joint"
-    assert result.keep == (0, 1)
-    np.testing.assert_allclose(result.precision, precision, atol=1e-9)
-    np.testing.assert_allclose(result.m_lik, m_lik, atol=1e-9)
-
-
-def test_single_side_is_the_scalar_case() -> None:
-    mu, cov = _posterior_from_likelihood(np.array([[4.0]]), np.array([3.0]))
-
-    result = divide_prior(mu, cov, M0, S0, MIN_PRECISION)
-
-    assert result.keep == (0,)
-    assert result.precision[0, 0] == pytest.approx(4.0)
-    assert result.m_lik[0] == pytest.approx(3.0)
-
-
-def test_weak_side_becomes_missing_and_the_rest_is_recomputed() -> None:
-    precision = np.diag([3.0, 0.2])
-    m_lik = np.array([1.0, 5.0])
-    mu, cov = _posterior_from_likelihood(precision, m_lik)
-
-    result = divide_prior(mu, cov, M0, S0, MIN_PRECISION)
-
-    assert result.keep == (0,)
-    assert result.precision[0, 0] == pytest.approx(3.0)
-    assert result.m_lik[0] == pytest.approx(1.0)
-
-
-def test_every_side_weak_leaves_nothing() -> None:
-    precision = np.diag([0.1, 0.2])
-    mu, cov = _posterior_from_likelihood(precision, np.array([1.0, 2.0]))
-
-    result = divide_prior(mu, cov, M0, S0, MIN_PRECISION)
-
-    assert result.keep == ()
-    assert result.m_lik.size == 0
-
-
-def test_non_positive_definite_precision_falls_back_to_the_diagonal() -> None:
-    # Strongly correlated posterior: the joint likelihood precision has a
-    # negative eigenvalue once the prior is subtracted, though each diagonal
-    # entry is comfortably above the weak threshold.
-    s0 = 1.0
-    c = 0.6
-    cov = c * np.array([[1.0, 0.99], [0.99, 1.0]])
-    mu = np.array([1.0, 1.4])
-    full = np.linalg.inv(cov) - np.eye(2) / s0**2
-    assert np.linalg.eigvalsh(full).min() < 0
-    assert np.diag(full).min() > MIN_PRECISION
-
-    result = divide_prior(mu, cov, M0, s0, MIN_PRECISION)
-
-    assert result.method == "diagonal"
-    assert result.keep == (0, 1)
-    p = 1.0 / c - 1.0 / s0**2
-    np.testing.assert_allclose(result.precision, np.diag([p, p]))
-    np.testing.assert_allclose(result.m_lik, (mu / c - M0 / s0**2) / p)
-
-
-def test_singular_covariance_falls_back_to_the_diagonal() -> None:
-    cov = np.array([[0.2, 0.2], [0.2, 0.2]])
-
-    result = divide_prior(np.array([1.0, 1.0]), cov, M0, S0, MIN_PRECISION)
-
-    assert result.method == "diagonal"
-    assert result.precision.shape == (2, 2)
-    assert result.precision[0, 1] == 0.0
-
-
-def _write_draws(
+def write_draws(
     path: Path,
-    run_id: int,
-    draws: np.ndarray,
-    side_ids: list[int],
+    *,
+    run_id: int = 1,
+    side_ids: tuple[int, ...] = (1, 2, 3),
+    battle_ids: tuple[int, ...] = (1, 1, 2),
+    lik_mean: tuple[float, ...] = (9.0, 10.0, 11.0),
+    lik_sd: tuple[float, ...] = (0.25, 0.5, 0.3),
+    has_point: tuple[bool, ...] = (True, True, True),
+    loadings: np.ndarray | None = None,
+    names: tuple[str, ...] = (),
+    theta: dict[str, np.ndarray] | None = None,
     fingerprint: dict[str, str] | None = None,
-) -> None:
-    np.savez(
-        path,
-        run_id=run_id,
+    with_likelihood: bool = True,
+) -> Path:
+    """Write a neutral draws file with the exported likelihood (or without it)."""
+    n = len(side_ids)
+    arrays: dict[str, object] = {
+        "run_id": run_id,
         **(fingerprint or {}),
-        side_id=np.array(side_ids, dtype=np.int64),
-        battle_id=np.array([(s + 1) // 2 for s in side_ids], dtype=np.int64),
-        draws=draws,
-        m0_mean=M0,
-        s0_mean=S0,
-    )
+        "side_id": np.array(side_ids, dtype=np.int64),
+        "battle_id": np.array(battle_ids, dtype=np.int64),
+        "draws": np.zeros((N_DRAWS, n)),
+        "m0_mean": 9.0,
+        "s0_mean": 1.0,
+    }
+    if with_likelihood:
+        arrays.update(
+            lik_mean=np.array(lik_mean, dtype=float),
+            lik_sd=np.array(lik_sd, dtype=float),
+            lik_has_point=np.array(has_point, dtype=bool),
+            lik_loadings=np.zeros((n, len(names))) if loadings is None else loadings,
+            lik_loading_names=np.array(names, dtype=np.str_),
+        )
+    arrays.update(theta or {})
+    np.savez(path, **arrays)
+    return path
+
+
+def test_load_reads_the_exported_likelihood(tmp_path: Path) -> None:
+    path = write_draws(tmp_path / "neutral_draws_run1.npz")
+
+    loaded = load_neutral_draws(path)
+
+    assert loaded.lik_mean is not None
+    np.testing.assert_allclose(loaded.lik_mean, [9.0, 10.0, 11.0])
+    assert loaded.lik_has_point is not None
+    assert loaded.lik_has_point.dtype == bool
+    assert loaded.lik_loading_names == ()
+
+
+def test_an_old_file_without_the_likelihood_fails_loudly_and_says_what_to_do(
+    tmp_path: Path,
+) -> None:
+    path = write_draws(tmp_path / "neutral_draws_run1.npz", with_likelihood=False)
+
+    with pytest.raises(StaleDrawsFileError, match="Re-run reconcile") as caught:
+        load_neutral_draws(path)
+
+    assert "lik_mean" in str(caught.value)
+    assert isinstance(caught.value, ValueError)
+
+
+def test_evaluate_can_still_read_a_file_that_predates_the_likelihood(tmp_path: Path) -> None:
+    path = write_draws(tmp_path / "neutral_draws_run1.npz", with_likelihood=False)
+
+    loaded = load_neutral_draws(path, require_likelihood=False)
+
+    assert loaded.lik_mean is None
+    with pytest.raises(StaleDrawsFileError):
+        likelihoods_from_draws(loaded, {1, 2, 3})
 
 
 def test_load_rejects_mismatched_shapes(tmp_path: Path) -> None:
-    path = tmp_path / "neutral_draws_run1.npz"
-    _write_draws(path, 1, np.zeros((5, 3)), [1, 2])
+    path = write_draws(tmp_path / "neutral_draws_run1.npz", lik_mean=(9.0, 10.0))
 
-    with pytest.raises(ValueError, match="does not match"):
+    with pytest.raises(ValueError, match="lik_mean"):
         load_neutral_draws(path)
 
 
-def test_load_reads_the_fingerprint_and_tolerates_its_absence(tmp_path: Path) -> None:
-    stamped = tmp_path / "neutral_draws_run1.npz"
-    _write_draws(stamped, 1, np.zeros((5, 2)), [1, 2], {"database": "db_a", "started_at": "t0"})
-    old = tmp_path / "neutral_draws_run2.npz"
-    _write_draws(old, 2, np.zeros((5, 2)), [1, 2])
+def test_load_rejects_a_point_side_without_a_finite_mean(tmp_path: Path) -> None:
+    path = write_draws(tmp_path / "neutral_draws_run1.npz", lik_mean=(9.0, float("nan"), 11.0))
 
-    assert (load_neutral_draws(stamped).database, load_neutral_draws(stamped).started_at) == (
-        "db_a",
-        "t0",
-    )
-    assert load_neutral_draws(old).database is None
+    with pytest.raises(ValueError, match="non-finite mean"):
+        load_neutral_draws(path)
 
 
-def test_load_leaves_the_shared_regime_fields_none_on_an_old_file(tmp_path: Path) -> None:
-    old = tmp_path / "neutral_draws_run2.npz"
-    _write_draws(old, 2, np.zeros((5, 2)), [1, 2])
-
-    loaded = load_neutral_draws(old)
-
-    assert loaded.g_unlabelled is None
-    assert loaded.a_era is None
-    assert loaded.offset_bar is None
-    assert loaded.side_era is None
-    assert loaded.side_unlabelled_share is None
-
-
-def test_load_reads_the_shared_regime_fields_and_checks_their_shapes(tmp_path: Path) -> None:
-    path = tmp_path / "neutral_draws_run3.npz"
-    shared = {
-        "g_unlabelled": np.arange(5.0),
-        "a_era": np.arange(5.0),
-        "offset_bar": np.arange(5.0),
-        "side_era": np.array([0.1, 0.2]),
-        "side_unlabelled_share": np.array([0.0, 1.0]),
-    }
-    np.savez(
-        path,
-        run_id=3,
-        side_id=np.array([1, 2], dtype=np.int64),
-        battle_id=np.array([1, 1], dtype=np.int64),
-        draws=np.zeros((5, 2)),
-        m0_mean=M0,
-        s0_mean=S0,
-        **shared,
+def test_load_reads_the_fingerprint(tmp_path: Path) -> None:
+    path = write_draws(
+        tmp_path / "neutral_draws_run1.npz", fingerprint={"database": "db_a", "started_at": "t0"}
     )
 
     loaded = load_neutral_draws(path)
-    np.testing.assert_array_equal(loaded.g_unlabelled, shared["g_unlabelled"])
-    np.testing.assert_array_equal(loaded.side_unlabelled_share, shared["side_unlabelled_share"])
 
-    bad = tmp_path / "neutral_draws_run4.npz"
-    np.savez(
-        bad,
-        run_id=4,
-        side_id=np.array([1, 2], dtype=np.int64),
-        battle_id=np.array([1, 1], dtype=np.int64),
-        draws=np.zeros((5, 2)),
-        m0_mean=M0,
-        s0_mean=S0,
-        side_era=np.zeros(3),
+    assert (loaded.database, loaded.started_at) == ("db_a", "t0")
+
+
+def test_every_side_with_a_point_row_gets_a_likelihood_at_its_exported_sd(tmp_path: Path) -> None:
+    neutral = load_neutral_draws(write_draws(tmp_path / "neutral_draws_run1.npz"))
+
+    liks, stats = likelihoods_from_draws(neutral, {1, 2, 3})
+
+    assert [lik.battle_id for lik in liks] == [1, 2]
+    assert liks[0].side_ids == (1, 2)
+    np.testing.assert_allclose(liks[0].m_lik, [9.0, 10.0])
+    np.testing.assert_allclose(liks[0].precision, np.diag([1 / 0.25**2, 1 / 0.5**2]))
+    assert liks[0].method == "reconcile"
+    assert stats.bound_only_side_ids == frozenset()
+    assert stats.stale_sides == 0
+
+
+def test_a_side_far_from_the_corpus_centre_is_never_weak(tmp_path: Path) -> None:
+    # The sides the old prior division discarded: the largest and smallest armies.
+    path = write_draws(
+        tmp_path / "neutral_draws_run1.npz",
+        side_ids=(1, 2),
+        battle_ids=(1, 1),
+        lik_mean=(4.6, 15.5),
+        lik_sd=(0.27, 0.27),
+        has_point=(True, True),
     )
-    with pytest.raises(ValueError, match="side_era"):
-        load_neutral_draws(bad)
+
+    liks, _ = likelihoods_from_draws(load_neutral_draws(path), {1, 2})
+
+    assert liks[0].side_ids == (1, 2)
+    np.testing.assert_allclose(liks[0].m_lik, [4.6, 15.5])
 
 
-def test_likelihoods_from_draws_recover_a_known_likelihood(tmp_path: Path) -> None:
-    rng = np.random.default_rng(0)
-    precision = np.array([[2.0, 0.0], [0.0, 3.0]])
-    mu, cov = _posterior_from_likelihood(precision, np.array([1.0, 2.0]))
-    draws = rng.multivariate_normal(mu, cov, size=20000)
-    path = tmp_path / "neutral_draws_run5.npz"
-    # Sides 1 and 2 share battle 1; side 9 is stale (no longer in scope).
-    _write_draws(path, 5, np.column_stack([draws, rng.normal(size=20000)]), [1, 2, 9])
-    neutral = load_neutral_draws(path)
+def test_a_bound_only_side_is_missing_and_counted_by_cause(tmp_path: Path) -> None:
+    path = write_draws(
+        tmp_path / "neutral_draws_run1.npz",
+        lik_mean=(9.0, float("nan"), 11.0),
+        lik_sd=(0.25, float("nan"), 0.3),
+        has_point=(True, False, True),
+    )
 
-    liks, stats = likelihoods_from_draws(neutral, {1, 2}, min_precision=MIN_PRECISION)
+    liks, stats = likelihoods_from_draws(load_neutral_draws(path), {1, 2, 3})
+
+    assert liks[0].side_ids == (1,)
+    assert stats.bound_only_side_ids == frozenset({2})
+
+
+def test_a_battle_with_only_bound_sides_has_no_likelihood(tmp_path: Path) -> None:
+    path = write_draws(
+        tmp_path / "neutral_draws_run1.npz",
+        lik_mean=(float("nan"), float("nan"), 11.0),
+        lik_sd=(float("nan"), float("nan"), 0.3),
+        has_point=(False, False, True),
+    )
+
+    liks, stats = likelihoods_from_draws(load_neutral_draws(path), {1, 2, 3})
+
+    assert [lik.battle_id for lik in liks] == [2]
+    assert stats.bound_only_side_ids == frozenset({1, 2})
+
+
+def test_a_stale_side_is_ignored_and_counted(tmp_path: Path) -> None:
+    neutral = load_neutral_draws(write_draws(tmp_path / "neutral_draws_run1.npz"))
+
+    liks, stats = likelihoods_from_draws(neutral, {1, 2})
 
     assert stats.stale_sides == 1
-    assert len(liks) == 1
-    assert liks[0].side_ids == (1, 2)
-    np.testing.assert_allclose(liks[0].m_lik, [1.0, 2.0], atol=0.05)
-    np.testing.assert_allclose(liks[0].precision, precision, atol=0.1)
+    assert [lik.battle_id for lik in liks] == [1]
 
 
 def _side(

@@ -474,7 +474,7 @@ def test_every_quality_check_in_the_reconcile_spec_executes(
     del reconciled
     raw = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))
     checks = raw["quality_checks"]
-    assert len(checks) == 17
+    assert len(checks) == 29
 
     runner = QualityRunner(conn)
     results = runner.run_all(checks)
@@ -609,6 +609,14 @@ def test_the_neutral_fit_writes_estimates_diagnostics_and_a_draws_file(
         assert data["draws"].shape[0] <= 1000
         assert data["draws"].dtype == np.float64
         assert side in set(data["side_id"].tolist())
+        n_sides = len(data["side_id"])
+        assert data["lik_mean"].shape == data["lik_sd"].shape == (n_sides,)
+        assert data["lik_has_point"].shape == (n_sides,)
+        assert data["lik_loadings"].shape[0] == n_sides
+        assert data["lik_loadings"].shape[1] == len(data["lik_loading_names"])
+        assert np.all(np.isfinite(data["lik_mean"][data["lik_has_point"]]))
+        position = int(np.flatnonzero(data["side_id"] == side)[0])
+        assert bool(data["lik_has_point"][position])
 
 
 def test_the_neutral_gates_execute_and_the_estimates_are_not_stale(
@@ -1117,11 +1125,38 @@ def test_the_collapse_gate_fails_a_run_whose_estimates_barely_spread(conn: Conne
 def test_the_collapse_gate_passes_a_run_whose_estimates_track_the_reports(
     conn: Connection,
 ) -> None:
-    _fabricate_run(conn, '{"troops": {"spread_ratio": 0.84}}')
+    _fabricate_run(conn, '{"troops": {"spread_ratio": 0.9}}')
 
     result = QualityRunner(conn).run_one(_quality_check("estimates_not_collapsed"))
 
     assert result.passed, result
+
+
+def test_the_collapse_gate_now_fails_a_run_that_keeps_only_84_percent_of_the_spread(
+    conn: Connection,
+) -> None:
+    # The 2026-10 corpus fit passed the old 0.25 limit at 0.65 while shrinking every
+    # lone report.
+    _fabricate_run(conn, '{"troops": {"spread_ratio": 0.84}}')
+
+    assert not QualityRunner(conn).run_one(_quality_check("estimates_not_collapsed")).passed
+
+
+def test_the_collapse_gate_reads_the_recovery_block_and_skips_when_it_is_null(
+    conn: Connection,
+) -> None:
+    # A recovery block replaces the raw ratio: null means "too few sides", which skips.
+    _fabricate_run(
+        conn,
+        '{"troops": {"spread_ratio": 0.1, "recovery": {"gate_spread_ratio": null}}}',
+    )
+    assert QualityRunner(conn).run_one(_quality_check("estimates_not_collapsed")).passed
+
+    _fabricate_run(
+        conn,
+        '{"troops": {"spread_ratio": 0.99, "recovery": {"gate_spread_ratio": 0.5}}}',
+    )
+    assert not QualityRunner(conn).run_one(_quality_check("estimates_not_collapsed")).passed
 
 
 def test_the_collapse_gate_does_not_fail_a_run_with_no_measurable_spread(
@@ -1131,6 +1166,78 @@ def test_the_collapse_gate_does_not_fail_a_run_with_no_measurable_spread(
     _fabricate_run(conn, '{"troops": {"spread_ratio": null}}')
 
     assert QualityRunner(conn).run_one(_quality_check("estimates_not_collapsed")).passed
+
+
+def _recovery(**gates: object) -> str:
+    """A fabricated diagnostics payload carrying published and neutral recovery blocks."""
+    import json
+
+    published = {k: v for k, v in gates.items() if not k.startswith("neutral_")}
+    neutral = {k.removeprefix("neutral_"): v for k, v in gates.items() if k.startswith("neutral_")}
+    return json.dumps(
+        {
+            "troops": {"recovery": published},
+            "troops_neutral": {"recovery": neutral},
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("gate", "key", "bad", "good"),
+    [
+        ("singleton_slope_recovers", "gate_singleton_slope", 0.61, 0.9),
+        ("within_battle_ratio_recovers", "gate_within_battle_slope", 0.4, 0.85),
+    ],
+)
+def test_the_slope_gates_fail_a_compressed_fit_and_pass_a_recovered_one(
+    conn: Connection, gate: str, key: str, bad: float, good: float
+) -> None:
+    check = _quality_check(gate)
+    assert check["severity"] == "error"
+
+    _fabricate_run(conn, _recovery(**{key: good, f"neutral_{key}": good}))
+    assert QualityRunner(conn).run_one(check).passed
+
+    _fabricate_run(conn, _recovery(**{key: good, f"neutral_{key}": bad}))
+    assert not QualityRunner(conn).run_one(check).passed, "the neutral fit counts too"
+
+    _fabricate_run(conn, _recovery(**{key: bad}))
+    assert not QualityRunner(conn).run_one(check).passed
+
+
+@pytest.mark.parametrize(
+    "gate",
+    [
+        "singleton_slope_recovers",
+        "within_battle_ratio_recovers",
+        "post1800_ratio_in_band",
+        "between_battle_variance_is_plausible",
+    ],
+)
+def test_the_recovery_gates_skip_when_their_inputs_are_too_few(conn: Connection, gate: str) -> None:
+    # A small fixture: the diagnostics hold nulls and a reason, and the gate passes.
+    _fabricate_run(conn, _recovery(gates_skipped={gate: "too few"}))
+
+    assert QualityRunner(conn).run_one(_quality_check(gate)).passed
+
+
+def test_the_post_1800_band_and_the_variance_check_are_warnings(conn: Connection) -> None:
+    band = _quality_check("post1800_ratio_in_band")
+    ppc = _quality_check("between_battle_variance_is_plausible")
+    assert band["severity"] == "warning"
+    assert ppc["severity"] == "error"  # the mixed predictive is a gate since P1
+
+    _fabricate_run(conn, _recovery(gate_post1800_band_violation=1))
+    assert not QualityRunner(conn).run_one(band).passed
+    _fabricate_run(conn, _recovery(gate_post1800_band_violation=0))
+    assert QualityRunner(conn).run_one(band).passed
+
+    _fabricate_run(
+        conn,
+        '{"troops": {"recovery": {"gate_ppc_tail_p": 0.004}}, '
+        '"troops_neutral": {"recovery": {"gate_ppc_tail_p": 0.4}}}',
+    )
+    assert not QualityRunner(conn).run_one(ppc).passed
 
 
 def test_a_run_records_its_spread_ratio_and_source_effect_counts(
@@ -1147,9 +1254,27 @@ def test_a_run_records_its_spread_ratio_and_source_effect_counts(
     troops = diagnostics["troops"]
 
     assert "spread_ratio" in troops
+    recovery = troops["recovery"]
+    assert {
+        "singleton_slope",
+        "within_battle_slope",
+        "post1800_large_ratio",
+        "mixed_ppc",
+        "gate_singleton_slope",
+        "gate_within_battle_slope",
+        "gate_post1800_band_violation",
+        "gates_skipped",
+    } <= set(recovery)
+    # The seeded corpus is far below every minimum size, so every gate skipped, loudly.
+    assert recovery["gate_singleton_slope"] is None
+    assert "singleton_slope" in recovery["gates_skipped"]
+    assert troops["noise_prior"]["applies"] is True
+    assert troops["nu"] is None  # troops use a Normal likelihood since P1
+    assert {"s_b", "s_d", "tau_e"} <= set(troops["side_prior"])
+    assert "recovery" in diagnostics["troops_neutral"]
     honoured = troops["reports_honoured"]
     assert set(honoured) == {"n_checked", "n_violations", "violating_side_ids", "within_side_mad"}
-    assert "s0" in troops and "sigma_type" in troops
+    assert "sigma_type" in troops
     assert (
         troops["n_source_keys_own_effect"] + troops["n_source_keys_pooled"] == troops["n_sources"]
     )

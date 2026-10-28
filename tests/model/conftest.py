@@ -18,14 +18,17 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
 import numpy as np
 import pytest
+import yaml
 
 from pipeline.modelers.fitting import RETRY_SEED_OFFSET
 from pipeline.reconcilers.design import Design, build_design
 from pipeline.reconcilers.model import (
+    ANCHOR_FROM_YEAR,
     InflationPrior,
     ModelPriors,
     SamplerSettings,
@@ -38,6 +41,8 @@ from pipeline.reconcilers.summarise import SummaryResult, summarise_fit
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     import arviz as az
+
+AGENTS = Path(__file__).resolve().parents[2] / "agents"
 
 T = TypeVar("T")
 
@@ -273,6 +278,8 @@ def simulate_corpus(
     start_side_id: int = 1,
     start_battle_id: int = 1,
     start_report_id: int = 1,
+    battle_sd: float = 0.0,
+    modern_year: int = MODERN_YEAR,
 ) -> SimulatedCorpus:
     """Simulate a troop-report corpus from a known truth.
 
@@ -281,7 +288,8 @@ def simulate_corpus(
         side_groups: ``(n_sides, n_reports_per_side)`` pairs, e.g.
             ``[(90, 4), (90, 2), (120, 1)]``.
         m0: True corpus-average log side strength.
-        s0: True side-to-side log-scale spread.
+        s0: True side-to-side log-scale spread (the side deviation ``s_d`` of the
+            P1 troop side prior, once ``battle_sd`` is non-zero).
         regime_weights: Sampling probabilities for each claim regime, over
             :data:`TRUE_G_REGIME`'s keys (a subset is fine).
         scope_weights: Sampling probabilities for each scope, over
@@ -296,6 +304,16 @@ def simulate_corpus(
         start_side_id: First side id to assign.
         start_battle_id: First battle id to assign (two sides per battle).
         start_report_id: First report id to assign.
+        battle_sd: Log-scale sd of a Student-t(4) effect shared by the two sides of
+            a battle (the P1 battle effect ``b``). Zero reproduces independent sides, which
+            the P1 prior cannot represent: with no battle effect to find, ``s_b`` is
+            pinned against zero and mixes poorly (ESS 131, rhat 1.036 on the main
+            corpus), so the recovery corpora generate the structure the model fits.
+
+        modern_year: Year given to a non-ancient battle. The default is after the level
+            anchor's 1800, so unlabelled rows there carry no offsets; a test of the
+            regime offset or the era covariate itself passes a year before 1800 so
+            the anchor does not interfere.
 
     Returns:
         The simulated corpus and the truth to check a fit against.
@@ -309,14 +327,23 @@ def simulate_corpus(
     # without yet knowing era_mean (which depends on every row's year at once,
     # exactly as build_design computes it).
     pending: list[dict[str, object]] = []
+    battle_effect: dict[int, float] = {}
+    battle_is_ancient: dict[int, bool] = {}
     for n_sides, n_reports in side_groups:
         for _ in range(n_sides):
             z = rng.normal()
-            true_log_side[side_id] = m0 + s0 * z
+            battle = start_battle_id + (side_id - start_side_id) // 2
+            if battle not in battle_effect:
+                battle_effect[battle] = battle_sd * float(rng.standard_t(4)) if battle_sd else 0.0
+            true_log_side[side_id] = m0 + battle_effect[battle] + s0 * z
             side_ids_by_report_count.setdefault(n_reports, []).append(side_id)
-            is_ancient = bool(rng.random() < ancient_fraction)
-            year = ANCIENT_YEAR if is_ancient else MODERN_YEAR
-            battle_id = start_battle_id + (side_id - start_side_id) // 2
+            # One era per battle: both sides fought at the same time, so the era bin
+            # (and the level anchor) cannot differ between them.
+            if battle not in battle_is_ancient:
+                battle_is_ancient[battle] = bool(rng.random() < ancient_fraction)
+            is_ancient = battle_is_ancient[battle]
+            year = ANCIENT_YEAR if is_ancient else modern_year
+            battle_id = battle
 
             chosen_sources = rng.choice(
                 len(SOURCES), size=n_reports, replace=n_reports > len(SOURCES)
@@ -348,12 +375,15 @@ def simulate_corpus(
                 report_id += 1
             side_id += 1
 
-    # Centre over dated unlabelled rows only, as build_design does: the era term
-    # applies to no other regime, so including them would shift the truth.
+    # Centre over dated unlabelled rows that keep the era term, as build_design
+    # does: the term applies to no other regime and the level anchor removes it
+    # from 1800 on, so including either would shift the truth.
     era_flags = [
         row["ancient_flag"]
         for row in pending
-        if row["regime"] == "unlabelled" and row["year"] is not None
+        if row["regime"] == "unlabelled"
+        and row["year"] is not None
+        and int(row["year"]) < ANCHOR_FROM_YEAR  # type: ignore[call-overload]
     ]
     era_mean = float(np.mean(era_flags)) if era_flags else 0.0
 
@@ -366,11 +396,16 @@ def simulate_corpus(
         scope = str(row["scope"])
         era_signed = float(row["ancient_flag"]) - era_mean
         era_term = a_era * era_signed if regime == "unlabelled" else 0.0
+        # The level anchor (model.py): an unlabelled figure from 1800 on is read at
+        # face value, so the generating process gives it neither offset.
+        anchored = regime == "unlabelled" and int(row["year"]) >= ANCHOR_FROM_YEAR  # type: ignore[call-overload]
+        if anchored:
+            era_term = 0.0
         eta = (
             true_log_side[int(row["side_id"])]
             + b_type[key.source_type]
             + true_u_source(key)
-            + g_regime[regime]
+            + (0.0 if anchored else g_regime[regime])
             + delta_level[scope]
             + era_term
             + _draw_noise(rng, TRUE_SOURCE_SIGMA[key])
@@ -633,5 +668,6 @@ def inflation_prior() -> InflationPrior:
 
 @pytest.fixture(scope="session")
 def troop_priors() -> ModelPriors:
-    """Default troop-model priors, matching agents/reconcile.yaml's params."""
-    return ModelPriors.from_params({}, quantity="troops")
+    """Troop-model priors as agents/reconcile.yaml sets them (P1: Normal, noise 0.22)."""
+    params = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))["params"]
+    return ModelPriors.from_params(params, quantity="troops")

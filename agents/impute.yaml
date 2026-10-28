@@ -33,48 +33,51 @@ description: >
   pooled level absorbs that shift rather than treating the side as a random
   draw from the named polities.
 
+  The likelihood is exported by reconcile, not recovered from its posterior.
+  Until 2026-10-22 impute divided reconcile's side prior N(m0, s0^2) out of the
+  neutral posterior and called a side weak when the remaining precision was at
+  most min_lik_precision (0.5). The prior is a Student-t, so for a side far from
+  m0 the posterior is wide and near-bimodal and the Gaussian division read it as
+  uninformative: 75 of 341 sides were discarded (the largest and smallest
+  armies) and the kept-pair log-ratio slope was 0.43. Reconcile's neutral fit now
+  writes, per side with at least one point row, the likelihood mean and sd on
+  the log scale from its point rows at the fitted noise (the rows' adjusted log
+  reports combined by precision, with the Student-t Fisher information
+  (nu + 1) / ((nu + 3) sigma^2) per row), in the neutral npz under the lik_*
+  keys. min_lik_precision is removed: a side is missing only when it has no point
+  row (bound_only or no_reports, or other when its reports were all excluded by
+  reconcile's load filters), the count by cause is logged and recorded in
+  gate_report.json, and no side with a point row is ever weak. An npz without the
+  lik_* keys is refused with a message to re-run reconcile; there is no fallback.
+
   Shared reconcile error is propagated, approximately. Reconcile's neutral fit
-  has measurement error shared across battles, g_unlabelled (the
-  unlabelled-regime offset) and a_era, and its npz carries those draws aligned
-  with the side draws. Impute regresses every side's draws on theta = (g_unlabelled,
-  a_era) by least squares (a constant or absent component is dropped), builds
-  each battle's likelihood from the residuals through the prior division, and
-  in each round picks one reconcile draw (seeded per round, from a stream
-  separate from the conditional draws) and shifts every battle's likelihood
-  mean by its loading times that draw's centred theta. All battles in a round
-  share the draw, which restores the cross-battle correlation and the
-  uncertainty in beta_force that independent per-battle Gaussians dropped. The
-  shift is carried back through the prior division. The posterior mean moves
-  less than the data estimate by the side prior's pull, but that prior's mean
-  m0 = corpus_level - offset_bar co-moves with g (about -w_u per unit g), so the
-  likelihood loading is B + P^-1 (B - 1 c') / s0^2 with c = d m0 / d theta,
-  regressed from the exported m0 draws; with m0 held fixed, an all-unlabelled
-  side's data loading of -1 would come out overstated by 1 / (P s0^2). A draws
-  file without m0 falls back to fixed m0 and logs impute_m0_draws_absent. The
-  gate report records the mean gap between the recovered loadings and the
-  design's (-unlabelled share on g, -share * era on a_era). Imputed sides
-  co-move too: each round adds, to the mean of every side, the precision-weighted
-  mean likelihood loading of the observed sides in its era times centred theta,
-  so an imputed side shifts with the observed sides its era level is learned
-  from. Weak sides are classified on the raw covariance, so propagation does not
-  change which sides are missing. The reconcile draw per round is stratified on
-  the leading theta component (permuted by the round seed), not independent.
-  Remaining approximation: the dependence on theta is linear-Gaussian and conditioned
-  on two shared parameters only; any other shared structure (for example the
-  b_type and lineage effects) stays in the within-battle residual covariance
-  or is dropped, and the imputation model itself is fit on the residual
-  likelihood. Old draws files without the shared arrays, or a theta with no
-  variance, fall back to independent battles and log
-  impute_shared_error_not_propagated; params.propagate_shared_error: false
-  forces that. gate_report.json and each round manifest record whether it was
-  on, the reconcile draw per round, the mean absolute loading and the share of
-  side variance theta explains. Evaluate's +/-1 sd g_unlabelled variant tests
-  misspecification of g's posterior mean (the rounds already carry theta), not
-  what the approximation misses.
+  has measurement error shared across battles: the unlabelled-regime offset
+  g_unlabelled, the era slope a_era and offset_bar (the corpus average of the
+  regime and scope offsets). Its npz carries draws of the three, and, per side,
+  the loading of the side's likelihood mean on each (the least-squares slope of
+  the side's per-draw likelihood mean on the centred draw). In each round impute
+  picks one reconcile draw (seeded per round, from a stream separate from the
+  conditional draws, stratified on the leading parameter) and shifts every
+  observed side's likelihood mean by its loading times that draw's centred
+  parameters. All battles in a round share the draw, which restores the
+  cross-battle correlation and the uncertainty in beta_force that independent
+  per-battle Gaussians dropped. Imputed sides co-move too: each round adds, to the
+  mean of every side, the precision-weighted mean likelihood loading of the
+  observed sides in its era times the centred draw, so an imputed side shifts with
+  the observed sides its era level is learned from. Remaining approximation: the
+  dependence is linear-Gaussian and conditioned on three shared parameters only;
+  any other shared structure (other regimes, source and scope terms beyond what
+  offset_bar averages) is dropped. A draws file whose parameters do not vary
+  falls back to independent battles and logs impute_shared_error_not_propagated;
+  params.propagate_shared_error: false forces that. gate_report.json and each
+  round manifest record whether it was on, the reconcile draw per round, the mean
+  absolute loading and the share of side variance the parameters explain.
+  Evaluate's +/-1 sd g_unlabelled variant tests misspecification of g's posterior
+  mean (the rounds already carry theta), not what the approximation misses.
 
   Runs once per scale. neutral (primary) reads reconcile's regime-neutral
-  draws (data/processed/reconcile/neutral_draws_run{run_id}.npz) and divides
-  reconcile's side prior out of them; published (sensitivity) reads
+  fit (data/processed/reconcile/neutral_draws_run{run_id}.npz) and its exported
+  per-side likelihood; published (sensitivity) reads
   battle_sides.est_troops_total and its interval, diagonally. Neutral values
   are for force ratios only and must never be displayed as troop counts.
 
@@ -90,7 +93,9 @@ outputs:
   - data/imputed/{scale}/gate_report.json
   - "db: model_runs (one row per invocation, model_type='imputation')"
   - >-
-    db: missing_data_log, neutral scale only (troop_total rows of imputed sides:
+    db: missing_data_log, neutral scale only (rows of sides that now carry a
+    likelihood and that an earlier run imputed are deleted first; then
+    troop_total rows of imputed sides:
     was_imputed, imputation_method 'bayes_joint_v1_neutral_log', imputed_value
     = exp(median over rounds), imputed_lo/hi = 2.5/97.5% of the n_imputations
     rounds, not of every retained posterior draw; notes says so). The
@@ -108,10 +113,19 @@ params:
   # evaluate stage's sensitivity grid is {-0.5, -0.25, +0.25, +0.5}; documented,
   # not yet run.
   mnar_delta: 0.0
-  # A side whose likelihood precision (after dividing out reconcile's prior)
-  # is at or below this carries about one sd of 1.4 of information: treated
-  # as missing.
-  min_lik_precision: 0.5
+  # min_lik_precision (0.5) was removed on 2026-10-22 together with the division
+  # of reconcile's side prior: reconcile now exports each side's likelihood, a
+  # side is missing only when it has no point row, and a leftover key in a
+  # params override is ignored with a warning (impute_min_lik_precision_ignored).
+  # Recovery gate thresholds (kept_pair_ratio_slope, kept_side_slope); a gate
+  # skips, with its reason in actual, below slope_gate_min_n pairs or sides.
+  # The kept-pair slope is held to reconcile's own within-battle slope (neutral
+  # fit on the neutral scale), within pair_slope_tolerance either way; min_pair_slope
+  # is the fallback floor when reconcile recorded none (a fixture below its minimum).
+  min_pair_slope: 0.8
+  pair_slope_tolerance: 0.1
+  min_side_slope: 0.9
+  slope_gate_min_n: 10
   published_default_sd: 1.0           # log sd when a published estimate has no interval
   propagate_shared_error: true        # neutral scale: carry reconcile's g_unlabelled/a_era error across battles
 
@@ -181,6 +195,32 @@ quality_checks:
     description: >
       KS test within era, imputed against observed. Expected to fire under MAR
       when missingness depends on covariates; read as information.
+
+  - name: kept_pair_ratio_slope
+    method: imputation_gate
+    params: {gate: kept_pair_ratio_slope, root: data/imputed, scale: neutral}
+    severity: error
+    description: >
+      Over battles with exactly two observed (point-reported) sides, the slope
+      through the origin of the across-round mean imputed log ratio on the
+      reported log ratio (the sides' likelihood means) lies within
+      params.pair_slope_tolerance (0.1) of the reconcile run's own within-battle
+      slope on the same scale; a fixed floor of 0.8 asks for more than a
+      calibrated reconcile fit gives. Falls back to params.min_pair_slope when
+      reconcile recorded no slope. The model stage regresses outcome on this
+      ratio; it was 0.43 on the 2026-10 corpus. Skips (passes, with the reason in
+      the gate's actual) below params.slope_gate_min_n battles.
+
+  - name: kept_side_slope
+    method: imputation_gate
+    params: {gate: kept_side_slope, root: data/imputed, scale: neutral}
+    severity: error
+    description: >
+      OLS slope of the across-round mean imputed log value on the reported
+      (likelihood mean) log value over observed sides is at least
+      params.min_side_slope (0.9). Observed sides are overimputed, not copied
+      through, and must not be pulled away from their reports. Skips below
+      params.slope_gate_min_n sides.
 
   - name: model_convergence
     check: "all rhat <= 1.01 and ess_bulk >= 400, no divergences"

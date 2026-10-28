@@ -146,8 +146,8 @@ def test_the_era_covariate_is_centred_so_its_column_sums_to_zero() -> None:
         [
             _report(1, year=-330),
             _report(2, year=-330),
-            _report(3, year=1815),
-            _report(4, year=1815),
+            _report(3, year=1700),
+            _report(4, year=1700),
         ]
     )
 
@@ -170,7 +170,7 @@ def test_a_battle_with_a_null_year_sits_at_the_corpus_average_not_at_modern() ->
     # A missing date is not evidence that a battle is recent. (Passes only
     # because `_report` defaults to the unlabelled regime, the one the era
     # covariate is centred over.)
-    design = _design([_report(1, year=-330), _report(2, year=1815), _report(3, year=None)])
+    design = _design([_report(1, year=-330), _report(2, year=1700), _report(3, year=None)])
 
     assert design.era[2] == pytest.approx(0.0)
     assert design.era[0] > 0.0
@@ -180,8 +180,8 @@ def test_a_battle_with_a_null_year_sits_at_the_corpus_average_not_at_modern() ->
 def test_an_undated_battle_does_not_drag_the_era_mean() -> None:
     # The mean is taken over rows carrying a year, so undated rows must not
     # move the centring for the rows that have one.
-    dated = _design([_report(1, year=-330), _report(2, year=1815)])
-    mixed = _design([_report(1, year=-330), _report(2, year=1815), _report(3, year=None)])
+    dated = _design([_report(1, year=-330), _report(2, year=1700)])
+    mixed = _design([_report(1, year=-330), _report(2, year=1700), _report(3, year=None)])
 
     assert mixed.era_mean == pytest.approx(dated.era_mean)
 
@@ -192,7 +192,7 @@ def test_the_era_centre_is_taken_over_unlabelled_rows_only() -> None:
     design = _design(
         [
             _report(1, year=-330, regime="unlabelled"),
-            _report(2, year=1815, regime="unlabelled"),
+            _report(2, year=1700, regime="unlabelled"),
             _report(
                 3, side_id=2, value=50_000.0, year=-330, regime="chronicle", url="https://example/b"
             ),
@@ -353,3 +353,27 @@ def test_a_quantity_with_no_reports_raises_rather_than_fitting_the_priors() -> N
 
 def test_the_level_orderings_stay_subsets_of_the_extractor_vocabularies() -> None:
     assert vocabularies_agree()
+
+
+def test_the_era_centre_skips_rows_the_level_anchor_removes() -> None:
+    # An unlabelled troop row dated 1800 or later carries no era term (the
+    # anchor zeroes it), so it must not pull the centre of the rows that do.
+    design = _design([_report(1, year=-330), _report(2, year=1700), _report(3, year=1815)])
+
+    assert design.era_mean == pytest.approx(0.5)
+    assert design.era_centre_rows == 2
+    assert design.era[2] == 0.0
+    assert design.era[:2].sum() == pytest.approx(0.0)
+
+
+def test_casualties_have_no_anchor_so_their_era_centre_keeps_every_dated_row() -> None:
+    design = _design(
+        [
+            _report(i, year=year, quantity="casualties")
+            for i, year in enumerate((-330, 1700, 1815), start=1)
+        ],
+        quantity="casualties",
+    )
+
+    assert design.era_centre_rows == 3
+    assert design.era_mean == pytest.approx(1 / 3)

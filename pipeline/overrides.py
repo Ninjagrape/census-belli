@@ -28,6 +28,7 @@ kind                    stage     target keys                value
 ``battle_date``         extract   battle                     {start, end|null, precision}
 ``side_polity``         extract   battle, side               non-empty str
 ``battle_split``        extract   battle                     list of >= 2 {key, name, heading}
+``troop_strength``      extract   battle, side               {point|low+high, scope}, see below
 ``commander_link``      resolve   battle, side, mention      Q-id or the string ``none``
 ``general_merge``       resolve   general                    Q-id (the survivor)
 ``battle_type``         classify  battle                     battle_type enum member
@@ -50,6 +51,20 @@ casefold on slugs, side labels, mention names and canonical names, and compare
 Q-ids exactly (the loader upper-cases the Q of a Q-id given as a general key,
 so ``q517`` and ``Q517`` are one key). :func:`target_key` is that normalisation
 applied to an entry.
+
+``troop_strength`` entries: ``value`` is exactly one of ``point`` or ``low`` plus
+``high`` (positive integers, ``low < high``), and the entry carries a required
+entry-level ``scope`` beside ``value`` (no other kind has one). ``scope`` is
+``deployed`` or one of the force-size scopes the extractor writes for a field
+army (``engaged``, ``available``, ``theatre_strength``, ``on_paper``); the
+infobox wording rules already read "deployed" as ``engaged``, so the entry's
+``scope`` is stored normalised (``deployed`` becomes ``engaged``). ``unknown``
+and ``population`` are refused: an override exists to state what the number
+counts, and a people count is not an army::
+
+    scope: deployed
+    value: {point: 50000}
+    value: {low: 40000, high: 60000}
 
 ``battle_date`` values: when ``start`` and ``end`` are both plain ``YYYY-MM-DD``
 dates the loader requires ``start <= end``. Any other text (``c. 1812``, a year
@@ -97,6 +112,7 @@ import yaml
 from sqlalchemy import text
 
 from pipeline.extractors.dates import PRECISIONS
+from pipeline.extractors.records import SCOPES
 
 __all__ = [
     "DEFAULT_PATH",
@@ -120,7 +136,7 @@ logger = structlog.get_logger()
 DEFAULT_PATH: Final[Path] = Path(__file__).resolve().parents[1] / "config" / "overrides.yaml"
 
 KINDS_BY_STAGE: Final[dict[str, tuple[str, ...]]] = {
-    "extract": ("outcome", "battle_date", "side_polity", "battle_split"),
+    "extract": ("outcome", "battle_date", "side_polity", "battle_split", "troop_strength"),
     "resolve": ("commander_link", "general_merge"),
     "classify": ("battle_type", "attribution"),
 }
@@ -134,6 +150,7 @@ _TARGET_KEYS: Final[dict[str, tuple[str, ...]]] = {
     "battle_date": ("battle",),
     "side_polity": ("battle", "side"),
     "battle_split": ("battle",),
+    "troop_strength": ("battle", "side"),
     "commander_link": ("battle", "side", "mention"),
     "general_merge": ("general",),
     "battle_type": ("battle",),
@@ -143,6 +160,7 @@ _TARGET_KEYS: Final[dict[str, tuple[str, ...]]] = {
 _ENTRY_KEYS: Final[frozenset[str]] = frozenset(
     {"id", "kind", "target", "value", "source", "note", "reviewed"}
 )
+_SCOPED_ENTRY_KEYS: Final[frozenset[str]] = frozenset({"scope"})
 _ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^ov-\d{4}$")
 _QID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^Q[1-9]\d*$")
 _SCHEMA_PATH: Final[Path] = Path(__file__).resolve().parents[1] / "config" / "schema.sql"
@@ -153,6 +171,14 @@ _DATE_VALUE_KEYS: Final[frozenset[str]] = frozenset({"start", "end", "precision"
 _MIN_OUTCOME_SIDES: Final[int] = 2
 _MIN_SPLIT_PARTS: Final[int] = 2
 _SPLIT_PART_KEYS: Final[frozenset[str]] = frozenset({"key", "name", "heading"})
+_TROOP_POINT_KEYS: Final[frozenset[str]] = frozenset({"point"})
+_TROOP_RANGE_KEYS: Final[frozenset[str]] = frozenset({"low", "high"})
+# Scopes an override may state: the army levels the reconcile scope offsets
+# model. ``unknown`` says nothing, and ``population`` is excluded from the
+# hierarchy (see pipeline.extractors.records.SCOPES).
+TROOP_STRENGTH_SCOPES: Final[frozenset[str]] = frozenset(SCOPES) - {"unknown", "population"}
+# Curators write "deployed"; the extractor's wording rules read it as engaged.
+_TROOP_SCOPE_ALIASES: Final[dict[str, str]] = {"deployed": "engaged"}
 _SPLIT_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _QID_LOOSE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[Qq][1-9]\d*$")
 _PLAIN_DATE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -201,6 +227,8 @@ class OverrideEntry:
     note: str
     reviewed_by: str
     reviewed_on: str
+    # Only a troop_strength entry has one, normalised to a stored scope.
+    scope: str | None = None
 
 
 @dataclass(frozen=True)
@@ -365,6 +393,41 @@ def _validate_battle_split(label: str, raw: Any) -> list[dict[str, str]]:
     return parts
 
 
+def _troop_count(label: str, what: str, raw: Any) -> int:
+    # bool is an int subclass; `true` would otherwise read as one soldier.
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise _fail(label, f"{what} must be an integer, got {raw!r}")
+    if raw <= 0:
+        raise _fail(label, f"{what} must be a positive integer, got {raw}")
+    return raw
+
+
+def _validate_troop_scope(label: str, raw: Any) -> str:
+    scope = _TROOP_SCOPE_ALIASES.get(raw, raw) if isinstance(raw, str) else raw
+    if not isinstance(scope, str) or scope not in TROOP_STRENGTH_SCOPES:
+        allowed = sorted(TROOP_STRENGTH_SCOPES | _TROOP_SCOPE_ALIASES.keys())
+        raise _fail(label, f"scope must be one of {allowed}, got {raw!r}")
+    return scope
+
+
+def _validate_troop_strength(label: str, raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise _fail(label, "value must be a mapping")
+    keys = frozenset(raw)
+    if keys not in (_TROOP_POINT_KEYS, _TROOP_RANGE_KEYS):
+        raise _fail(
+            label,
+            f"value needs exactly one of point or low+high; got keys {sorted(map(str, raw))}",
+        )
+    if keys == _TROOP_POINT_KEYS:
+        return {"point": _troop_count(label, "value.point", raw["point"])}
+    low = _troop_count(label, "value.low", raw["low"])
+    high = _troop_count(label, "value.high", raw["high"])
+    if low >= high:
+        raise _fail(label, f"value.low {low} must be less than value.high {high}")
+    return {"low": low, "high": high}
+
+
 def _validate_commander_link(label: str, raw: Any) -> str:
     if raw == "none":
         return "none"
@@ -443,6 +506,8 @@ def _validate_value(label: str, kind: str, target: dict[str, str], raw: Any) -> 
         return _non_empty_str(label, "value", raw)
     if kind == "battle_split":
         return _validate_battle_split(label, raw)
+    if kind == "troop_strength":
+        return _validate_troop_strength(label, raw)
     if kind == "commander_link":
         return _validate_commander_link(label, raw)
     if kind == "general_merge":
@@ -473,12 +538,15 @@ def _validate_entry(index: int, raw: Any, seen_ids: set[str]) -> OverrideEntry:
         raise _fail(label, "must be a mapping")
     if isinstance(raw.get("id"), str):
         label = raw["id"]
-    if set(raw) != _ENTRY_KEYS:
+    expected = (
+        _ENTRY_KEYS | _SCOPED_ENTRY_KEYS if raw.get("kind") == "troop_strength" else _ENTRY_KEYS
+    )
+    if set(raw) != expected:
         raise _fail(
             label,
-            f"keys must be exactly {sorted(_ENTRY_KEYS)}; "
-            f"missing {sorted(_ENTRY_KEYS - set(raw))}, "
-            f"unknown {sorted(map(str, set(raw) - _ENTRY_KEYS))}",
+            f"keys must be exactly {sorted(expected)}; "
+            f"missing {sorted(expected - set(raw))}, "
+            f"unknown {sorted(map(str, set(raw) - expected))}",
         )
     entry_id = raw["id"]
     if not isinstance(entry_id, str) or not _ID_PATTERN.match(entry_id):
@@ -494,6 +562,7 @@ def _validate_entry(index: int, raw: Any, seen_ids: set[str]) -> OverrideEntry:
         raise _fail(label, "note must be a string")
     target = _validate_target(label, kind, raw["target"])
     value = _validate_value(label, kind, target, raw["value"])
+    scope = _validate_troop_scope(label, raw["scope"]) if kind == "troop_strength" else None
     reviewed_by, reviewed_on = _validate_reviewed(label, raw["reviewed"])
     return OverrideEntry(
         id=entry_id,
@@ -505,6 +574,7 @@ def _validate_entry(index: int, raw: Any, seen_ids: set[str]) -> OverrideEntry:
         note=raw["note"],
         reviewed_by=reviewed_by,
         reviewed_on=reviewed_on,
+        scope=scope,
     )
 
 

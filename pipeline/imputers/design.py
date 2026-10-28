@@ -171,6 +171,15 @@ class ImputeDesign:
         mask[self.observed_rows] = True
         return mask
 
+    @property
+    def reported(self) -> np.ndarray:
+        """Per row, the side's likelihood mean (its report, offsets removed); NaN if none."""
+        out = np.full(self.n_sides, np.nan)
+        for battle in self.battles:
+            if len(battle.obs_local):
+                out[battle.rows[battle.obs_local]] = battle.m_lik
+        return out
+
 
 def _categorical(name: str, values: Sequence[str], sd: float) -> CategoricalBlock:
     """Index a per-side categorical column against its own sorted vocabulary.

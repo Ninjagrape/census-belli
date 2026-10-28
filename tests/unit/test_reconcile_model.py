@@ -198,13 +198,15 @@ def test_summarises_row_location_and_scale_match_the_compiled_model_at_a_test_po
             "delta_level",
             "a_era",
             "sigma_source",
+            "sigma_source_ancient",
             "sigma_estimate",
             "sigma_round",
             "sigma_unknown",
         )
         if n in model.named_vars
     ]
-    assert {"sigma_unknown", "sigma_estimate", "sigma_round"} <= set(names)
+    assert {"sigma_unknown", "sigma_source_ancient"} <= set(names)
+    assert not {"sigma_estimate", "sigma_round"} & set(model.named_vars)
     graphs = model.replace_rvs_by_values([model[n] for n in names] + [model.row_eta, model.row_sd])
     compiled = pytensor.function(model.value_vars, graphs, on_unused_input="ignore")
     outputs = compiled(*[point[v.name] for v in model.value_vars])
@@ -265,7 +267,11 @@ def test_the_ratio_variance_applies_to_casualty_components_only() -> None:
     )
     troops = build_design(_reports("troops"), quantity="troops", ancient_cutoff_year=500)
 
-    casualty_model = build_model(casualties, priors=ModelPriors(), inflation=InflationPrior())
+    casualty_model = build_model(
+        casualties,
+        priors=ModelPriors.from_params({}, quantity="casualties"),
+        inflation=InflationPrior(),
+    )
     troop_model = build_model(troops, priors=ModelPriors(), inflation=InflationPrior())
 
     assert {"sigma_ratio", "z_ratio"} <= _free_names(casualty_model)

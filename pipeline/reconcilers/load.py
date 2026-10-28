@@ -36,6 +36,7 @@ a reconcile re-run would erase extract's half of the log every time.
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -44,15 +45,24 @@ from typing import Any, Final
 import structlog
 from sqlalchemy import text
 
+from pipeline.extractors.store import OVERRIDE_SOURCE_PREFIX
 from pipeline.reconcilers.claims import assign_lineages, classify_regime, roundness
-from pipeline.reconcilers.plausibility import exclusion_reason, filter_troop_reports
+from pipeline.reconcilers.plausibility import (
+    exclusion_reason,
+    filter_troop_reports,
+    is_override_report,
+)
 from pipeline.reconcilers.records import Quantity, ReconcileCounts, Report, SourceKey
 
 __all__ = [
     "DEFAULT_MIN_PLAUSIBLE_TROOPS",
+    "SPAN_ERROR_LOG_RATIO",
+    "SPAN_WARN_LOG_RATIO",
+    "SpanFinding",
     "UnfillableSide",
     "classify_sides",
     "load_reports",
+    "troop_span_findings",
     "write_unfillable",
 ]
 
@@ -77,6 +87,13 @@ _MODERN_REGIME: Final[str] = "modern_scholarly"
 # a hundred combatants in this corpus's sources; below that the figure is a day
 # number, a count of something else or a fragment of a date.
 DEFAULT_MIN_PLAUSIBLE_TROOPS: Final[float] = 100.0
+
+# Span guard bounds (params.troop_span_warn_log / troop_span_error_log), in log
+# units: ln(max / min) of a side's kept point totals. e (ratio 2.72) is more
+# disagreement than one claim regime's noise explains; e squared (7.4) is a
+# scope or unit mix-up until a curator says otherwise.
+SPAN_WARN_LOG_RATIO: Final[float] = 1.0
+SPAN_ERROR_LOG_RATIO: Final[float] = 2.0
 
 _FIELD_NAME_BY_QUANTITY: Final[dict[Quantity, str]] = {
     "troops": "troop_total",
@@ -179,6 +196,37 @@ class UnfillableSide:
     reason: str
 
 
+def _troop_row_exclusion(
+    branch: str, reported_value: float, scope: str | None
+) -> tuple[str, str] | None:
+    """Name the per-row rule that excludes a troop report, if any.
+
+    Args:
+        branch: The report's ``troop_branch`` value.
+        reported_value: The report's raw value.
+        scope: The report's ``scope``. ``population`` counts people (a nation
+            on the move, its non-combatants), not an army, and is not a level
+            of the force-size hierarchy the scope offsets model.
+
+    Returns:
+        ``(counter_name, reason)`` for the first rule that excludes the row, or
+        None when the row is usable.
+    """
+    if branch == _NAVAL_BRANCH:
+        # Naval rows are also non-total; count them once, as naval, never
+        # again as a generic non-total exclusion.
+        return "excluded_naval", "naval branch"
+    if scope == _POPULATION_SCOPE:
+        # Checked before the branch rule: a "368,000 people" row is stored as a
+        # component, and calling it a non-total would hide why it was dropped.
+        return "excluded_population_scope", "population scope"
+    if branch != _TOTAL_BRANCH:
+        return "excluded_non_total_branch", f"non-total branch {branch!r}"
+    if reported_value <= 0:
+        return "excluded_non_positive", "non-positive value"
+    return None
+
+
 def _classify_troop_report(
     branch: str, reported_value: float, scope: str | None, counts: ReconcileCounts
 ) -> bool:
@@ -187,31 +235,18 @@ def _classify_troop_report(
     Args:
         branch: The report's ``troop_branch`` value.
         reported_value: The report's raw value.
-        scope: The report's ``scope``. ``population`` counts people (a nation
-            on the move, its non-combatants), not an army, and is not a level
-            of the force-size hierarchy the scope offsets model.
+        scope: The report's ``scope``.
         counts: Counters to accumulate the exclusion into.
 
     Returns:
         True if the report is usable, False if it was excluded (and counted).
     """
-    if branch == _NAVAL_BRANCH:
-        # Naval rows are also non-total; count them once, as naval, never
-        # again as a generic non-total exclusion.
-        counts.excluded_naval += 1
-        return False
-    if scope == _POPULATION_SCOPE:
-        # Counted before the branch rule: a "368,000 people" row is stored as a
-        # component, and calling it a non-total would hide why it was dropped.
-        counts.excluded_population_scope += 1
-        return False
-    if branch != _TOTAL_BRANCH:
-        counts.excluded_non_total_branch += 1
-        return False
-    if reported_value <= 0:
-        counts.excluded_non_positive += 1
-        return False
-    return True
+    exclusion = _troop_row_exclusion(branch, reported_value, scope)
+    if exclusion is None:
+        return True
+    counter, _ = exclusion
+    setattr(counts, counter, getattr(counts, counter) + 1)
+    return False
 
 
 def _sides_with_modern_estimate(reports: list[Report]) -> set[int]:
@@ -272,6 +307,126 @@ def drop_superseded_by_modern(reports: list[Report], counts: ReconcileCounts) ->
     return kept
 
 
+@dataclass(frozen=True)
+class SpanFinding:
+    """A side whose kept point totals disagree by more than the guard allows.
+
+    Attributes:
+        side_id: The ``battle_sides.side_id``.
+        battle_id: Its battle.
+        min_value: The smallest kept point total.
+        max_value: The largest kept point total.
+        log_span: ``ln(max_value / min_value)``.
+        severity: ``"warning"`` above the warn bound, ``"error"`` above the
+            error bound.
+    """
+
+    side_id: int
+    battle_id: int
+    min_value: float
+    max_value: float
+    log_span: float
+    severity: str
+
+
+def troop_span_findings(
+    reports: Sequence[Report],
+    *,
+    warn_log_span: float = SPAN_WARN_LOG_RATIO,
+    error_log_span: float = SPAN_ERROR_LOG_RATIO,
+) -> list[SpanFinding]:
+    """Flag sides whose kept troop point totals span more than the bounds.
+
+    Runs after every load filter, supersede included, so it judges what the
+    model will see. Only point rows count: a bound is one-sided by design. A
+    side holding a ``troop_strength`` override row is skipped, because a
+    curator has settled it.
+
+    Args:
+        reports: The loaded reports; casualty rows are ignored.
+        warn_log_span: Flag a side when ``ln(max / min)`` exceeds this.
+        error_log_span: Make it an error when it exceeds this.
+
+    Returns:
+        One finding per flagged side, in side id order.
+    """
+    points: dict[int, list[Report]] = defaultdict(list)
+    overridden: set[int] = set()
+    for report in reports:
+        if report.quantity != "troops":
+            continue
+        # Keyed on the override url, not the manual_entry source type: other hand
+        # entries have not had their disagreement settled by a curator.
+        if is_override_report(report):
+            overridden.add(report.side_id)
+        if not report.is_lower_bound and not report.is_upper_bound:
+            points[report.side_id].append(report)
+
+    findings: list[SpanFinding] = []
+    for side_id in sorted(points.keys() - overridden):
+        rows = points[side_id]
+        low = min(r.reported_value for r in rows)
+        high = max(r.reported_value for r in rows)
+        span = math.log(high / low)
+        if span <= warn_log_span:
+            continue
+        findings.append(
+            SpanFinding(
+                side_id=side_id,
+                battle_id=rows[0].battle_id,
+                min_value=low,
+                max_value=high,
+                log_span=span,
+                severity="error" if span > error_log_span else "warning",
+            )
+        )
+    return findings
+
+
+_LOAD_SIDE_NAMES = text(
+    "SELECT bs.side_id, COALESCE(b.source_slug, b.name), bs.side_label "
+    "FROM battle_sides bs JOIN battles b ON b.battle_id = bs.battle_id "
+    "WHERE bs.side_id = ANY(CAST(:ids AS INT[]))"
+)
+
+
+def _record_span_findings(conn: Any, findings: list[SpanFinding], counts: ReconcileCounts) -> None:
+    """Log each finding, count it and keep it, named, for the stage diagnostics."""
+    if not findings:
+        return
+    names = {
+        int(side_id): (str(slug), str(label))
+        for side_id, slug, label in conn.execute(
+            _LOAD_SIDE_NAMES, {"ids": [f.side_id for f in findings]}
+        ).fetchall()
+    }
+    for finding in findings:
+        battle, side = names.get(finding.side_id, ("", ""))
+        log = logger.error if finding.severity == "error" else logger.warning
+        log(
+            "reconcile_troop_span",
+            battle=battle,
+            side=side,
+            severity=finding.severity,
+            min=finding.min_value,
+            max=finding.max_value,
+        )
+        if finding.severity == "error":
+            counts.troop_span_errors += 1
+        else:
+            counts.troop_span_warnings += 1
+        counts.span_findings.append(
+            {
+                "battle": battle,
+                "side": side,
+                "severity": finding.severity,
+                "min": finding.min_value,
+                "max": finding.max_value,
+                "log_span": finding.log_span,
+            }
+        )
+
+
 def _build_troop_reports(
     conn: Any, counts: ReconcileCounts, *, min_plausible_troops: float
 ) -> list[Report]:
@@ -307,6 +462,14 @@ def _build_troop_reports(
         counts.reports_read += 1
         value = float(reported_value)
         if not _classify_troop_report(str(branch), value, scope, counts):
+            if str(url).startswith(OVERRIDE_SOURCE_PREFIX):
+                # A curator entered this on purpose; dropping it silently would
+                # discard the correction without a trace.
+                _, reason = _troop_row_exclusion(str(branch), value, scope) or ("", "")
+                raise ValueError(
+                    f"troop_strength override {url} (side {side_id}) would be excluded"
+                    f" by the loader: {reason}; fix the override"
+                )
             continue
 
         regime = classify_regime(extracted_context, value=value)
@@ -426,6 +589,8 @@ def load_reports(
     ancient_cutoff_year: int,
     counts: ReconcileCounts,
     min_plausible_troops: float = DEFAULT_MIN_PLAUSIBLE_TROOPS,
+    span_warn_log: float = SPAN_WARN_LOG_RATIO,
+    span_error_log: float = SPAN_ERROR_LOG_RATIO,
 ) -> list[Report]:
     """Load every usable troop and casualty report as :class:`Report` records.
 
@@ -448,9 +613,12 @@ def load_reports(
             ``excluded_non_positive``, the four plausibility counters
             (``excluded_implausible_small``, ``excluded_non_personnel``,
             ``excluded_date_context``, ``excluded_component_of_stated_total``),
-            ``regime_unlabelled`` and ``lineages``.
+            ``regime_unlabelled``, ``lineages`` and the span guard's
+            ``troop_span_warnings``, ``troop_span_errors`` and ``span_findings``.
         min_plausible_troops: Troop values below this are excluded as not an
             army's strength (``params.min_plausible_troops``).
+        span_warn_log: Span guard warning bound (``params.troop_span_warn_log``).
+        span_error_log: Span guard error bound (``params.troop_span_error_log``).
 
     Returns:
         Every usable report, troops and casualties together, each with
@@ -458,9 +626,15 @@ def load_reports(
     """
     del ancient_cutoff_year  # see docstring
 
-    troop_reports = _with_lineages(
-        _build_troop_reports(conn, counts, min_plausible_troops=min_plausible_troops)
+    kept_troops = _build_troop_reports(conn, counts, min_plausible_troops=min_plausible_troops)
+    _record_span_findings(
+        conn,
+        troop_span_findings(
+            kept_troops, warn_log_span=span_warn_log, error_log_span=span_error_log
+        ),
+        counts,
     )
+    troop_reports = _with_lineages(kept_troops)
     casualty_reports = _with_lineages(_build_casualty_reports(conn, counts))
 
     counts.lineages = len({r.lineage_id for r in troop_reports}) + len(

@@ -13,6 +13,7 @@ import pytest
 from pipeline.reconcilers.plausibility import (
     drop_components_of_stated_totals,
     exclusion_reason,
+    filter_troop_reports,
     is_stated_total,
 )
 from pipeline.reconcilers.records import ReconcileCounts, Report, SourceKey
@@ -212,3 +213,43 @@ def test_a_stated_total_does_not_reach_across_sources_or_sides() -> None:
 
     assert [r.report_id for r in kept] == [1, 2, 3]
     assert counts.excluded_component_of_stated_total == 0
+
+
+def _troop_report(value: float, *, url: str, source_type: str = "manual_entry") -> Report:
+    return Report(
+        report_id=1,
+        side_id=1,
+        battle_id=1,
+        source_id=1,
+        source_key=SourceKey(source_type, url),
+        source_type=source_type,
+        quantity="troops",
+        reported_value=value,
+        branch="total",
+        claim_regime="unlabelled",
+    )
+
+
+def test_an_override_below_the_floor_is_rejected_loudly_not_dropped() -> None:
+    report = _troop_report(50.0, url="override:ov-0007")
+
+    with pytest.raises(
+        ValueError, match=r"override:ov-0007 \(side \d+, battle \d+\) gives 50 troops, below"
+    ):
+        filter_troop_reports([report], ReconcileCounts(), min_plausible_troops=MIN_TROOPS)
+
+
+def test_an_ordinary_small_row_is_still_dropped_and_counted() -> None:
+    counts = ReconcileCounts()
+    report = _troop_report(50.0, url="https://example/x", source_type="wikipedia_infobox")
+
+    assert filter_troop_reports([report], counts, min_plausible_troops=MIN_TROOPS) == []
+    assert counts.excluded_implausible_small == 1
+
+
+def test_an_override_at_or_above_the_floor_passes() -> None:
+    report = _troop_report(100.0, url="override:ov-0007")
+
+    assert filter_troop_reports([report], ReconcileCounts(), min_plausible_troops=MIN_TROOPS) == [
+        report
+    ]

@@ -150,7 +150,8 @@ _INSERT_RECONCILE_RUN = text(
     INSERT INTO model_runs (run_id, run_name, model_type, config, started_at, completed_at,
                             diagnostics)
     VALUES (:run_id, 'fake reconcile', 'source_disagreement', '{}'::jsonb, now(), now(),
-            '{"troops_neutral": {"written": true}}'::jsonb)
+            '{"troops_neutral": {"written": true,
+                                "recovery": {"within_battle_slope": 0.9}}}'::jsonb)
     """
 )
 
@@ -231,9 +232,9 @@ def _seed(setup: Connection, corpus: SimCorpus) -> dict[int, int]:
 def _write_draws(path: Path, corpus: SimCorpus, db_side: dict[int, int], conn: Any) -> None:
     """Write a reconcile-shaped draws file for the observed sides.
 
-    Each side's posterior is its likelihood mean with sd 0.5, independent, so
-    dividing out s0 = 2 leaves a precision of 3.75 per side, comfortably above
-    the weak-side threshold.
+    Each observed side carries an exported likelihood: its measured value with
+    sd 0.3 (about reconcile's Fisher sd at noise 0.22), no loadings (the shared error is
+    not propagated here).
     """
     rng = np.random.default_rng(11)
     observed = [s for s in corpus.sides if s.side_id not in corpus.is_missing]
@@ -262,6 +263,11 @@ def _write_draws(path: Path, corpus: SimCorpus, db_side: dict[int, int], conn: A
         draws=centres + 0.5 * rng.standard_normal((400, len(observed))),
         m0_mean=9.0,
         s0_mean=2.0,
+        lik_mean=centres,
+        lik_sd=np.full(len(observed), 0.3),
+        lik_has_point=np.ones(len(observed), dtype=bool),
+        lik_loadings=np.zeros((len(observed), 0)),
+        lik_loading_names=np.array([], dtype=np.str_),
     )
 
 
@@ -458,8 +464,15 @@ def test_the_stage_gates_pass_on_the_written_rounds(
 
     results = {r.name: r for r in QualityRunner(conn).run_all(checks)}
 
-    for name in ("imputation_completeness", "imputed_ratio_plausible", "imputed_values_plausible"):
+    for name in (
+        "imputation_completeness",
+        "imputed_ratio_plausible",
+        "imputed_values_plausible",
+        "kept_pair_ratio_slope",
+        "kept_side_slope",
+    ):
         assert results[name].passed, results[name].message
+    assert "slope=" in str(results["kept_pair_ratio_slope"].actual_value)
     assert results["distributional_check"].severity.value == "warning"
 
 
@@ -646,3 +659,132 @@ def test_published_scale_writes_files_but_never_missing_data_log(
     report = json.loads((tmp_path / "published" / "gate_report.json").read_text(encoding="utf-8"))
     gate = next(g for g in report["gates"] if g["name"] == "imputed_values_plausible")
     assert "not applicable" not in gate["actual"]
+
+
+def _variant_draws(seeded: dict[str, Any], corpus: SimCorpus, tmp_path: Path) -> dict[str, Any]:
+    """A draws file where two observed sides sit far from the corpus centre and one is bound-only.
+
+    Returns:
+        The file path and the database ids of each special side.
+    """
+    observed = [s for s in corpus.sides if s.side_id not in corpus.is_missing]
+    db = seeded["db_side"]
+    with np.load(seeded["draws_path"]) as data:
+        arrays = {name: np.array(data[name]) for name in data.files}
+    position = {int(s): i for i, s in enumerate(arrays["side_id"])}
+    small, large, bound_only, stale = (db[s.side_id] for s in observed[:4])
+    arrays["lik_mean"][position[small]] = 4.6
+    arrays["lik_mean"][position[large]] = 15.5
+    arrays["lik_sd"][[position[small], position[large]]] = 0.27
+    arrays["lik_has_point"][position[bound_only]] = False
+    arrays["lik_mean"][position[bound_only]] = np.nan
+    arrays["lik_sd"][position[bound_only]] = np.nan
+    path = tmp_path / f"neutral_draws_run{FAKE_RECONCILE_RUN_ID}.npz"
+    np.savez(path, **arrays)
+    return {
+        "path": path,
+        "small": small,
+        "large": large,
+        "bound_only": bound_only,
+        "stale": stale,
+    }
+
+
+def test_a_side_is_missing_only_without_a_point_row_and_the_causes_are_counted(
+    conn: Connection, seeded: dict[str, Any], corpus: SimCorpus, tmp_path: Path
+) -> None:
+    variant = _variant_draws(seeded, corpus, tmp_path)
+    missing_db = sorted(seeded["db_side"][s] for s in corpus.is_missing)
+    with_reports = missing_db[0]
+    source = int(
+        conn.execute(
+            text(
+                "INSERT INTO sources (source_type, url) "
+                "VALUES (CAST('wikipedia_infobox' AS source_type), 'https://example/cav') "
+                "RETURNING source_id"
+            )
+        ).scalar_one()
+    )
+    conn.execute(
+        text(
+            "INSERT INTO troop_reports (side_id, source_id, branch, reported_value, scope) "
+            "VALUES (:s, :src, CAST('cavalry' AS troop_branch), 800, 'engaged')"
+        ),
+        {"s": with_reports, "src": source},
+    )
+
+    impute_stage.run(
+        _spec(seeded, draws_path=str(variant["path"]), imputed_root=str(tmp_path)),
+        context=StageContext(db_conn=conn),
+    )
+
+    rows = {int(r["side_id"]): r for r in _read_round(tmp_path, "neutral", 0)}
+    # The largest and smallest armies carry a point row, so they are observed.
+    assert rows[variant["small"]]["is_imputed"] == "False"
+    assert rows[variant["large"]]["is_imputed"] == "False"
+    assert float(rows[variant["small"]]["log_troops"]) < 8.0
+    assert float(rows[variant["large"]]["log_troops"]) > 12.0
+    assert rows[variant["bound_only"]]["is_imputed"] == "True"
+    report = json.loads((tmp_path / "neutral" / "gate_report.json").read_text(encoding="utf-8"))
+    assert report["missing_by_cause"] == {
+        "bound_only": 1,
+        "no_reports": len(missing_db) - 1,
+        "other": 1,
+    }
+    assert {g["name"] for g in report["gates"]} >= {"kept_pair_ratio_slope", "kept_side_slope"}
+
+
+def test_a_side_that_is_now_kept_loses_its_stale_imputation_row(
+    conn: Connection, seeded: dict[str, Any], corpus: SimCorpus, tmp_path: Path
+) -> None:
+    variant = _variant_draws(seeded, corpus, tmp_path)
+    battle_id = conn.execute(
+        text("SELECT battle_id FROM battle_sides WHERE side_id = :s"), {"s": variant["stale"]}
+    ).scalar_one()
+    conn.execute(
+        text(
+            "INSERT INTO missing_data_log (battle_id, side_id, field_name, was_imputed, "
+            "imputation_method, imputed_value, notes) "
+            "VALUES (:b, :s, 'troop_total', TRUE, 'bayes_joint_v1_neutral_log', 1.0, "
+            "'imputed_scale=neutral (old); ')"
+        ),
+        {"b": battle_id, "s": variant["stale"]},
+    )
+
+    impute_stage.run(
+        _spec(seeded, draws_path=str(variant["path"]), imputed_root=str(tmp_path)),
+        context=StageContext(db_conn=conn),
+    )
+
+    left = conn.execute(
+        text(
+            "SELECT COUNT(*) FROM missing_data_log "
+            "WHERE side_id = :s AND field_name = 'troop_total'"
+        ),
+        {"s": variant["stale"]},
+    ).scalar_one()
+    still_missing = conn.execute(
+        text(
+            "SELECT COUNT(*) FROM missing_data_log WHERE side_id = :s AND was_imputed "
+            "AND imputation_method = 'bayes_joint_v1_neutral_log'"
+        ),
+        {"s": variant["bound_only"]},
+    ).scalar_one()
+    assert left == 0
+    assert still_missing == 1
+
+
+def test_a_draws_file_that_predates_the_exported_likelihood_is_refused(
+    conn: Connection, seeded: dict[str, Any], tmp_path: Path
+) -> None:
+    with np.load(seeded["draws_path"]) as data:
+        arrays = {n: data[n] for n in data.files if not n.startswith("lik_")}
+    old = tmp_path / f"neutral_draws_run{FAKE_RECONCILE_RUN_ID}.npz"
+    np.savez(old, **arrays)
+
+    with pytest.raises(ValueError, match="Re-run reconcile"):
+        impute_stage.run(
+            _spec(seeded, draws_path=str(old), imputed_root=str(tmp_path)),
+            context=StageContext(db_conn=conn),
+        )
+    assert not (tmp_path / "neutral").exists()

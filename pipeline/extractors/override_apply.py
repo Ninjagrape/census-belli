@@ -2,9 +2,10 @@
 Apply the extract stage's manual overrides to the merged battle records.
 
 ``config/overrides.yaml`` entries of kind ``outcome``, ``battle_date``,
-``side_polity`` and ``battle_split`` are applied to the in-memory :class:`BattleExtraction` list
-after extraction and before anything is written, so ``data/processed/*.jsonl``
-(which resolve reads) and the database both carry the correction. The stage
+``side_polity``, ``battle_split`` and ``troop_strength`` are applied to the in-memory
+:class:`BattleExtraction` list after extraction and before anything is written, so
+``data/processed/*.jsonl`` (which resolve reads) and the database both carry the
+correction. The stage
 runs this on every run, after its own logic, so a re-run never undoes it.
 
 A ``battle_split`` entry is acted on earlier, while the article is extracted
@@ -35,8 +36,9 @@ from typing import Final
 import structlog
 
 from pipeline.extractors.dates import astronomical_year, parse_date_text
-from pipeline.extractors.records import BattleExtraction, SideExtraction
+from pipeline.extractors.records import BattleExtraction, Provenance, SideExtraction, TroopReport
 from pipeline.extractors.split import SplitPart, child_slug
+from pipeline.extractors.store import OVERRIDE_SOURCE_PREFIX
 from pipeline.overrides import OverrideEntry, OverrideReport
 
 __all__ = [
@@ -210,10 +212,75 @@ def _apply_side_polity(entry: OverrideEntry, battle: BattleExtraction) -> str | 
     return None
 
 
+_TROOP_GAP_FIELD: Final[str] = "troop_total"
+# The label reconcile reads to treat a figure as the modern-scholarly anchor
+# (pipeline.extractors.textnorm.MODERN_ESTIMATE_PATTERN). The supersede rule
+# then drops the side's other totals, so no second exclusion mechanism exists.
+_MODERN_LABEL: Final[str] = "(modern estimates)"
+
+
+def _apply_troop_strength(entry: OverrideEntry, battle: BattleExtraction) -> str | None:
+    """Add the curated figure to the side as modern-scholarly troop report rows.
+
+    A point becomes one row. A range becomes a lower and an upper bound row
+    sharing one context, the shape the infobox parser writes for a labelled
+    range, which reconcile merges into one observation. The side's own
+    extracted rows stay; reconcile load supersedes them.
+
+    Returns:
+        An unmatched reason, or None when applied.
+    """
+    sides = _sides_by_label(battle).get(_norm(entry.target["side"]))
+    if sides is None:
+        known = sorted(s.label for s in battle.sides)
+        return f"side {entry.target['side']!r} not found in battle (sides: {known})"
+    value = entry.value
+    figure = f"{value['point']:,}" if "point" in value else f"{value['low']:,}-{value['high']:,}"
+    provenance = Provenance(
+        source_type="manual_entry",
+        extraction_method="manual",
+        source_ref=f"{OVERRIDE_SOURCE_PREFIX}{entry.id}",
+        source_title=entry.source,
+    )
+    for side in sides:
+        rows = (
+            [(float(value["point"]), False, False)]
+            if "point" in value
+            else [(float(value["low"]), True, False), (float(value["high"]), False, True)]
+        )
+        for reported, is_lower, is_upper in rows:
+            side.troop_reports.append(
+                TroopReport(
+                    side_label=side.label,
+                    reported_value=reported,
+                    provenance=provenance,
+                    branch="total",
+                    scope=entry.scope or "unknown",
+                    is_estimate=True,
+                    is_upper_bound=is_upper,
+                    is_lower_bound=is_lower,
+                    extracted_context=f"{figure} {_MODERN_LABEL}",
+                    page_or_section=f"override:{entry.id}",
+                )
+            )
+    labels = {_norm(side.label) for side in sides}
+    battle.missing = [
+        m
+        for m in battle.missing
+        if not (
+            m.field_name == _TROOP_GAP_FIELD
+            and m.side_label is not None
+            and _norm(m.side_label) in labels
+        )
+    ]
+    return None
+
+
 _APPLIERS: Final[dict[str, Callable[[OverrideEntry, BattleExtraction], str | None]]] = {
     "outcome": _apply_outcome,
     "battle_date": _apply_battle_date,
     "side_polity": _apply_side_polity,
+    "troop_strength": _apply_troop_strength,
 }
 
 

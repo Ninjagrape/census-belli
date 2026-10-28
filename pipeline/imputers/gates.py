@@ -21,6 +21,9 @@ __all__ = [
     "imputation_completeness",
     "imputed_ratio_plausible",
     "imputed_values_plausible",
+    "kept_pair_ratio_slope",
+    "require_pair_reference",
+    "kept_side_slope",
     "run_gates",
 ]
 
@@ -256,6 +259,154 @@ def distributional_check(
     )
 
 
+def _skipped(name: str, threshold: str, reason: str) -> GateResult:
+    """A recovery gate that cannot be judged: passes, and says why."""
+    return GateResult(name, True, "error", f"skipped: {reason}", threshold)
+
+
+def require_pair_reference(
+    gates: list[GateResult], reference: float | None, *, reconcile_run_id: int | None
+) -> list[GateResult]:
+    """Fail the kept-pair gate when reconcile recorded no within-battle slope.
+
+    Falling back to the fixed floor would hold impute to a standard reconcile's
+    calibrated fit does not meet, so a missing reference is an error to fix upstream.
+
+    Args:
+        gates: The gate results from :func:`run_gates`.
+        reference: Reconcile's within-battle slope, or None when none was recorded.
+        reconcile_run_id: The reconcile run behind the likelihood, for the message.
+
+    Returns:
+        ``gates`` unchanged when a reference exists, else a copy whose
+        ``kept_pair_ratio_slope`` verdict is a failure.
+    """
+    if reference is not None:
+        return gates
+    failed = GateResult(
+        name="kept_pair_ratio_slope",
+        passed=False,
+        severity="error",
+        actual="no reference slope",
+        threshold="within tolerance of reconcile's within_battle_slope",
+        message=f"reconcile run {reconcile_run_id} has no within_battle_slope; re-run reconcile",
+    )
+    return [failed if g.name == failed.name else g for g in gates] + (
+        [] if any(g.name == failed.name for g in gates) else [failed]
+    )
+
+
+def kept_pair_ratio_slope(
+    values: np.ndarray,
+    battle_ids: np.ndarray,
+    report: np.ndarray,
+    is_observed: np.ndarray,
+    *,
+    minimum: float,
+    min_n: int,
+    reference: float | None = None,
+    tolerance: float = 0.1,
+) -> GateResult:
+    """Imputed force ratios track the reported ones where both sides carry a report.
+
+    Over battles with exactly two observed (point-reported) sides, the slope
+    through the origin of the across-round mean imputed log ratio on the
+    reported log ratio (the sides' likelihood means, which are the reports with
+    reconcile's offsets removed). Through the origin because the log ratio is
+    antisymmetric: which side is "A" (the lower row) is arbitrary. The model
+    stage regresses outcome on this ratio, so a slope under 1 attenuates the
+    force effect. Before 2026-10-22 it was 0.43 on the corpus.
+
+    Args:
+        values: ``(rounds, sides)`` log troop counts.
+        battle_ids: Battle id per side.
+        report: Per side, the reported (likelihood mean) log value; NaN if none.
+        is_observed: Per side, True if it carried a likelihood.
+        minimum: The slope must be at least this when there is no ``reference``.
+        min_n: Fewest battles for the gate to apply; below it the gate passes
+            and says it skipped.
+        reference: Reconcile's own within-battle slope on the same scale. A
+            calibrated reconcile fit shrinks reported ratios by their reliability,
+            so impute is held to that slope rather than to a fixed floor: it must
+            lie within ``tolerance`` of it, in either direction.
+        tolerance: Allowed distance from ``reference``.
+
+    Returns:
+        The verdict, severity error.
+    """
+    threshold = (
+        f">= {minimum:g}" if reference is None else f"within {tolerance:g} of {reference:.3f}"
+    )
+    mean = values.mean(axis=0)
+    xs: list[float] = []
+    ys: list[float] = []
+    for battle in np.unique(battle_ids):
+        rows = np.flatnonzero((battle_ids == battle) & is_observed)
+        if len(rows) != 2:
+            continue
+        a, b = rows
+        xs.append(float(report[a] - report[b]))
+        ys.append(float(mean[a] - mean[b]))
+    if len(xs) < min_n:
+        return _skipped("kept_pair_ratio_slope", threshold, f"{len(xs)} pairs, need {min_n}")
+    denominator = float(np.sum(np.square(xs)))
+    if denominator <= 0.0:
+        return _skipped("kept_pair_ratio_slope", threshold, "reported ratios are all zero")
+    slope = float(np.sum(np.multiply(xs, ys)) / denominator)
+    passed = slope >= minimum if reference is None else abs(slope - reference) <= tolerance
+    reference_note = "" if reference is None else f", reference={reference:.3f}"
+    return GateResult(
+        name="kept_pair_ratio_slope",
+        passed=passed,
+        severity="error",
+        actual=f"slope={slope:.3f}, battles={len(xs)}{reference_note}",
+        threshold=threshold,
+        message=""
+        if passed
+        else "the imputed force ratio is compressed relative to the reported one",
+    )
+
+
+def kept_side_slope(
+    values: np.ndarray,
+    report: np.ndarray,
+    is_observed: np.ndarray,
+    *,
+    minimum: float,
+    min_n: int,
+) -> GateResult:
+    """Observed sides keep their reported level: imputed against reported, OLS slope.
+
+    Args:
+        values: ``(rounds, sides)`` log troop counts.
+        report: Per side, the reported (likelihood mean) log value; NaN if none.
+        is_observed: Per side, True if it carried a likelihood.
+        minimum: The slope must be at least this.
+        min_n: Fewest sides for the gate to apply.
+
+    Returns:
+        The verdict, severity error.
+    """
+    threshold = f">= {minimum:g}"
+    n = int(is_observed.sum())
+    if n < min_n:
+        return _skipped("kept_side_slope", threshold, f"{n} observed sides, need {min_n}")
+    x = report[is_observed]
+    y = values.mean(axis=0)[is_observed]
+    if float(np.var(x)) <= 0.0:
+        return _skipped("kept_side_slope", threshold, "reported values do not vary")
+    slope = float(np.polyfit(x, y, 1)[0])
+    passed = slope >= minimum
+    return GateResult(
+        name="kept_side_slope",
+        passed=passed,
+        severity="error",
+        actual=f"slope={slope:.3f}, sides={n}",
+        threshold=threshold,
+        message="" if passed else "observed sides are pulled away from their reports",
+    )
+
+
 def run_gates(
     values: np.ndarray,
     *,
@@ -269,6 +420,13 @@ def run_gates(
     value_max: float,
     ks_alpha: float,
     ks_min_n: int,
+    report: np.ndarray | None = None,
+    is_observed: np.ndarray | None = None,
+    min_pair_slope: float = 0.8,
+    min_side_slope: float = 0.9,
+    slope_min_n: int = 10,
+    reference_pair_slope: float | None = None,
+    pair_slope_tolerance: float = 0.1,
 ) -> list[GateResult]:
     """Compute every dataset-level gate.
 
@@ -284,15 +442,41 @@ def run_gates(
         value_max: See :func:`imputed_values_plausible`.
         ks_alpha: See :func:`distributional_check`.
         ks_min_n: See :func:`distributional_check`.
+        report: Per side, the reported log value (NaN where unobserved). The two
+            slope gates are added only when this and ``is_observed`` are given.
+        is_observed: Per side, True if it carried a likelihood.
+        min_pair_slope: See :func:`kept_pair_ratio_slope`.
+        min_side_slope: See :func:`kept_side_slope`.
+        slope_min_n: Fewest pairs or sides for a slope gate to apply.
+        reference_pair_slope: Reconcile's within-battle slope, if known; see
+            :func:`kept_pair_ratio_slope`.
+        pair_slope_tolerance: Allowed distance from it.
 
     Returns:
-        The four gate results, in spec order.
+        The gate results, in spec order.
     """
     complete = imputation_completeness(values, n_sides=len(battle_ids), n_rounds=n_rounds)
     finite = np.where(np.isfinite(values), values, 0.0)
-    return [
+    results = [
         complete,
         imputed_ratio_plausible(finite, battle_ids, is_imputed, limit=ratio_limit),
         imputed_values_plausible(finite, is_imputed, scale=scale, lower=value_min, upper=value_max),
         distributional_check(finite, is_imputed, era_of_side, alpha=ks_alpha, min_n=ks_min_n),
     ]
+    if report is not None and is_observed is not None:
+        results.append(
+            kept_pair_ratio_slope(
+                finite,
+                battle_ids,
+                report,
+                is_observed,
+                minimum=min_pair_slope,
+                min_n=slope_min_n,
+                reference=reference_pair_slope,
+                tolerance=pair_slope_tolerance,
+            )
+        )
+        results.append(
+            kept_side_slope(finite, report, is_observed, minimum=min_side_slope, min_n=slope_min_n)
+        )
+    return results

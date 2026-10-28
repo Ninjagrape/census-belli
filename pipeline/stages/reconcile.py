@@ -104,6 +104,8 @@ from pipeline.reconcilers.design import (
 )
 from pipeline.reconcilers.load import (
     DEFAULT_MIN_PLAUSIBLE_TROOPS,
+    SPAN_ERROR_LOG_RATIO,
+    SPAN_WARN_LOG_RATIO,
     classify_sides,
     load_reports,
     write_unfillable,
@@ -116,6 +118,7 @@ from pipeline.reconcilers.model import (
     SamplerSettings,
     build_model,
     load_inflation_prior,
+    noise_prior_medians,
     sample,
 )
 from pipeline.reconcilers.neutral import summarise_neutral, write_neutral_draws
@@ -126,6 +129,7 @@ from pipeline.reconcilers.prior_check import (
     prior_predictive_check,
 )
 from pipeline.reconcilers.records import Quantity, ReconcileCounts, Report
+from pipeline.reconcilers.recovery import RecoverySettings
 from pipeline.reconcilers.report import build_report, write_report
 from pipeline.reconcilers.summarise import (
     DEFAULT_MAX_MEDIAN_MCSE_LOG,
@@ -216,6 +220,19 @@ def _write_thresholds(params: dict[str, Any]) -> dict[str, float]:
         "max_quantile_mcse_frac": _max_quantile_mcse_frac(params),
         "max_median_mcse_log": _max_median_mcse_log(params),
     }
+
+
+def _noise_cutoff_year(params: dict[str, Any]) -> int | None:
+    """Read the year before which a row takes the wider ancient noise prior.
+
+    Args:
+        params: The spec's ``params`` mapping.
+
+    Returns:
+        ``noise_ancient_cutoff_year``, or None to use ``ancient_cutoff_year``.
+    """
+    value = params.get("noise_ancient_cutoff_year")
+    return None if value is None else int(value)
 
 
 def _max_quantile_mcse_frac(params: dict[str, Any]) -> float:
@@ -369,6 +386,7 @@ def _fit_neutral_troops(
     inflation: InflationPrior,
     run_id: int,
     processed_root: Path,
+    ancient_cutoff_year: int,
 ) -> dict[str, Any]:
     """Fit the regime-neutral troops model and write it if it converged.
 
@@ -382,6 +400,8 @@ def _fit_neutral_troops(
         inflation: The fitted claim-regime inflation prior.
         run_id: The shared ``model_runs`` id.
         processed_root: Where the draws file goes.
+        ancient_cutoff_year: The era fallback's cutoff year, for the recovery
+            diagnostics' ancient group.
 
     Returns:
         The ``troops_neutral`` diagnostics block, including whether the fit was
@@ -409,6 +429,12 @@ def _fit_neutral_troops(
         ci_mass=ci_mass,
         max_quantile_mcse_frac=_max_quantile_mcse_frac(params),
         max_median_mcse_log=_max_median_mcse_log(params),
+        year_of_side={r.side_id: r.year_astronomical for r in reports if r.quantity == "troops"},
+        recovery=RecoverySettings.from_params(params),
+        ancient_cutoff_year=ancient_cutoff_year,
+        noise_medians=noise_prior_medians(priors, inflation),
+        battle_nu=priors.side_prior_nu,
+        inflation=inflation,
     )
     summary.diagnostics["prior_predictive_neutral"] = prior_predictive
     worst = summary.diagnostics["worst"]
@@ -495,6 +521,7 @@ def _fit_quantity(
             params.get("min_battles_per_source_effect", DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT)
         ),
         merge_ranges=bool(params.get("merge_ranges", True)),
+        noise_cutoff_year=_noise_cutoff_year(params),
     )
     model = build_model(design, priors=priors, inflation=inflation)
     # Before the fit, with its own seed: the prior sampler does not touch the
@@ -523,6 +550,8 @@ def _fit_quantity(
         computed_at=computed_at,
         max_quantile_mcse_frac=_max_quantile_mcse_frac(params),
         max_median_mcse_log=_max_median_mcse_log(params),
+        recovery=RecoverySettings.from_params(params),
+        ancient_cutoff_year=ancient_cutoff_year,
     )
 
     summary.diagnostics["prior_predictive"] = prior_predictive
@@ -574,8 +603,28 @@ def _fit_quantity(
             inflation=inflation,
             run_id=run_id,
             processed_root=processed_root,
+            ancient_cutoff_year=ancient_cutoff_year,
         )
     return summary.diagnostics, neutral_diagnostics
+
+
+def _span_guard_diagnostics(counts: ReconcileCounts) -> dict[str, Any]:
+    """Build the span guard's block for the run's diagnostics.
+
+    The ``troop_span_guard`` and ``troop_span_warnings`` checks read the counts;
+    the side list is for whoever opens the failing check.
+
+    Args:
+        counts: The run's counters, after ``load_reports``.
+
+    Returns:
+        Warning and error counts and one entry per flagged side.
+    """
+    return {
+        "n_warnings": counts.troop_span_warnings,
+        "n_errors": counts.troop_span_errors,
+        "sides": list(counts.span_findings),
+    }
 
 
 def _run_body(
@@ -613,6 +662,8 @@ def _run_body(
         ancient_cutoff_year=ancient_cutoff_year,
         counts=counts,
         min_plausible_troops=min_plausible_troops,
+        span_warn_log=float(params.get("troop_span_warn_log", SPAN_WARN_LOG_RATIO)),
+        span_error_log=float(params.get("troop_span_error_log", SPAN_ERROR_LOG_RATIO)),
     )
 
     # Unfillable sides are a fact about the loaded reports, not about
@@ -697,6 +748,7 @@ def _run_body(
             "worst": _combined_worst(per_quantity_diagnostics),
             **per_quantity_diagnostics,
             **neutral_blocks,
+            "troop_span_guard": _span_guard_diagnostics(counts),
         }
         store.complete_model_run(conn, run_id, diagnostics)
         if owns_connection:

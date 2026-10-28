@@ -22,7 +22,11 @@ from pipeline.reconcilers.records import Report, SourceKey
 
 
 def _report(
-    report_id: int, side_id: int, battle_id: int, regime: str = "modern_scholarly"
+    report_id: int,
+    side_id: int,
+    battle_id: int,
+    regime: str = "modern_scholarly",
+    year: int = 1800,
 ) -> Report:
     return Report(
         report_id=report_id,
@@ -35,7 +39,7 @@ def _report(
         reported_value=10_000.0 * report_id,
         scope="engaged",
         claim_regime=regime,
-        year_astronomical=1800,
+        year_astronomical=year,
     )
 
 
@@ -184,18 +188,24 @@ def test_neutral_estimates_are_stamped_with_their_own_run_id() -> None:
     assert "neutral" not in other.calls[0][0]
 
 
+SIGMA = 0.25
+NU = 5.0
+
+
 def _shared_summary(n_draws: int = 4000):  # type: ignore[no-untyped-def]
     """A neutral summary whose shared-parameter draws are exact multiples of a row index.
 
     Side 20 carries one unlabelled and one modern report, side 30 only an
-    unlabelled one dated 1800, side 10 only a modern one.
+    unlabelled one dated 300 BC, side 10 only a modern one. The unlabelled rows are
+    dated before 1800 (side 20's in 1700) because from 1800 on the level anchor
+    removes both shared offsets from them.
     """
     import arviz as az
 
     reports = [
-        _report(1, 30, 3, "unlabelled"),
+        _report(1, 30, 3, "unlabelled", year=-300),
         _report(2, 10, 1),
-        _report(3, 20, 1, "unlabelled"),
+        _report(3, 20, 1, "unlabelled", year=1700),
         _report(4, 20, 1),
     ]
     design = build_design(reports, quantity="troops", ancient_cutoff_year=500)
@@ -212,11 +222,27 @@ def _shared_summary(n_draws: int = 4000):  # type: ignore[no-untyped-def]
         "g_regime": g_regime,
         "a_era": 3.0 * index,
         "offset_bar": 4.0 * index,
+        # The pieces the exported likelihood rebuilds each row's offset and noise from.
+        "beta_source": np.zeros((chains, per_chain, design.n_sources)),
+        "delta_level": np.zeros((chains, per_chain, len(design.levels))),
+        "sigma_source": np.full((chains, per_chain, design.n_sources), SIGMA),
+        "nu": np.full((chains, per_chain), NU),
     }
     idata = az.from_dict(
         posterior=posterior,
-        coords={"side": [str(s) for s in design.side_ids], "regime": regimes},
-        dims={"mu_side": ["side"], "g_regime": ["regime"]},
+        coords={
+            "side": [str(s) for s in design.side_ids],
+            "regime": regimes,
+            "source_key": design.coords()["source_key"],
+            "level": list(design.levels),
+        },
+        dims={
+            "mu_side": ["side"],
+            "g_regime": ["regime"],
+            "beta_source": ["source_key"],
+            "delta_level": ["level"],
+            "sigma_source": ["source_key"],
+        },
     )
     battles = {30: 3, 10: 1, 20: 1}
     return design, summarise_neutral(idata, design, battles, run_id=9, ci_mass=0.95)

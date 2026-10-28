@@ -25,7 +25,7 @@ from sqlalchemy import text
 from pipeline.imputers.records import ImputeCounts
 from pipeline.imputers.summarise import ImputedSide
 
-__all__ = ["imputation_method", "write_imputed_log"]
+__all__ = ["imputation_method", "retire_kept_sides", "write_imputed_log"]
 
 logger = structlog.get_logger()
 
@@ -59,6 +59,43 @@ _INSERT = text(
     )
     """
 )
+
+
+_RETIRE = text(
+    """
+    DELETE FROM missing_data_log
+    WHERE side_id = ANY(CAST(:side_ids AS INT[]))
+      AND field_name = 'troop_total'
+      AND was_imputed = TRUE
+      AND imputation_method = :method
+    """
+)
+
+
+def retire_kept_sides(conn: Any, kept_side_ids: Sequence[int], *, scale: str) -> int:
+    """Remove this scale's imputation rows for sides that now carry a likelihood.
+
+    A side that earlier runs imputed (it was weak, bound-only or unmodelled) but
+    that has a point report in the current reconcile fit is no longer missing
+    troop data, so its row must not say so. Only rows this method wrote are
+    removed; rows other stages wrote for a side that is still imputed are kept
+    and updated by :func:`write_imputed_log`.
+
+    Args:
+        conn: An open database connection.
+        kept_side_ids: Sides that have a likelihood in this run.
+        scale: ``'neutral'`` or ``'published'``.
+
+    Returns:
+        The number of rows deleted.
+    """
+    if not kept_side_ids:
+        return 0
+    result = conn.execute(
+        _RETIRE,
+        {"side_ids": [int(s) for s in kept_side_ids], "method": imputation_method(scale)},
+    )
+    return int(result.rowcount or 0)
 
 
 def imputation_method(scale: str) -> str:

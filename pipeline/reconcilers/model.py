@@ -13,12 +13,58 @@ statistical stack.
 
 For observation ``i`` on the log scale::
 
-    eta_i  = mu_side[s_i] + beta_source[j_i] + g_regime[r_i]
-             + delta_level[k_i] + a_era * era_i * unlabelled_i
+    eta_i  = mu_side[s_i] + beta_source[j_i] + keep_i * g_regime[r_i]
+             + delta_level[k_i] + a_era * era_i * unlabelled_i * keep_i
     beta_j = b_type[t_j] + u_j
 
 ``mu_side`` is the quantity published. Everything else exists to explain why a
 particular source's number differs from it.
+
+## The troop side prior (P1, from 2026-10-23)
+
+Casualties draw ``mu_side = m0 + s0 * z_side`` with a Student-t ``z_side``, as
+before. Troops use a prior built from the battle and its period::
+
+    mu_side[s] = m0 + e[era_bin(s)] + b[battle(s)] + s_d * zd[s]
+    e  = tau_e * z_era, z_era ~ ZeroSumNormal(1) over era_bin  tau_e ~ HalfNormal(1)
+    b  = s_b * zb, zb ~ StudentT(nu=4, 0, 1)  per battle  s_b ~ HalfNormal(1)
+    zd ~ Normal(0, 1)                per side         s_d ~ HalfNormal(0.5)
+
+The old prior drew a battle's two sides independently from one corpus mean, while
+the reported log sizes of the two sides correlate at 0.80 (ICC) and the means
+differ by period. Independence implied a variance of the reported log ratio of
+about 2.9 against the 0.60 observed, which is why the posterior predictive check
+failed everywhere (``docs/handover-log/32-troop-redesign-review-2026-10-23.md``).
+The era bins are fixed by the battle's astronomical year (``design.ERA_BIN_LABELS``);
+``e`` is zero-sum so ``m0`` keeps its meaning. A side whose battle is undated takes
+a sixth index that maps to a zero era effect: it is not a member of the zero-sum
+vector, because no date is no evidence that its period is average. ``b`` is shared
+by the two sides of a battle and cancels in their log ratio; ``s_d`` is what is left
+of the ratio's variance once the noise is removed, and a collapse of ``s_d`` is a
+gate. Troops also use a Normal likelihood, ``sigma_type_*`` priors with log-sd 0.2 and
+no ``sigma_round`` or ``sigma_estimate`` term at all (they let noise leak around its
+prior, 0.67 under a Normal fit).
+
+``e``, ``b`` and ``zd`` are all non-centred. Both centred forms were tried in the
+2026-10-28 pass and made sampling worse: a centred ``b`` gave 2081 divergences on the
+main recovery corpus, and a centred ``e`` gave convergence failures on ``tau_e``/``e``
+in test_reconcile_recovery and test_reconcile_contamination at target_accept
+0.97-0.99. The non-centred form stays and target_accept stays 0.99.
+``side_prior_independent`` drops ``b`` and widens ``s_d`` to
+``sqrt(battle_effect_prior_sd^2 + side_deviation_prior_sd^2)``, an ablation for
+comparing P1 against independent sides.
+
+## The level anchor (an explicit assumption)
+
+**An unlabelled troop row whose battle is dated 1800 or later is read at face
+value: ``g_unlabelled`` and ``a_era`` contribute exactly zero to it.** Unlabelled
+rows before 1800 and undated rows keep both, and every labelled regime is
+unchanged. 96% of rows are unlabelled and only 10 ``modern_scholarly`` rows pin the
+level, so published head counts moved by 1.1 to 1.4x with the prior on
+``g_unlabelled``. Modern figures are counted, not rhetorical, so this assumption
+replaces the role of those 10 anchor rows for the modern level.
+:func:`level_anchor_mask` is the row mask; the rotation below averages only the
+offsets actually applied. Casualties have no such mask.
 
 ## Identifiability, and the rule behind it
 
@@ -106,9 +152,33 @@ deviation; below that they are constants at ``source_deviation_prior_sd`` and
 prior. The count is of the keys that actually get a deviation, which excludes
 the lone key of a type that has no pooled keys, since that key is ``b_type``.
 
+## The observation-noise prior (troops, from 2026-10-22; log-sd 0.2 from 2026-10-23)
+
+The per-row noise sd was identified only by the 31 multi-report sides of the
+real corpus (selected for disagreement: pooled within-side sd 1.16) and then
+applied to 309 singletons against one Student-t side prior. That gave sigma
+about 0.51 with nu about 3.4, a shrinkage factor of 0.58 to 0.63 and a singleton
+slope of 0.61 (``docs/handover-log/31-troop-numbers-diagnosis-2026-10-22.md``).
+Troops therefore take an informative prior on each source type's noise sd::
+
+    sigma_modern[type]  ~ LogNormal(log(m_modern), noise_modern_log_sd)   # 0.22, 0.2
+    sigma_ancient[type] ~ LogNormal(log(noise_ancient_median), noise_ancient_log_sd)  # 0.40, 0.2
+
+``m_modern`` is the gold set's ``faithful_sd`` from ``config/inflation_priors.yaml``
+unless ``noise_modern_median`` overrides it (the 0.35 sensitivity). A row uses
+the ancient scale when its battle is before the noise cutoff year (default the
+stage's ``ancient_cutoff_year``, 500; ``design.ancient_rows``); an undated row
+uses the modern one. The per-key deviation ``exp(tau_sigma * z_sigma)`` multiplies
+both. Troops have no ``sigma_estimate`` or ``sigma_round`` (P1); the Student-t
+``nu``, when that family is chosen, is floored at 3. ``sigma_sq_type`` is kept as the modern scale
+squared so the diagnostics that read it work for either prior; the ancient
+scale is ``sigma_type_ancient``. Casualties, and
+``observation_noise_prior: inverse_gamma``, keep the older prior below.
+
 ## Observation scale, casualty ratios and one-sided bounds
 
-``sigma_sq_type`` is ``InverseGamma(3, 4/3)``. The first version was IG(2, 1),
+``sigma_sq_type`` (casualties, and the legacy troop prior) is ``InverseGamma(3, 4/3)``.
+The first version was IG(2, 1),
 whose infinite variance sits on a parameter that sets every interval width.
 Alpha 3 fixes that, but IG(3, 2) keeping the *mean* at 1 was a much stronger
 prior than that suggests (mode 0.5, a thin right tail) and visibly shrank
@@ -199,19 +269,22 @@ import numpy as np
 import structlog
 import yaml
 
-from pipeline.reconcilers.design import Design
+from pipeline.reconcilers.design import MODERN_FROM_YEAR, Design
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     import arviz as az
     import pymc as pm
 
 __all__ = [
+    "PINNED_BIAS_SOURCE_TYPE",
     "DEFAULT_PRIORS_PATH",
     "InflationPrior",
     "ModelPriors",
     "SamplerSettings",
     "build_model",
+    "level_anchor_mask",
     "load_inflation_prior",
+    "noise_prior_medians",
     "sample",
 ]
 
@@ -224,6 +297,10 @@ DEFAULT_PRIORS_PATH: Final[Path] = Path("config/inflation_priors.yaml")
 # documented case, and for an ancient battle with no independent anchor the
 # prior is the estimate. Running without the fitted file is a fallback and the
 # loader says so at warning level.
+# Hand-entered figures (troop_strength overrides) supersede every other total on
+# their side, so this type never co-reports and its bias is not identified.
+# Pinned to exactly zero rather than left to the prior; keeps the modern noise.
+PINNED_BIAS_SOURCE_TYPE: Final[str] = "manual_entry"
 _FALLBACK_MU: Final[float] = 1.15
 _FALLBACK_SD: Final[float] = 0.90
 
@@ -249,6 +326,10 @@ _NEUTRAL_ERA_SD: Final[float] = 0.25
 
 _TROOPS: Final[str] = "troops"
 _UNLABELLED: Final[str] = "unlabelled"
+
+# Unlabelled troop rows from this astronomical year on are read at face value;
+# see "The level anchor" in the module docstring.
+ANCHOR_FROM_YEAR: Final[int] = MODERN_FROM_YEAR
 
 
 @dataclass(frozen=True)
@@ -318,8 +399,8 @@ class ModelPriors:
     scope_offset_prior_sd: float = 0.4
     casualty_type_offset_prior_sd: float = 0.7
     scope_unknown_dispersion_sd: float = 0.4
-    estimate_dispersion_sd: float = 0.3
-    roundness_dispersion_sd: float = 0.3
+    estimate_dispersion_sd: float = 0.1
+    roundness_dispersion_sd: float = 0.1
     precision_prior_alpha: float = 3.0
     precision_prior_beta: float = 4.0 / 3.0
     min_keys_for_hierarchical_deviation: int = 5
@@ -330,6 +411,21 @@ class ModelPriors:
     contamination_pi_alpha: float = 1.0
     contamination_pi_beta: float = 9.0
     contamination_sd: float = 2.0
+    observation_noise_prior: str = "informative"
+    noise_modern_median: float | None = None
+    noise_modern_log_sd: float = 0.3
+    noise_ancient_median: float = 0.40
+    noise_ancient_log_sd: float = 0.35
+    student_t_nu_floor: float = 3.0
+    era_effect_prior_sd: float = 1.0
+    battle_effect_prior_sd: float = 1.0
+    side_deviation_prior_sd: float = 0.5
+    side_prior_independent: bool = False
+
+    @property
+    def informative_noise(self) -> bool:
+        """Whether the per-source-type noise scale takes the informative LogNormal."""
+        return self.observation_noise_prior == "informative"
 
     @classmethod
     def from_params(cls, params: dict[str, Any], *, quantity: str) -> ModelPriors:
@@ -345,7 +441,9 @@ class ModelPriors:
             The priors.
         """
         prefix = "" if quantity == _TROOPS else "casualty_"
-        default_mu = 9.2 if quantity == _TROOPS else 7.0
+        is_troops = quantity == _TROOPS
+        default_mu = 9.2 if is_troops else 7.0
+        modern_median = params.get("noise_modern_median")
         return cls(
             side_prior_mu=float(params.get(f"{prefix}side_prior_mu", default_mu)),
             side_prior_mu_sd=float(params.get(f"{prefix}side_prior_mu_sd", 1.0)),
@@ -357,8 +455,14 @@ class ModelPriors:
             scope_offset_prior_sd=float(params.get("scope_offset_prior_sd", 0.4)),
             casualty_type_offset_prior_sd=float(params.get("casualty_type_offset_prior_sd", 0.7)),
             scope_unknown_dispersion_sd=float(params.get("scope_unknown_dispersion_sd", 0.4)),
-            estimate_dispersion_sd=float(params.get("estimate_dispersion_sd", 0.3)),
-            roundness_dispersion_sd=float(params.get("roundness_dispersion_sd", 0.3)),
+            # Casualties keep their original 0.3: the 0.1 prior was set from the
+            # troop diagnosis and nothing here has measured casualty rows.
+            estimate_dispersion_sd=float(
+                params.get(f"{prefix}estimate_dispersion_sd", 0.1 if is_troops else 0.3)
+            ),
+            roundness_dispersion_sd=float(
+                params.get(f"{prefix}roundness_dispersion_sd", 0.1 if is_troops else 0.3)
+            ),
             precision_prior_alpha=float(params.get("precision_prior_alpha", 3.0)),
             precision_prior_beta=float(params.get("precision_prior_beta", 4.0 / 3.0)),
             min_keys_for_hierarchical_deviation=int(
@@ -367,11 +471,47 @@ class ModelPriors:
             casualty_ratio_dispersion_sd=float(params.get("casualty_ratio_dispersion_sd", 0.5)),
             bound_likelihood=str(params.get("bound_likelihood", "exgaussian")),
             bound_excess_prior_sd=float(params.get("bound_excess_prior_sd", 0.5)),
-            likelihood_family=str(params.get("likelihood_family", "student_t")),
+            # Casualties keep their own family: the P1 redesign is troops only, and
+            # the spec's likelihood_family now says "normal" for troops.
+            likelihood_family=str(params.get(f"{prefix}likelihood_family", "student_t")),
             contamination_pi_alpha=float(params.get("contamination_pi_alpha", 1.0)),
             contamination_pi_beta=float(params.get("contamination_pi_beta", 9.0)),
             contamination_sd=float(params.get("contamination_sd", 2.0)),
+            observation_noise_prior=_noise_prior_name(params.get("observation_noise_prior")),
+            noise_modern_median=None if modern_median is None else float(modern_median),
+            noise_modern_log_sd=float(params.get("noise_modern_log_sd", 0.3)),
+            noise_ancient_median=float(params.get("noise_ancient_median", 0.40)),
+            noise_ancient_log_sd=float(params.get("noise_ancient_log_sd", 0.35)),
+            # Casualties keep the floor of 2 they had before P1 raised it for troops.
+            student_t_nu_floor=float(
+                params.get(f"{prefix}student_t_nu_floor", 3.0 if is_troops else 2.0)
+            ),
+            era_effect_prior_sd=float(params.get("era_effect_prior_sd", 1.0)),
+            battle_effect_prior_sd=float(params.get("battle_effect_prior_sd", 1.0)),
+            side_deviation_prior_sd=float(params.get("side_deviation_prior_sd", 0.5)),
+            side_prior_independent=bool(params.get("side_prior_independent", False)),
         )
+
+
+def _noise_prior_name(value: Any) -> str:
+    """Validate the ``observation_noise_prior`` spec param.
+
+    Args:
+        value: The raw param, or None for the default.
+
+    Returns:
+        ``"informative"`` or ``"inverse_gamma"``.
+
+    Raises:
+        ValueError: For any other value, so a typo cannot silently select the
+            legacy prior.
+    """
+    name = "informative" if value is None else str(value)
+    if name not in ("informative", "inverse_gamma"):
+        raise ValueError(
+            f"observation_noise_prior must be 'informative' or 'inverse_gamma', got {name!r}"
+        )
+    return name
 
 
 @dataclass(frozen=True)
@@ -512,7 +652,14 @@ def build_model(
 
     # The observation-weighted share of each reference-coded level. These are
     # the directions the data identify; see device 3 in the module docstring.
-    w_regime = np.bincount(design.regime_index, minlength=len(design.regimes)) / design.n_obs
+    # Weighted by the rows that carry the regime offset: a row under the level
+    # anchor carries none, so counting it would put the unlabelled offset into the
+    # corpus level that no row actually has.
+    anchor = level_anchor_mask(design)
+    w_regime = (
+        np.bincount(design.regime_index, weights=1.0 - anchor, minlength=len(design.regimes))
+        / design.n_obs
+    )
     w_level = np.bincount(design.level_index, minlength=len(design.levels)) / design.n_obs
 
     with pm.Model(coords=coords) as model:
@@ -535,20 +682,23 @@ def build_model(
         level = pm.Normal("corpus_level", mu=priors.side_prior_mu, sigma=_LEVEL_PRIOR_SD)
         m0 = pm.Deterministic("m0", level - offset_bar)
 
-        s0 = pm.HalfNormal("s0", sigma=priors.side_prior_sd_scale)
-        # Heavy-tailed, with nu fixed from the spec. A Normal side prior against
-        # a Student-t likelihood makes the model explain a genuinely large side
-        # as outlying reports around a typical one (Kursk's 2.5M read as noise).
-        # Non-centred: mu_side = m0 + s0 * z_side is unchanged.
-        z_side = pm.StudentT("z_side", nu=priors.side_prior_nu, mu=0.0, sigma=1.0, dims="side")
-        mu_side = pm.Deterministic("mu_side", m0 + s0 * z_side, dims="side")
+        if design.quantity == _TROOPS:
+            mu_side = _troop_side_prior(pm, pt, design, priors, m0)
+        else:
+            s0 = pm.HalfNormal("s0", sigma=priors.side_prior_sd_scale)
+            # Heavy-tailed, with nu fixed from the spec. A Normal side prior against
+            # a Student-t likelihood makes the model explain a genuinely large side
+            # as outlying reports around a typical one (Kursk's 2.5M read as noise).
+            # Non-centred: mu_side = m0 + s0 * z_side is unchanged.
+            z_side = pm.StudentT("z_side", nu=priors.side_prior_nu, mu=0.0, sigma=1.0, dims="side")
+            mu_side = pm.Deterministic("mu_side", m0 + s0 * z_side, dims="side")
 
         # ── source bias: type mean plus within-type deviation ────────────────
         # Only keys spanning enough battles get a deviation (see the nesting
         # section of the module docstring). With none, there is no u_source and
         # no tau_u: a zero-size or all-zero deviation would leave tau_u
         # sampling its prior and report clean convergence on nothing.
-        b_type = pm.ZeroSumNormal("b_type", sigma=priors.bias_prior_sd, dims="source_type")
+        b_type = _source_type_biases(pm, pt, design, priors)
         beta = b_type[source_type_of_key]
         deviation_groups = _deviation_groups(design, source_type_of_key)
         n_deviating_keys = sum(group.keys.size for group in deviation_groups)
@@ -580,16 +730,51 @@ def build_model(
             mu=0.0 if neutral else inflation.era_mu,
             sigma=_NEUTRAL_ERA_SD if neutral else inflation.era_sd,
         )
-        era_column = _data(pm, "data_era", design.era * _unlabelled_mask(design))
+        era_column = _data(pm, "data_era", design.era * _unlabelled_mask(design) * (1.0 - anchor))
 
         # ── observation scale ────────────────────────────────────────────────
-        sigma_sq_type = pm.InverseGamma(
-            "sigma_sq_type",
-            alpha=priors.precision_prior_alpha,
-            beta=priors.precision_prior_beta,
-            dims="source_type",
-        )
-        sigma_type_scale = pm.math.sqrt(sigma_sq_type[source_type_of_key])
+        # Troops take an informative LogNormal on the noise sd of each source
+        # type, one for modern rows and one for rows before the noise cutoff
+        # year. See "The observation-noise prior" in the module docstring.
+        # Casualties, and troops under observation_noise_prior=inverse_gamma
+        # (the behaviour before 2026-10-22), keep the inverse-gamma on the variance.
+        informative = priors.informative_noise and design.quantity == _TROOPS
+        has_ancient = informative and bool(design.ancient_rows.any())
+        sigma_type_scale_ancient: Any = None
+        if informative:
+            modern_median = (
+                inflation.faithful_sd
+                if priors.noise_modern_median is None
+                else priors.noise_modern_median
+            )
+            sigma_type_modern = pm.LogNormal(
+                "sigma_type_modern",
+                mu=float(np.log(modern_median)),
+                sigma=priors.noise_modern_log_sd,
+                dims="source_type",
+            )
+            # Same name and meaning as the inverse-gamma path's variable (the
+            # modern-row type scale squared), so summaries read either.
+            sigma_sq_type = pm.Deterministic(
+                "sigma_sq_type", sigma_type_modern**2, dims="source_type"
+            )
+            sigma_type_scale = sigma_type_modern[source_type_of_key]
+            if has_ancient:
+                sigma_type_ancient = pm.LogNormal(
+                    "sigma_type_ancient",
+                    mu=float(np.log(priors.noise_ancient_median)),
+                    sigma=priors.noise_ancient_log_sd,
+                    dims="source_type",
+                )
+                sigma_type_scale_ancient = sigma_type_ancient[source_type_of_key]
+        else:
+            sigma_sq_type = pm.InverseGamma(
+                "sigma_sq_type",
+                alpha=priors.precision_prior_alpha,
+                beta=priors.precision_prior_beta,
+                dims="source_type",
+            )
+            sigma_type_scale = pm.math.sqrt(sigma_sq_type[source_type_of_key])
         if deviation_groups:
             tau_sigma: Any = (
                 pm.HalfNormal("tau_sigma", sigma=priors.sigma_deviation_prior_sd)
@@ -606,13 +791,25 @@ def build_model(
                 _within_type_deviations(pm, pt, design, deviation_groups, prefix="z_sigma"),
                 dims="source_key",
             )
-            sigma_type_scale = sigma_type_scale * pm.math.exp(tau_sigma * z_sigma)
-        # A pooled key's noise is its type's scale: one sigma per source type,
-        # drawn from the same inverse-gamma the per-key scales are centred on.
+            deviation = pm.math.exp(tau_sigma * z_sigma)
+            sigma_type_scale = sigma_type_scale * deviation
+            if sigma_type_scale_ancient is not None:
+                sigma_type_scale_ancient = sigma_type_scale_ancient * deviation
+        # A pooled key's noise is its type's scale: one sigma per source type.
         sigma_source = pm.Deterministic("sigma_source", sigma_type_scale, dims="source_key")
+        sigma_source_ancient: Any = None
+        if sigma_type_scale_ancient is not None:
+            sigma_source_ancient = pm.Deterministic(
+                "sigma_source_ancient", sigma_type_scale_ancient, dims="source_key"
+            )
 
-        sigma_estimate = pm.HalfNormal("sigma_estimate", sigma=priors.estimate_dispersion_sd)
-        sigma_round = pm.HalfNormal("sigma_round", sigma=priors.roundness_dispersion_sd)
+        # Troops have neither term (P1): they let the noise escape its prior.
+        is_troops = design.quantity == _TROOPS
+        sigma_estimate: Any = None
+        sigma_round: Any = None
+        if not is_troops:
+            sigma_estimate = pm.HalfNormal("sigma_estimate", sigma=priors.estimate_dispersion_sd)
+            sigma_round = pm.HalfNormal("sigma_round", sigma=priors.roundness_dispersion_sd)
 
         # Every per-observation array enters as pm.Data, never as a numpy
         # constant. PyTensor's numba backend compiles constants into the
@@ -621,10 +818,13 @@ def build_model(
         # and 11 GB without finishing at 670. As inputs, the compiled function
         # is the same size whatever the corpus. The model is unchanged.
         source_ix = _data(pm, "data_source_index", design.source_index)
+        row_g = g_regime[_data(pm, "data_regime_index", design.regime_index)]
+        if anchor.any():
+            row_g = row_g * _data(pm, "data_regime_keep", 1.0 - anchor)
         eta = (
             mu_side[_data(pm, "data_side_index", design.side_index)]
             + beta_source[source_ix]
-            + g_regime[_data(pm, "data_regime_index", design.regime_index)]
+            + row_g
             + delta_level[_data(pm, "data_level_index", design.level_index)]
             + a_era * era_column
         )
@@ -647,13 +847,19 @@ def build_model(
         # scope, a hedged figure, a number rounded to a convention. Added in
         # variance rather than in scale because that is the algebra for
         # independent error components.
-        var = (
-            sigma_source[source_ix] ** 2
-            + sigma_estimate**2 * _data(pm, "data_is_estimate", design.is_estimate.astype(float))
-            + sigma_round**2 * _data(pm, "data_roundness", design.roundness)
-            # A stated range is one point row whose width is the extra spread.
-            + _data(pm, "data_range_var", design.range_var)
-        )
+        sigma_row = sigma_source[source_ix]
+        if sigma_source_ancient is not None:
+            is_ancient = _data(pm, "data_noise_ancient", design.ancient_rows)
+            sigma_row = sigma_row + is_ancient * (sigma_source_ancient[source_ix] - sigma_row)
+        # A stated range is one point row whose width is the extra spread.
+        var = sigma_row**2 + _data(pm, "data_range_var", design.range_var)
+        if not is_troops:
+            var = (
+                var
+                + sigma_estimate**2
+                * _data(pm, "data_is_estimate", design.is_estimate.astype(float))
+                + sigma_round**2 * _data(pm, "data_roundness", design.roundness)
+            )
         unknown_mask = _unknown_level_mask(design)
         if unknown_mask.any():
             sigma_unknown = pm.HalfNormal("sigma_unknown", sigma=priors.scope_unknown_dispersion_sd)
@@ -687,6 +893,95 @@ def build_model(
     return model
 
 
+def _troop_side_prior(
+    pm_module: Any, pt_module: Any, design: Design, priors: ModelPriors, m0: Any
+) -> Any:
+    """The P1 side prior: era mean, shared battle effect and side deviation.
+
+    ``mu_side = m0 + e[era_bin] + b[battle] + s_d * zd``, all non-centred: ``e = tau_e * z_era``,
+    ``b = s_b * zb``. Centring either made sampling worse (module docstring). An undated
+    side maps to a sixth, appended zero rather than to a member of the zero-sum vector;
+    see the module docstring.
+
+    With ``priors.side_prior_independent`` the battle effect is dropped and the
+    side deviation takes the combined scale, so total side variance stays
+    comparable: ``mu_side = m0 + e[era_bin] + s_d * zd``.
+
+    Args:
+        pm_module: The imported pymc module.
+        pt_module: The imported pytensor.tensor module.
+        design: The design, for the per-side battle and era-bin indices.
+        priors: Hierarchy scales.
+        m0: The derived corpus level.
+
+    Returns:
+        The ``mu_side`` deterministic, over the ``side`` dimension.
+    """
+    tau_e = pm_module.HalfNormal("tau_e", sigma=priors.era_effect_prior_sd)
+    z_era = pm_module.ZeroSumNormal("z_era", sigma=1.0, dims="era_bin")
+    era_effect = pm_module.Deterministic("e", tau_e * z_era, dims="era_bin")
+    era_with_undated = pt_module.concatenate([era_effect, pt_module.zeros(1)])
+    era_of_side = _data(pm_module, "data_side_era_bin", design.era_bin_of_side)
+
+    deviation_sd = priors.side_deviation_prior_sd
+    if priors.side_prior_independent:
+        deviation_sd = float(
+            np.hypot(priors.battle_effect_prior_sd, priors.side_deviation_prior_sd)
+        )
+    s_d = pm_module.HalfNormal("s_d", sigma=deviation_sd)
+    zd = pm_module.Normal("zd", mu=0.0, sigma=1.0, dims="side")
+    location = m0 + era_with_undated[era_of_side] + s_d * zd
+
+    if not priors.side_prior_independent:
+        s_b = pm_module.HalfNormal("s_b", sigma=priors.battle_effect_prior_sd)
+        # Non-centred on purpose: centring the Student-t battle effect gave 2081
+        # divergences (rhat 1.57) on the main recovery corpus at target_accept 0.9,
+        # against 82 with it non-centred.
+        zb = pm_module.StudentT("zb", nu=priors.side_prior_nu, mu=0.0, sigma=1.0, dims="battle")
+        battle_effect = pm_module.Deterministic("b", s_b * zb, dims="battle")
+        battle_of_side = _data(pm_module, "data_side_battle", design.battle_of_side)
+        location = location + battle_effect[battle_of_side]
+
+    return pm_module.Deterministic("mu_side", location, dims="side")
+
+
+def noise_prior_medians(priors: ModelPriors, inflation: InflationPrior) -> tuple[float, float]:
+    """Prior medians of the modern and ancient noise sd.
+
+    Args:
+        priors: Hierarchy scales; ``noise_modern_median`` overrides the gold set's.
+        inflation: Supplies ``faithful_sd`` when no modern median is set.
+
+    Returns:
+        ``(modern, ancient)``.
+    """
+    modern = (
+        inflation.faithful_sd if priors.noise_modern_median is None else priors.noise_modern_median
+    )
+    return float(modern), float(priors.noise_ancient_median)
+
+
+def level_anchor_mask(design: Design) -> np.ndarray:
+    """Flag the troop rows read at face value: unlabelled and dated 1800 or later.
+
+    On these rows the regime offset ``g_unlabelled`` and the era term ``a_era``
+    contribute exactly zero. See "The level anchor" in the module docstring.
+
+    Args:
+        design: The design; casualties get no anchor.
+
+    Returns:
+        A float array, 1.0 on an anchored row. An undated row is never anchored.
+    """
+    if design.quantity != _TROOPS:
+        return np.zeros(design.n_obs, dtype=float)
+    year = design.year_of_row
+    dated_modern = np.zeros(design.n_obs, dtype=bool)
+    np.greater_equal(year, ANCHOR_FROM_YEAR, out=dated_modern, where=~np.isnan(year))
+    mask: np.ndarray = (dated_modern & (_unlabelled_mask(design) > 0)).astype(float)
+    return mask
+
+
 def _data(pm_module: Any, name: str, values: np.ndarray) -> Any:
     """Register a per-observation array as model data rather than a constant.
 
@@ -713,6 +1008,37 @@ def _source_type_of_key(design: Design) -> np.ndarray:
     """
     lookup = {name: i for i, name in enumerate(design.source_types)}
     return np.array([lookup[key.source_type] for key in design.source_keys], dtype=int)
+
+
+def _source_type_biases(pm_module: Any, pt_module: Any, design: Design, priors: ModelPriors) -> Any:
+    """The per-source-type bias vector, with the pinned type held at exactly zero.
+
+    Without the pinned type this is the plain zero-sum ``b_type``. With it, the
+    free zero-sum vector runs over the other types (``b_type_free``) and a fixed
+    zero is spliced in at the pinned type's position, as the undated era bin is.
+
+    Args:
+        pm_module: The imported pymc module.
+        pt_module: The imported pytensor.tensor module.
+        design: The design, whose ``source_types`` fix the order.
+        priors: Hierarchy scales.
+
+    Returns:
+        A vector over the ``source_type`` dimension, named ``b_type``.
+    """
+    if PINNED_BIAS_SOURCE_TYPE not in design.source_types:
+        return pm_module.ZeroSumNormal("b_type", sigma=priors.bias_prior_sd, dims="source_type")
+    position = design.source_types.index(PINNED_BIAS_SOURCE_TYPE)
+    free_types = [t for t in design.source_types if t != PINNED_BIAS_SOURCE_TYPE]
+    if not free_types:
+        return pm_module.Deterministic("b_type", pt_module.zeros(1), dims="source_type")
+    free = pm_module.ZeroSumNormal(
+        "b_type_free",
+        sigma=priors.bias_prior_sd,
+        shape=len(free_types),
+    )
+    full = pt_module.concatenate([free[:position], pt_module.zeros(1), free[position:]])
+    return pm_module.Deterministic("b_type", full, dims="source_type")
 
 
 class DeviationGroup(NamedTuple):
@@ -753,6 +1079,8 @@ def _deviation_groups(design: Design, source_type_of_key: np.ndarray) -> list[De
     """
     groups: list[DeviationGroup] = []
     for type_index, type_name in enumerate(design.source_types):
+        if type_name == PINNED_BIAS_SOURCE_TYPE:
+            continue
         in_type = source_type_of_key == type_index
         own = np.flatnonzero(in_type & design.source_has_own_effect)
         if own.size == 0:
@@ -1017,10 +1345,15 @@ def _attach_likelihood(
         # Concentrated on small values on purpose. PyMC's Gamma takes a rate,
         # so Gamma(2, 0.1) would have mean 20, where StudentT is visually
         # Normal -- the robustness the family is here for would be asserted and
-        # not delivered. Gamma(2, 0.5) has mean 4, so nu sits near 6 and the
-        # tails stay genuinely heavy. Registered as a Deterministic so it
-        # reaches the trace and the convergence diagnostics.
-        nu = pm_module.Deterministic("nu", pm_module.Gamma("nu_raw", alpha=2.0, beta=0.5) + 2.0)
+        # not delivered. Gamma(2, 0.5) has mean 4, so nu sits near 7 with the
+        # floor at 3 and the tails stay genuinely heavy. The troop floor is 3
+        # (student_t_nu_floor), not 2: at 2 the variance is infinite and the
+        # sampler used it to absorb disagreement as noise, which inflated every
+        # singleton's scale (nu 3.4 with sigma 0.51 on the corpus). Registered as
+        # a Deterministic so it reaches the trace and the convergence diagnostics.
+        nu = pm_module.Deterministic(
+            "nu", pm_module.Gamma("nu_raw", alpha=2.0, beta=0.5) + priors.student_t_nu_floor
+        )
 
     def dist(rows: Any) -> Any:
         if family != "student_t":

@@ -81,12 +81,23 @@ SEED = 20260923
 # The Student-t side prior (side_prior_nu) lets s0 trade off against the tails of
 # z_side, which mixes more slowly: at 2000 draws / 1000 tune this corpus gave
 # rhat 1.013 and ess 350 on s0, at 4000 / 1500 rhat 1.006 and ess 1144.
+# 0.99: at 0.97 the main corpus (bound rows included) still gave 12 to 26 divergences
+# with rhat 1.002 and ESS above 2000; the convergence predicate wants none.
 MAIN_SAMPLER = SamplerSettings(
-    draws=4000, tune=1500, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+    draws=4000,
+    tune=1500,
+    chains=4,
+    cores=1,
+    random_seed=SEED,
+    nuts_sampler="nutpie",
+    target_accept=0.99,
 )
 
 TRUE_M0 = 9.4
-TRUE_S0 = 1.1
+# P1 side prior: sd of the shared battle effect and of the side deviation (the old
+# independent-sides spread was 1.1; sqrt(0.9^2 + 0.5^2) is 1.03).
+TRUE_BATTLE_SD = 0.9
+TRUE_S0 = 0.5
 
 INDEPENDENT_LINEAGE_SIDE = 90_001
 REPEATED_LINEAGE_SIDE = 90_002
@@ -104,6 +115,7 @@ def main_truth() -> object:
         side_groups=[(90, 4), (90, 2), (120, 1)],
         m0=TRUE_M0,
         s0=TRUE_S0,
+        battle_sd=TRUE_BATTLE_SD,
         regime_weights=MAIN_REGIME_WEIGHTS,
         scope_weights=MAIN_SCOPE_WEIGHTS,
         ancient_fraction=0.6,
@@ -373,7 +385,13 @@ def test_five_sources_repeating_one_claim_do_not_narrow_the_interval_like_five_i
 
 
 CENSORING_SAMPLER = SamplerSettings(
-    draws=500, tune=500, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+    draws=500,
+    tune=500,
+    chains=4,
+    cores=1,
+    random_seed=SEED,
+    nuts_sampler="nutpie",
+    target_accept=0.97,
 )
 
 
@@ -389,6 +407,7 @@ def _censoring_corpus(*, lower: bool = False) -> object:
         side_groups=[(60, 2)],
         m0=TRUE_M0,
         s0=TRUE_S0,
+        battle_sd=TRUE_BATTLE_SD,
         regime_weights=MAIN_REGIME_WEIGHTS,
         scope_weights=MAIN_SCOPE_WEIGHTS,
         ancient_fraction=0.6,
@@ -578,10 +597,13 @@ def all_unlabelled_fit() -> tuple[Fit, float, int]:
         rng,
         side_groups=[(20, 4), (20, 2), (20, 1)],
         m0=9.3,
-        s0=1.0,
+        s0=TRUE_S0,
+        battle_sd=TRUE_BATTLE_SD,
         regime_weights={"unlabelled": 1.0},
         scope_weights={"engaged": 1.0},
         ancient_fraction=0.5,
+        # Before the level anchor (1800): the test is about the regime offset itself.
+        modern_year=1700,
         g_regime={
             "modern_scholarly": 0.0,
             "ancient_claim": 0.0,
@@ -596,7 +618,13 @@ def all_unlabelled_fit() -> tuple[Fit, float, int]:
 
     inflation = load_inflation_prior()
     sampler = SamplerSettings(
-        draws=1500, tune=1500, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+        draws=1500,
+        tune=1500,
+        chains=4,
+        cores=1,
+        random_seed=SEED,
+        nuts_sampler="nutpie",
+        target_accept=0.97,
     )
     fit, seeds = fit_until_converged(
         lambda seed: run_fit(
@@ -610,7 +638,11 @@ def all_unlabelled_fit() -> tuple[Fit, float, int]:
         converged=lambda fit: _all_unlabelled_converged(fit.summary.diagnostics["worst"]),
         describe=lambda fit: fit.summary.diagnostics["worst"],
     )
-    true_identified_level = 9.3 + true_offset
+    # The level the data identify is the row-weighted mean of the sides actually
+    # drawn plus the offset, not the generating m0: 60 sides with a shared battle
+    # effect move their own mean by about 0.1.
+    realised_mean = float(np.mean([corpus.true_log_side[r.side_id] for r in corpus.reports]))
+    true_identified_level = realised_mean + true_offset
     return fit, true_identified_level, len(seeds)
 
 
@@ -651,7 +683,13 @@ def era_centring_fits() -> tuple[Fit, Fit, dict[int, float]]:
 
     inflation = load_inflation_prior()
     sampler = SamplerSettings(
-        draws=600, tune=600, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+        draws=600,
+        tune=600,
+        chains=4,
+        cores=1,
+        random_seed=SEED,
+        nuts_sampler="nutpie",
+        target_accept=0.97,
     )
 
     rng_ancient = np.random.default_rng(SEED + 3)
@@ -660,9 +698,11 @@ def era_centring_fits() -> tuple[Fit, Fit, dict[int, float]]:
         side_groups=[(40, 2)],
         m0=TRUE_M0,
         s0=TRUE_S0,
+        battle_sd=TRUE_BATTLE_SD,
         regime_weights=MAIN_REGIME_WEIGHTS,
         scope_weights=MAIN_SCOPE_WEIGHTS,
         ancient_fraction=1.0,
+        modern_year=1700,
     )
     rng_mixed = np.random.default_rng(SEED + 3)
     mixed_corpus = simulate_corpus(
@@ -670,9 +710,13 @@ def era_centring_fits() -> tuple[Fit, Fit, dict[int, float]]:
         side_groups=[(40, 2)],
         m0=TRUE_M0,
         s0=TRUE_S0,
+        battle_sd=TRUE_BATTLE_SD,
         regime_weights=MAIN_REGIME_WEIGHTS,
         scope_weights=MAIN_SCOPE_WEIGHTS,
         ancient_fraction=0.5,
+        # Before 1800 so the level anchor does not make the mixed corpus's level
+        # better identified than the all-ancient one: this test isolates the centring.
+        modern_year=1700,
     )
 
     ancient_fit = run_fit(
@@ -728,6 +772,7 @@ def source_split_fits() -> tuple[Fit, Fit]:
         side_groups=[(30, 2)],
         m0=TRUE_M0,
         s0=TRUE_S0,
+        battle_sd=TRUE_BATTLE_SD,
         regime_weights=MAIN_REGIME_WEIGHTS,
         scope_weights=MAIN_SCOPE_WEIGHTS,
         ancient_fraction=0.6,
@@ -737,7 +782,13 @@ def source_split_fits() -> tuple[Fit, Fit]:
 
     inflation = load_inflation_prior()
     sampler = SamplerSettings(
-        draws=400, tune=400, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+        draws=400,
+        tune=400,
+        chains=4,
+        cores=1,
+        random_seed=SEED,
+        nuts_sampler="nutpie",
+        target_accept=0.97,
     )
 
     target_key = SOURCES[0]
@@ -910,7 +961,13 @@ def _fit_nested(
         priors=troop_priors,
         inflation=inflation,  # type: ignore[arg-type]
         sampler=SamplerSettings(
-            draws=1000, tune=1000, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+            draws=1000,
+            tune=1000,
+            chains=4,
+            cores=1,
+            random_seed=SEED,
+            nuts_sampler="nutpie",
+            target_accept=0.97,
         ),
         ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
     )
@@ -959,7 +1016,8 @@ HEAVY_TAIL_SAMPLER = SamplerSettings(
     tune=1500,
     chains=4,
     cores=1,
-    target_accept=0.95,
+    # The stage samples at 0.99 (agents/reconcile.yaml); 0.97 gave 1-5 divergences here.
+    target_accept=0.99,
     random_seed=SEED,
     nuts_sampler="nutpie",
 )
@@ -980,7 +1038,13 @@ def _fit_nested_intervals(
         inflation=inflation,  # type: ignore[arg-type]
         sampler=sampler
         or SamplerSettings(
-            draws=1000, tune=1000, chains=4, cores=1, random_seed=SEED, nuts_sampler="nutpie"
+            draws=1000,
+            tune=1000,
+            chains=4,
+            cores=1,
+            random_seed=SEED,
+            nuts_sampler="nutpie",
+            target_accept=0.97,
         ),
         ancient_cutoff_year=ANCIENT_CUTOFF_YEAR,
     )

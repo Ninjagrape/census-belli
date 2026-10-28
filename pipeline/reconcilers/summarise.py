@@ -58,7 +58,7 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 import structlog
 
-from pipeline.reconcilers.design import Design
+from pipeline.reconcilers.design import ERA_BIN_LABELS, Design
 
 # Reaching into model.py's private constants rather than re-declaring them:
 # these are judgement calls documented once, in model.py, and a second copy
@@ -66,14 +66,25 @@ from pipeline.reconcilers.design import Design
 from pipeline.reconcilers.model import (
     _LEVEL_PRIOR_SD,
     _UNLABELLED_WEIGHT,
+    PINNED_BIAS_SOURCE_TYPE,
     InflationPrior,
     ModelPriors,
     _ratio_level_mask,
     _ratio_pairs,
     _unknown_level_mask,
     _unlabelled_mask,
+    level_anchor_mask,
+    noise_prior_medians,
 )
 from pipeline.reconcilers.records import Quantity, Report, SideEstimate, SourceBias, SourceKey
+from pipeline.reconcilers.recovery import (
+    RecoverySettings,
+    battle_pairs,
+    implied_reliability,
+    mixed_predictive_ppc,
+    recovery_diagnostics,
+    singleton_points,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     import arviz as az
@@ -137,6 +148,8 @@ def summarise_fit(
     computed_at: datetime,
     max_quantile_mcse_frac: float = DEFAULT_MAX_QUANTILE_MCSE_FRAC,
     max_median_mcse_log: float = DEFAULT_MAX_MEDIAN_MCSE_LOG,
+    recovery: RecoverySettings | None = None,
+    ancient_cutoff_year: int = 500,
 ) -> SummaryResult:
     """Turn a sampled posterior into the records the reconcile stage stores.
 
@@ -159,6 +172,10 @@ def summarise_fit(
             MCSE as a share of its interval width; see :func:`_convergence`.
         max_median_mcse_log: The write gate's absolute limit on the MCSE of a
             side's median, in log units.
+        recovery: Sizes and thresholds of the recovery diagnostics (troops only);
+            defaults when None.
+        ancient_cutoff_year: The stage's ancient cutoff, for the ancient group of
+            the recovery diagnostics.
 
     Returns:
         The side estimates, source biases, and diagnostics payload.
@@ -203,10 +220,26 @@ def summarise_fit(
         "n_source_keys_own_effect": design.n_source_keys_own_effect,
         "n_source_keys_pooled": design.n_source_keys_pooled,
         "reports_honoured": reports_honoured(idata, design, ci_mass=ci_mass),
-        "s0": _scalar_stats(idata, "s0"),
+        # Casualties keep s0; troops have the P1 side prior instead (side_prior).
+        "s0": _scalar_stats(idata, "s0") if "s0" in idata.posterior.data_vars else None,
+        "side_prior": _side_prior_stats(idata),
+        # Read by between_battle_variance_is_plausible: the ablation has no battle
+        # effect, so that check is expected to fail under it.
+        "side_prior_independent": priors.side_prior_independent,
         # Type-level observation scale: sqrt(sigma_sq_type) per source type, the
         # sigma a pooled key uses.
         "sigma_type": _sigma_type_stats(idata),
+        "sigma_type_ancient": _sigma_ancient_stats(idata),
+        "nu": _scalar_stats(idata, "nu") if "nu" in idata.posterior.data_vars else None,
+        "noise_prior": {
+            "family": priors.observation_noise_prior,
+            "modern_median": priors.noise_modern_median or inflation.faithful_sd,
+            "modern_log_sd": priors.noise_modern_log_sd,
+            "ancient_median": priors.noise_ancient_median,
+            "ancient_log_sd": priors.noise_ancient_log_sd,
+            "nu_floor": priors.student_t_nu_floor,
+            "applies": design.quantity == "troops" and priors.informative_noise,
+        },
         # Do the estimates spread as widely as the reports? ~0.005 on the pilot
         # corpus where every side came back at the same level; see spread_ratio.
         "spread_ratio": spread_ratio(design, log_estimates),
@@ -239,9 +272,22 @@ def summarise_fit(
         "n_identifying_sides": n_identifying_sides(design, inflation.anchor_regime),
         "identified_width": identified_width_stats(idata, design, side_estimates, ci_mass),
         "contraction": _contraction(idata, design, priors, inflation),
+        "g_regime": g_regime_stats(idata, design, inflation),
         "bound_excess": _bound_excess_stats(idata, priors),
     }
     diagnostics.update(_contamination_diagnostics(idata, design, priors.contamination_sd))
+    if design.quantity == "troops":
+        diagnostics["recovery"] = recovery_block(
+            idata,
+            design,
+            log_estimates,
+            battle_of_side={r.side_id: r.battle_id for r in rows},
+            year_of_side={r.side_id: r.year_astronomical for r in rows},
+            settings=recovery or RecoverySettings(),
+            ancient_cutoff_year=ancient_cutoff_year,
+            noise_medians=noise_prior_medians(priors, inflation),
+            battle_nu=priors.side_prior_nu,
+        )
 
     logger.info(
         "reconcile_summary_built",
@@ -404,19 +450,143 @@ def singleton_slope(design: Design, log_estimates: dict[int, float]) -> float | 
         The slope, or None when fewer than three singleton sides exist or
         their reports do not vary.
     """
-    counts = np.bincount(design.side_index, minlength=design.n_sides)
-    xs: list[float] = []
-    ys: list[float] = []
-    for row in design.point_rows:
-        position = int(design.side_index[row])
-        side_id = design.side_ids[position]
-        if counts[position] != 1 or side_id not in log_estimates:
-            continue
-        xs.append(float(design.log_y[row]))
-        ys.append(log_estimates[side_id])
+    xs, ys = singleton_points(design, log_estimates)
     if len(xs) < 3 or float(np.var(xs)) <= 0.0:
         return None
     return _finite(float(np.polyfit(xs, ys, 1)[0]))
+
+
+def recovery_block(
+    idata: az.InferenceData,
+    design: Design,
+    log_estimates: dict[int, float],
+    *,
+    battle_of_side: dict[int, int],
+    year_of_side: dict[int, int | None],
+    settings: RecoverySettings,
+    ancient_cutoff_year: int,
+    noise_medians: tuple[float, float] | None = None,
+    battle_nu: float = 4.0,
+) -> dict[str, Any]:
+    """Recovery diagnostics for one troop fit, including its mixed-predictive check.
+
+    Args:
+        idata: The fit's posterior.
+        design: The design the fit used.
+        log_estimates: ``side_id`` to the log of the fit's estimate (published
+            or neutral).
+        battle_of_side: ``side_id`` to ``battle_id``.
+        year_of_side: ``side_id`` to the battle's astronomical year.
+        settings: Sizes and thresholds.
+        ancient_cutoff_year: The stage's ancient cutoff.
+        noise_medians: ``(modern, ancient)`` prior medians of the noise sd, for the
+            leak guard; None skips it.
+        battle_nu: Degrees of freedom of the battle effect's prior.
+
+    Returns:
+        See :func:`pipeline.reconcilers.recovery.recovery_diagnostics`.
+    """
+    ppc: dict[str, Any] | None = None
+    side_prior = _side_prior_gate_inputs(idata, noise_medians)
+    pairs = battle_pairs(design, battle_of_side)
+    if len(pairs) >= settings.min_battles:
+        rows = np.unique(np.concatenate([np.concatenate([p.rows_a, p.rows_b]) for p in pairs]))
+        pooled_size = int(np.prod(idata.posterior["mu_side"].shape[:2]))
+        keep = np.unique(
+            np.linspace(0, pooled_size - 1, min(settings.ppc_draws, pooled_size)).astype(int)
+        )
+
+        def draw(name: str) -> np.ndarray:
+            thinned: np.ndarray = _pooled(idata, name)[keep]
+            return thinned
+
+        eta, var = _row_eta_and_var(draw, design, rows)
+        nu = draw("nu") if "nu" in idata.posterior.data_vars else None
+        if {"e", "s_d", "m0"} <= set(idata.posterior.data_vars):
+            side_of_row = design.side_index[rows]
+            era_labels = _coord_labels(idata, "era_bin")
+            era = draw("e")[:, [era_labels.index(label) for label in ERA_BIN_LABELS]]
+            era_with_undated = np.concatenate([era, np.zeros((era.shape[0], 1))], axis=1)
+            fixed = (
+                eta
+                - draw("mu_side")[:, side_of_row]
+                + draw("m0")[:, None]
+                + era_with_undated[:, design.era_bin_of_side[side_of_row]]
+            )
+            ppc = mixed_predictive_ppc(
+                pairs,
+                design.log_y,
+                rows,
+                fixed,
+                var,
+                side_of_row,
+                design.battle_of_side,
+                # No s_b under side_prior_independent: no battle effect to redraw.
+                draw("s_b") if "s_b" in idata.posterior.data_vars else np.zeros(fixed.shape[0]),
+                draw("s_d"),
+                nu,
+                battle_nu=battle_nu,
+                seed=settings.ppc_seed,
+            )
+            side_prior["reliability"] = implied_reliability(pairs, design.log_y, rows, var, nu)[
+                "reliability"
+            ]
+    return recovery_diagnostics(
+        design,
+        log_estimates,
+        battle_of_side,
+        year_of_side,
+        settings=settings,
+        ancient_cutoff_year=ancient_cutoff_year,
+        singleton_slope=singleton_slope(design, log_estimates),
+        spread_ratio=spread_ratio(design, log_estimates),
+        ppc=ppc,
+        side_prior=side_prior,
+    )
+
+
+def _side_prior_gate_inputs(
+    idata: az.InferenceData, noise_medians: tuple[float, float] | None
+) -> dict[str, Any]:
+    """The side-prior statistics the collapse and leak gates read.
+
+    Args:
+        idata: The fit's posterior.
+        noise_medians: ``(modern, ancient)`` prior medians of the noise sd, or None.
+
+    Returns:
+        ``s_d_median`` and, with ``noise_medians``, ``noise_ratio_modern`` and
+        ``noise_ratio_ancient``: the largest posterior median over prior median across
+        source types. Keys the fit cannot supply are absent.
+    """
+    names = set(idata.posterior.data_vars)
+    stats: dict[str, Any] = {}
+    if "s_d" in names:
+        stats["s_d_median"] = _finite(float(np.median(_pooled(idata, "s_d"))))
+    if noise_medians is not None:
+        for key, variable, prior_median in (
+            ("noise_ratio_modern", "sigma_type_modern", noise_medians[0]),
+            ("noise_ratio_ancient", "sigma_type_ancient", noise_medians[1]),
+        ):
+            if variable in names:
+                medians = np.median(_pooled(idata, variable), axis=0)
+                stats[key] = _finite(float(np.max(medians)) / prior_median)
+    return stats
+
+
+def _side_prior_stats(idata: az.InferenceData) -> dict[str, Any] | None:
+    """Posterior summaries of the P1 side prior's scales, or None for casualties."""
+    names = set(idata.posterior.data_vars)
+    if not {"s_d", "tau_e"} <= names:
+        return None
+    return {
+        name: {
+            **_scalar_stats(idata, name),
+            "median": _finite(float(np.median(_pooled(idata, name)))),
+        }
+        for name in ("s_b", "s_d", "tau_e")
+        if name in names
+    }
 
 
 def _log_normal_pdf(y: np.ndarray, mu: np.ndarray, sd: np.ndarray) -> np.ndarray:
@@ -432,6 +602,30 @@ def _log_normal_pdf(y: np.ndarray, mu: np.ndarray, sd: np.ndarray) -> np.ndarray
     """
     z = (y - mu) / sd
     return cast(np.ndarray, -0.5 * z * z - np.log(sd) - 0.5 * math.log(2.0 * math.pi))
+
+
+def _row_sigma(draw: Callable[[str], np.ndarray], design: Design, rows: np.ndarray) -> np.ndarray:
+    """Per-draw source noise sd of the given rows, ancient rows on the ancient scale.
+
+    Args:
+        draw: Name to an array of shape ``(n_draws, ...)`` of that posterior
+            variable. May raise ``KeyError`` for ``sigma_source_ancient``, which
+            exists only for a troop fit with the informative noise prior and at
+            least one row before the noise cutoff year.
+        design: The design the fit used.
+        rows: Row indices into the design.
+
+    Returns:
+        ``(n_draws, len(rows))``.
+    """
+    sigma: np.ndarray = draw("sigma_source")[:, design.source_index[rows]]
+    try:
+        ancient: np.ndarray = draw("sigma_source_ancient")[:, design.source_index[rows]]
+    except KeyError:
+        return sigma
+    is_ancient = design.ancient_rows[rows][None, :]
+    blended: np.ndarray = sigma + is_ancient * (ancient - sigma)
+    return blended
 
 
 def _row_eta_and_var(
@@ -451,24 +645,26 @@ def _row_eta_and_var(
     Returns:
         ``(eta, var)``, each of shape ``(n_draws, len(rows))``.
     """
+    keep = 1.0 - level_anchor_mask(design)
     eta = (
         draw("mu_side")[:, design.side_index[rows]]
         + draw("beta_source")[:, design.source_index[rows]]
-        + draw("g_regime")[:, design.regime_index[rows]]
+        + draw("g_regime")[:, design.regime_index[rows]] * keep[rows]
         + draw("delta_level")[:, design.level_index[rows]]
-        + draw("a_era")[:, None] * (design.era * _unlabelled_mask(design))[rows]
+        + draw("a_era")[:, None] * (design.era * _unlabelled_mask(design) * keep)[rows]
     )
     ratio = _ratio_level_mask(design)
     if ratio.any():
         pair_of_row, _ = _ratio_pairs(design)
         offsets = draw("sigma_ratio")[:, None] * draw("z_ratio")[:, pair_of_row[rows]]
         eta = eta + offsets * ratio[rows]
-    var = (
-        draw("sigma_source")[:, design.source_index[rows]] ** 2
-        + draw("sigma_estimate")[:, None] ** 2 * design.is_estimate.astype(float)[rows]
-        + draw("sigma_round")[:, None] ** 2 * design.roundness[rows]
-        + design.range_var[rows]
-    )
+    var = _row_sigma(draw, design, rows) ** 2 + design.range_var[rows]
+    if design.quantity != "troops":
+        var = (
+            var
+            + draw("sigma_estimate")[:, None] ** 2 * design.is_estimate.astype(float)[rows]
+            + draw("sigma_round")[:, None] ** 2 * design.roundness[rows]
+        )
     unknown = _unknown_level_mask(design)
     if unknown.any():
         var = var + draw("sigma_unknown")[:, None] ** 2 * unknown[rows]
@@ -562,6 +758,24 @@ def _sigma_type_stats(idata: az.InferenceData) -> dict[str, float | None]:
     return {label: _finite(float(values[:, i].mean())) for i, label in enumerate(labels)}
 
 
+def _sigma_ancient_stats(idata: az.InferenceData) -> dict[str, float | None]:
+    """Posterior mean of the ancient-row noise sd for each source type.
+
+    Args:
+        idata: The fit's posterior.
+
+    Returns:
+        Source type to mean ancient observation sd on the log scale; empty when
+        the fit has no ancient scale (casualties, the inverse-gamma prior, or no
+        row before the noise cutoff).
+    """
+    if "sigma_type_ancient" not in idata.posterior.data_vars:
+        return {}
+    values = _pooled(idata, "sigma_type_ancient")
+    labels = _coord_labels(idata, "source_type")
+    return {label: _finite(float(values[:, i].mean())) for i, label in enumerate(labels)}
+
+
 def reports_honoured(
     idata: az.InferenceData, design: Design, *, ci_mass: float = 0.95
 ) -> dict[str, Any]:
@@ -592,9 +806,10 @@ def reports_honoured(
     g_regime = _pooled(idata, "g_regime")
     delta = _pooled(idata, "delta_level")
     a_era = _pooled(idata, "a_era")
+    keep = 1.0 - level_anchor_mask(design)
     era = design.era.copy()
     if "unlabelled" in design.regimes:
-        era = era * (design.regime_index == design.regimes.index("unlabelled"))
+        era = era * (design.regime_index == design.regimes.index("unlabelled")) * keep
     else:
         era = era * 0.0
 
@@ -622,7 +837,7 @@ def reports_honoured(
             eta = (
                 mu[:, column]
                 + beta[:, int(design.source_index[row])]
-                + g_regime[:, int(design.regime_index[row])]
+                + g_regime[:, int(design.regime_index[row])] * keep[row]
                 + delta[:, int(design.level_index[row])]
                 + a_era * era[row]
             )
@@ -931,7 +1146,7 @@ def _convergence(
         if values.size == 0:
             continue
         candidate = float(values.min())
-        if "side" in data_array.dims or "ratio_pair" in data_array.dims:
+        if any(dim in data_array.dims for dim in ("side", "ratio_pair", "battle")):
             min_ess_side = min(min_ess_side, candidate)
         elif candidate < min_ess:
             min_ess = candidate
@@ -1161,9 +1376,17 @@ def _row_precision(idata: az.InferenceData, design: Design, *, max_draws: int = 
     """
     if "sigma_source" not in idata.posterior.data_vars:
         return np.ones(design.n_obs)
-    sigma = _pooled(idata, "sigma_source")
-    keep = np.unique(np.linspace(0, sigma.shape[0] - 1, min(max_draws, sigma.shape[0])).astype(int))
-    var = sigma[keep][:, design.source_index] ** 2 + design.range_var[None, :]
+    pooled_sigma = _pooled(idata, "sigma_source")
+    keep = np.unique(
+        np.linspace(0, pooled_sigma.shape[0] - 1, min(max_draws, pooled_sigma.shape[0])).astype(int)
+    )
+
+    def draw_kept(name: str) -> np.ndarray:
+        thinned: np.ndarray = _pooled(idata, name)[keep]
+        return thinned
+
+    sigma = _row_sigma(draw_kept, design, np.arange(design.n_obs))
+    var = sigma**2 + design.range_var[None, :]
     columns = {
         "sigma_estimate": design.is_estimate.astype(float),
         "sigma_round": design.roundness,
@@ -1203,7 +1426,8 @@ def _side_offsets(idata: az.InferenceData, design: Design) -> np.ndarray:
         if "unlabelled" in design.regimes
         else np.zeros(design.n_obs, dtype=bool)
     )
-    era_row = design.era * unlabelled
+    keep = 1.0 - level_anchor_mask(design)
+    era_row = design.era * unlabelled * keep
     regime_weight = np.zeros((design.n_sides, len(design.regimes)))
     level_weight = np.zeros((design.n_sides, len(design.levels)))
     era_weight = np.zeros(design.n_sides)
@@ -1213,7 +1437,7 @@ def _side_offsets(idata: az.InferenceData, design: Design) -> np.ndarray:
     row_weight = _row_precision(idata, design)
     totals = np.bincount(design.side_index, weights=row_weight, minlength=design.n_sides)
     totals[totals == 0] = 1.0
-    np.add.at(regime_weight, (design.side_index, design.regime_index), row_weight)
+    np.add.at(regime_weight, (design.side_index, design.regime_index), row_weight * keep)
     np.add.at(level_weight, (design.side_index, design.level_index), row_weight)
     np.add.at(era_weight, design.side_index, row_weight * era_row)
     regime_weight /= totals[:, None]
@@ -1328,6 +1552,52 @@ def _contraction_value(posterior_sd: float, prior_sd: float) -> float | None:
     return _finite(1.0 - posterior_sd / prior_sd)
 
 
+def g_regime_stats(
+    idata: az.InferenceData,
+    design: Design,
+    inflation: InflationPrior,
+    *,
+    neutral: bool = False,
+) -> dict[str, dict[str, float | None]]:
+    """Posterior mean and sd of each regime's bias, with its prior sd.
+
+    A regime whose posterior sd matches its prior sd is carrying its prior, and
+    one whose mean moved when only the opposing side's reports changed is being
+    pulled across sides by the shared battle effect. Both are visible here.
+
+    Args:
+        idata: The fit's posterior; needs ``g_regime`` over ``regime``.
+        design: The design, for the regime vocabulary.
+        inflation: The fitted claim-regime prior the model was built with.
+        neutral: The fit is the regime-neutral variant, whose unlabelled prior is
+            the faithful component.
+
+    Returns:
+        ``{regime: {"mean", "sd", "prior_sd"}}``. The prior is the Normal the
+        model uses for a free regime, so it is analytic; the anchor is pinned, so
+        its sd and prior sd are zero. Empty when the posterior has no
+        ``g_regime``.
+    """
+    if "g_regime" not in idata.posterior.data_vars:
+        return {}
+    samples = _pooled(idata, "g_regime")
+    labels = _coord_labels(idata, "regime")
+    stats: dict[str, dict[str, float | None]] = {}
+    for position, regime in enumerate(labels):
+        if regime == inflation.anchor_regime:
+            prior_sd = 0.0
+        elif neutral and regime == "unlabelled":
+            prior_sd = inflation.faithful_sd
+        else:
+            _, prior_sd = inflation.moments_for(regime)
+        stats[regime] = {
+            "mean": _finite(float(np.mean(samples[:, position]))),
+            "sd": _finite(float(np.std(samples[:, position]))),
+            "prior_sd": _finite(float(prior_sd)),
+        }
+    return stats
+
+
 def _contraction(
     idata: az.InferenceData,
     design: Design,
@@ -1367,7 +1637,7 @@ def _contraction(
 
     b_type_samples = _pooled(idata, "b_type")
     type_labels = _coord_labels(idata, "source_type")
-    n_types = len(type_labels)
+    n_types = len([t for t in type_labels if t != PINNED_BIAS_SOURCE_TYPE])
     # A ZeroSumNormal's n entries are exchangeable by construction, so every
     # entry shares one marginal prior sd: sigma * sqrt((n-1)/n). At n=1 the
     # single entry is forced to exactly zero and has no prior spread to
@@ -1377,7 +1647,9 @@ def _contraction(
         priors.bias_prior_sd * math.sqrt((n_types - 1) / n_types) if n_types > 1 else 0.0
     )
     b_type: dict[str, float | None] = {
-        type_name: _contraction_value(float(np.std(b_type_samples[:, i])), prior_marginal_sd)
+        type_name: None
+        if type_name == PINNED_BIAS_SOURCE_TYPE
+        else _contraction_value(float(np.std(b_type_samples[:, i])), prior_marginal_sd)
         for i, type_name in enumerate(type_labels)
     }
 

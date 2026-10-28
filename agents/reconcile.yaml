@@ -34,6 +34,40 @@ tools:
 params:
   # ── source-bias model priors ──────────────────────────────────────────────
   bias_prior_sd: 1.0                  # weakly informative
+
+  # ── observation-noise prior (troops; approved 2026-10-22) ──────────────────
+  # The noise sd was identified only by the 31 multi-report sides of the corpus
+  # (selected for disagreement) and applied to 309 singletons: sigma 0.51, nu 3.4,
+  # singleton slope 0.61 (handover-log 31). Troops now take an informative
+  # LogNormal on each source type's noise sd, one for modern rows and one for
+  # rows before the noise cutoff year:
+  #   sigma_modern  ~ LogNormal(log(noise_modern_median), noise_modern_log_sd)
+  #   sigma_ancient ~ LogNormal(log(noise_ancient_median), noise_ancient_log_sd)
+  # 'informative' or 'inverse_gamma' (the earlier prior below, for ablation).
+  # Casualties always keep the inverse-gamma.
+  observation_noise_prior: informative
+  # null reads faithful_sd from inflation_priors (0.2223 on the gold set). The
+  # sensitivity run sets 0.35 here; it is not the default.
+  noise_modern_median: 0.22           # P1 pins it (the gold set's faithful_sd is 0.2223)
+  noise_modern_log_sd: 0.2            # P1 (2026-10-23): tighter than 0.3, with no sigma_round/sigma_estimate
+  noise_ancient_median: 0.40          # judgement call; the sensitivity runs are the check
+  noise_ancient_log_sd: 0.2
+  # null uses ancient_cutoff_year (500), the only era split reconcile has. The
+  # design called for 1500; set 1500 here to move the wide scale to the medieval
+  # rows too.
+  noise_ancient_cutoff_year: null
+  # nu = floor + Gamma(2, 0.5). Troops moved to 3 with P1; casualties keep the
+  # original floor of 2 (the casualty_ prefix, like the other per-quantity keys).
+  student_t_nu_floor: 3.0
+  casualty_student_t_nu_floor: 2.0
+  # Half-normal scales of the hedged-figure and rounded-figure variance terms.
+  # 0.1 for troops (they were 0.3, below under their old names); casualties
+  # keep 0.3 via the casualty_ names.
+  estimate_dispersion_sd: 0.1
+  roundness_dispersion_sd: 0.1
+  casualty_estimate_dispersion_sd: 0.3
+  casualty_roundness_dispersion_sd: 0.3
+
   # Inverse-gamma on each source type's noise variance. The original IG(2, 1)
   # has infinite variance on a parameter that sets every interval width, so
   # alpha is 3. Beta 4/3 preserves the original mode, beta / (alpha + 1) = 1/3,
@@ -61,14 +95,25 @@ params:
   mcmc_samples: 5000                   # neutral fit hit ESS 313 at 2000 on the 211-article corpus; 5000 cleared 400 on the pilot
   mcmc_chains: 4
   mcmc_tune: 1000
-  mcmc_target_accept: 0.9
+  mcmc_target_accept: 0.99            # P1: 0.9 gave 15-37 divergences, 0.97 gave 12-53 on bound-heavy corpora (write_max_divergences is 0)
   mcmc_cores: 1                       # >1 respawns the interpreter under pytest on Windows
   random_seed: 20260923               # a re-run must reproduce, not merely converge
   # PyTensor needs g++ to compile its C backend and falls back to Python
   # without one, which puts this model out of reach on a machine with no
   # toolchain. nutpie compiles the logp through numba instead.
   nuts_sampler: nutpie
-  likelihood_family: student_t        # 'contaminated' or 'normal' for ablations
+  # P1 (2026-10-23): troops use a Normal likelihood, a side prior of era mean plus a
+  # shared battle effect plus a side deviation, and no sigma_round/sigma_estimate.
+  # Casualties keep their Student-t model (casualty_likelihood_family).
+  likelihood_family: normal           # 'student_t' or 'contaminated' for ablations
+  casualty_likelihood_family: student_t
+  era_effect_prior_sd: 1.0
+  battle_effect_prior_sd: 1.0         # s_b ~ HalfNormal
+  side_deviation_prior_sd: 0.5        # s_d ~ HalfNormal
+  # true drops the shared battle effect: sides are independent given their era,
+  # with s_d ~ HalfNormal(sqrt(battle_effect_prior_sd^2 + side_deviation_prior_sd^2)).
+  # An ablation, used to compare P1 against independent sides per regime.
+  side_prior_independent: false
   # Under `contaminated` point rows are a two-component Normal mixture (faithful
   # noise plus a wide component, keys below). Kept as an ablation: on the real
   # corpus pi_contam came back at 0.02, so it was not the cause of the collapse.
@@ -109,7 +154,29 @@ params:
   write_max_median_mcse_log: 0.05
 
   # ── gate thresholds (resolved into the quality_checks thresholds below) ────
-  min_spread_ratio: 0.25              # estimates_not_collapsed
+  min_spread_ratio: 0.85              # estimates_not_collapsed (was 0.25 before the noise prior)
+  # Recovery gates (2026-10-22): do the estimates give the reports back? Each
+  # applies only above a minimum size and otherwise skips, with the reason in
+  # diagnostics -> troops -> recovery -> gates_skipped.
+  min_singleton_slope: 0.85           # singleton_slope_recovers
+  # within_battle_ratio_recovers: 0.5, not 0.8. A calibrated fit's slope is the
+  # reliability of a reported ratio, about 0.6 to 0.7 at noise 0.28; only a model
+  # that believes true ratios vary far more than they do reaches 0.8
+  # (handover-log 32). wb_matches_reliability checks the slope against its own noise.
+  min_within_battle_slope: 0.5
+  max_wb_reliability_gap: 0.1         # wb_matches_reliability (warning)
+  post1800_ratio_band_lo: 0.85        # post1800_ratio_in_band; neutral_post1800_level_relative
+  post1800_ratio_band_hi: 1.15
+  all_ratio_band_lo: 0.9              # neutral_all_sides_level_in_band (warning)
+  all_ratio_band_hi: 1.1
+  min_s_d_median: 0.25                # side_deviation_not_collapsed (error)
+  max_noise_ratio: 1.5                # noise_not_leaking (error): posterior / prior median
+  min_ppc_tail_p: 0.05                # between_battle_variance_is_plausible (error)
+  recovery_min_sides: 10              # singleton slope, spread ratio
+  recovery_min_battles: 10            # within-battle slope, variance check
+  recovery_min_post1800_sides: 5      # post-1800 sides reported above 50,000
+  recovery_ppc_draws: 500
+
   min_estimate_coverage: 0.99         # estimates_populated
   max_median_ci_log_width: 4.5        # ci_width_reasonable, LN(hi/lo) on multi-claim sides
   min_singleton_ci_log_width: 0.8     # singleton_estimates_are_honestly_uncertain
@@ -152,8 +219,8 @@ params:
   # one row in build_design, so the model has no lineage term (handover-log 20.10).
   scope_offset_prior_sd: 0.4
   scope_unknown_dispersion_sd: 0.4
-  estimate_dispersion_sd: 0.3
-  roundness_dispersion_sd: 0.3        # conventional figures are coarsened, not noisy
+  # estimate_dispersion_sd and roundness_dispersion_sd: see the observation-noise
+  # block above. Conventional (round) figures are coarsened, not noisy.
   casualty_type_offset_prior_sd: 0.7
   # Extra sd (HalfNormal scale) on a casualty component report's log value,
   # because the component-to-total ratio is one corpus constant per component
@@ -172,9 +239,10 @@ params:
   bound_excess_prior_sd: 0.5
 
   # ── latent side-strength prior ────────────────────────────────────────────
-  # Deliberately not era-structured: era and polity priors belong to the
-  # impute stage, and duplicating them here would double-count the same
-  # information in two places in the pipeline.
+  # Troops are era-structured (P1): the side prior carries era means, a shared
+  # battle effect and a side deviation (era_effect_prior_sd and friends above).
+  # The keys below are the casualty side prior; side_prior_nu is shared, and also
+  # the df of the per-battle effect for troops.
   side_prior_mu: 9.2                  # log troops; e^9.2 ~ 10,000
   side_prior_mu_sd: 1.0
   side_prior_sd_scale: 1.5
@@ -250,6 +318,55 @@ quality_checks:
       force ratios. Kept apart from model_convergence, which reads the
       published fits only.
 
+  - name: troop_span_guard
+    check: >
+      SELECT COALESCE((
+        SELECT COALESCE((latest.diagnostics -> 'troop_span_guard' ->> 'n_errors')::int, -1)
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), -1)
+    threshold: "= 0"
+    severity: error
+    description: >
+      No side keeps point totals that differ by more than a factor of e squared
+      (7.4) after the load filters, supersede included. That much disagreement
+      is a scope or unit mix-up, not source noise. The offending sides (battle
+      slug, side label, min, max) are listed in the newest run's diagnostics
+      under troop_span_guard -> sides. A side with a troop_strength override
+      (a report whose url starts "override:") is exempt: a curator settled its
+      figure. A run whose diagnostics lack troop_span_guard -> n_errors fails
+      (the query returns -1), and so does a database with no completed
+      source_disagreement run: the guard did not run, which is not the same as
+      finding nothing. Bounds are the load constants
+      SPAN_WARN_LOG_RATIO and SPAN_ERROR_LOG_RATIO, or params troop_span_warn_log
+      and troop_span_error_log.
+
+  - name: troop_span_warnings
+    check: >
+      SELECT COALESCE((
+        SELECT (latest.diagnostics -> 'troop_span_guard' ->> 'n_warnings')::int
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 0)
+    threshold: "= 0"
+    severity: warning
+    description: >
+      Sides whose kept point totals differ by more than a factor of e (2.7) but
+      less than e squared. Listed in the newest run's diagnostics under
+      troop_span_guard -> sides, with the errors.
+
   - name: sides_low_precision
     check: >
       SELECT COALESCE((
@@ -286,7 +403,11 @@ quality_checks:
   - name: estimates_not_collapsed
     check: >
       SELECT COALESCE((
-        SELECT COALESCE((latest.diagnostics -> 'troops' ->> 'spread_ratio')::float, 1::float)
+        SELECT LEAST(
+          (CASE WHEN (latest.diagnostics -> 'troops' -> 'recovery') IS NOT NULL
+                THEN latest.diagnostics -> 'troops' -> 'recovery' ->> 'gate_spread_ratio'
+                ELSE latest.diagnostics -> 'troops' ->> 'spread_ratio' END)::float,
+          (latest.diagnostics -> 'troops_neutral' -> 'recovery' ->> 'gate_spread_ratio')::float)
         FROM (
           SELECT diagnostics
           FROM model_runs
@@ -300,13 +421,279 @@ quality_checks:
     threshold: ">= {params.min_spread_ratio}"
     severity: error
     description: >
-      The estimates keep at least a quarter of the reports' between-side spread
+      The estimates keep at least 85% of the reports' between-side spread
       (spread_ratio: sd across sides of log est_troops_total over sd across sides
-      of the mean observed log value). On the pilot corpus a fit that converged
-      cleanly gave every side about 35,000, at a ratio near 0.005, because
-      per-source terms confounded with battles absorbed the between-side
-      variation. No sampler diagnostic sees that. A run whose ratio cannot be
-      computed (under two sides, or no point observations) is not failed.
+      of the mean observed log value), on the published fit and on the neutral
+      fit, whichever is lower. Was 0.25, a collapse backstop: on the pilot corpus a
+      fit that converged cleanly gave every side about 35,000, at a ratio near
+      0.005. The 2026-10 corpus fit passed at 0.65 while shrinking every lone
+      report (singleton slope 0.61), hence the stricter limit. The recovery block
+      applies it only with at least recovery_min_sides point-reported sides;
+      below that the value is null, the gate passes at the sentinel 1 and the
+      reason is in diagnostics -> troops -> recovery -> gates_skipped. A run
+      with no recovery block (an older run) is judged on troops.spread_ratio.
+
+  - name: singleton_slope_recovers
+    check: >
+      SELECT COALESCE((
+        SELECT LEAST(
+          (latest.diagnostics -> 'troops' -> 'recovery' ->> 'gate_singleton_slope')::float,
+          (latest.diagnostics -> 'troops_neutral' -> 'recovery' ->> 'gate_singleton_slope')::float)
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 1::float)
+    threshold: ">= {params.min_singleton_slope}"
+    severity: error
+    description: >
+      OLS slope of the log estimate on the log report over singleton sides (one
+      point report, nothing else), on the published and the neutral fit,
+      whichever is lower. A slope near 1 trusts a lone report up to its bias
+      terms; the 2026-10 corpus fit gave 0.61 (shrinkage toward the corpus
+      mean from a noise sd identified on 31 disagreeing sides). Applies with at
+      least recovery_min_sides singletons; otherwise null, passes at the
+      sentinel 1, reason logged in gates_skipped.
+
+  - name: within_battle_ratio_recovers
+    check: >
+      SELECT COALESCE((
+        SELECT LEAST(
+          (latest.diagnostics -> 'troops' -> 'recovery' ->> 'gate_within_battle_slope')::float,
+          (latest.diagnostics -> 'troops_neutral' -> 'recovery' ->> 'gate_within_battle_slope')::float)
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 1::float)
+    threshold: ">= {params.min_within_battle_slope}"
+    severity: error
+    description: >
+      Slope, through the origin, of the estimated log force ratio on the
+      reported one over battles with exactly two sides that each have a point
+      report, on the published and the neutral fit, whichever is lower. This is
+      the quantity the model stage regresses outcome on; the 2026-10 corpus fit
+      gave 0.60 with an uncalibrated noise. The floor is 0.5 since P1 (it was 0.8,
+      which a calibrated fit cannot meet; see min_within_battle_slope). Applies with at least
+      recovery_min_battles such battles; otherwise null, passes at the sentinel
+      1, reason in gates_skipped.
+
+  - name: post1800_ratio_in_band
+    check: >
+      SELECT COALESCE((
+        SELECT (latest.diagnostics -> 'troops' -> 'recovery'
+                ->> 'gate_post1800_band_violation')::float
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 0::float)
+    threshold: "= 0"
+    severity: warning
+    description: >
+      The geometric mean of estimate / report over post-1800 sides reported above
+      50,000 lies in [post1800_ratio_band_lo, post1800_ratio_band_hi] (0.85 to
+      1.15), on the published fit (the neutral fit is shifted by its
+      regime-neutral offset and is only recorded). Modern armies are counted
+      carefully, so a ratio far from 1 is shrinkage, not correction; the 2026-10
+      corpus fit gave 0.71. The diagnostic holds the ratio itself. Applies with at
+      least recovery_min_post1800_sides such sides; otherwise null, passes, reason
+      in gates_skipped.
+
+  - name: between_battle_variance_is_plausible
+    check: >
+      SELECT COALESCE((
+        SELECT LEAST(
+          (latest.diagnostics -> 'troops' -> 'recovery' ->> 'gate_ppc_tail_p')::float,
+          (latest.diagnostics -> 'troops_neutral' -> 'recovery' ->> 'gate_ppc_tail_p')::float)
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 1::float)
+    threshold: ">= {params.min_ppc_tail_p}"
+    severity: error
+    description: >
+      Mixed-predictive check of the between-battle spread of the reported log
+      force ratio: the mean squared reported log ratio over two-sided battles,
+      against its distribution when each posterior draw redraws the side
+      deviations (a new battle effect and a new side effect at that draw's s_b and
+      s_d), keeps the fitted offsets and draws new noise. The value is the
+      two-sided tail probability; under min_ppc_tail_p (0.05) the observed spread
+      is in a tail. Replicating around the fitted mu_side (the check used until
+      2026-10-23) cannot pass for any non-zero noise. Published and neutral fit,
+      whichever is lower. Skipped below recovery_min_battles two-sided battles
+      (null, passes). Expected to fail under the side_prior_independent ablation
+      (diagnostics troops -> side_prior_independent is true): with no battle
+      effect the model cannot reproduce the between-battle spread. The pass/fail
+      rule is unchanged.
+
+  - name: side_deviation_not_collapsed
+    check: >
+      SELECT COALESCE((
+        SELECT LEAST(
+          (latest.diagnostics -> 'troops' -> 'recovery' ->> 'gate_s_d_median')::float,
+          (latest.diagnostics -> 'troops_neutral' -> 'recovery' ->> 'gate_s_d_median')::float)
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 1::float)
+    threshold: ">= {params.min_s_d_median}"
+    severity: error
+    description: >
+      Posterior median of s_d, the per-side deviation scale of the P1 side prior,
+      is at least min_s_d_median (0.25), on the published and the neutral fit,
+      whichever is lower. s_d is what is left of the reported log ratio's variance
+      once the noise is removed (the battle effect cancels in a ratio); a collapse
+      towards zero says the model believes both sides of a battle are the same size
+      and attributes the whole ratio to noise. Counterfactual fits gave 0.42 once the
+      scope-conflated sides were fixed. Null (passes) for a fit without the P1 prior.
+
+  - name: noise_not_leaking
+    check: >
+      SELECT COALESCE((
+        SELECT GREATEST(
+          (latest.diagnostics -> 'troops' -> 'recovery' ->> 'gate_noise_ratio')::float,
+          (latest.diagnostics -> 'troops_neutral' -> 'recovery' ->> 'gate_noise_ratio')::float)
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 0::float)
+    threshold: "<= {params.max_noise_ratio}"
+    severity: error
+    description: >
+      The posterior median of the observation-noise sd stays within max_noise_ratio
+      (1.5) times its prior median, separately for modern and ancient rows (the
+      worse of the two, over source types), on the published and the neutral fit.
+      The earlier fit let noise leak around its prior (0.314 against a 0.22 median
+      even at log-sd 0.1); a leak means a few scope-conflated sides are being
+      absorbed as noise. Null (passes) when the fit has no informative noise scale.
+
+  - name: wb_matches_reliability
+    check: >
+      SELECT COALESCE((
+        SELECT GREATEST(
+          (latest.diagnostics -> 'troops' -> 'recovery' ->> 'gate_wb_reliability_gap')::float,
+          (latest.diagnostics -> 'troops_neutral' -> 'recovery' ->> 'gate_wb_reliability_gap')::float)
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 0::float)
+    threshold: "<= {params.max_wb_reliability_gap}"
+    severity: warning
+    description: >
+      The within-battle slope wb is within max_wb_reliability_gap (0.1) of the
+      reliability the fitted noise implies, (V - 2 sigma_eff^2) / V, with V the
+      variance of the observed within-battle reported log ratios (definition in
+      pipeline/reconcilers/recovery.py). A calibrated fit's slope is the
+      reliability of a reported ratio; a gap means the noise and the shrinkage
+      disagree. Published and neutral fit, whichever is worse.
+
+  - name: recovery_gates_skipped
+    check: >
+      SELECT COALESCE((
+        SELECT
+          CASE WHEN jsonb_typeof(latest.diagnostics -> 'troops' -> 'recovery' -> 'gates_skipped') = 'object'
+               THEN (SELECT COUNT(*) FROM jsonb_object_keys(
+                       latest.diagnostics -> 'troops' -> 'recovery' -> 'gates_skipped'))
+               ELSE 0 END
+          + CASE WHEN jsonb_typeof(latest.diagnostics -> 'troops_neutral' -> 'recovery' -> 'gates_skipped') = 'object'
+               THEN (SELECT COUNT(*) FROM jsonb_object_keys(
+                       latest.diagnostics -> 'troops_neutral' -> 'recovery' -> 'gates_skipped'))
+               ELSE 0 END
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 0)
+    threshold: "= 0"
+    severity: warning
+    description: >
+      No recovery gate was skipped. A skipped gate (too few sides, singletons or
+      battles for its statistic, or a fit without the parameter it reads) passes
+      at its sentinel, so a run can look green while having checked nothing. The
+      count is over the published and the neutral fit; each skipped gate and its
+      reason are in diagnostics -> troops -> recovery -> gates_skipped (and the
+      neutral equivalent), and in the reconcile_recovery_gates_skipped warning.
+      A small fixture skipping gates is legitimate, hence a warning.
+
+  - name: neutral_post1800_level_relative
+    check: >
+      SELECT COALESCE((
+        SELECT (latest.diagnostics -> 'troops_neutral' -> 'recovery' ->> 'gate_relative_level_violation')::float
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 0::float)
+    threshold: "= 0"
+    severity: warning
+    description: >
+      On the neutral fit, the geometric ratio of estimate to report over post-1800
+      sides reported above 50,000, divided by the same ratio over all sides, lies
+      in [post1800_ratio_band_lo, post1800_ratio_band_hi] (0.85 to 1.15). The
+      level anchor reads unmarked post-1800 figures at face value, so modern
+      armies should not sit systematically away from the rest.
+
+  - name: neutral_all_sides_level_in_band
+    check: >
+      SELECT COALESCE((
+        SELECT (latest.diagnostics -> 'troops_neutral' -> 'recovery' ->> 'gate_all_ratio_violation')::float
+        FROM (
+          SELECT diagnostics
+          FROM model_runs
+          WHERE model_type = 'source_disagreement'
+            AND completed_at IS NOT NULL
+          ORDER BY run_id DESC
+          LIMIT 1
+        ) latest
+      ), 0::float)
+    threshold: "= 0"
+    severity: warning
+    description: >
+      On the neutral fit, the geometric ratio of estimate to report over all
+      point-reported sides lies in [all_ratio_band_lo, all_ratio_band_hi] (0.9 to
+      1.1). The earlier P1 fit gave 1.12; a ratio outside the band shifts head
+      counts as a whole.
 
   - name: reports_honoured
     check: >
