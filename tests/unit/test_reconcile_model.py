@@ -267,7 +267,11 @@ def test_the_ratio_variance_applies_to_casualty_components_only() -> None:
     )
     troops = build_design(_reports("troops"), quantity="troops", ancient_cutoff_year=500)
 
-    casualty_model = build_model(casualties, priors=ModelPriors(), inflation=InflationPrior())
+    casualty_model = build_model(
+        casualties,
+        priors=ModelPriors.from_params({}, quantity="casualties"),
+        inflation=InflationPrior(),
+    )
     troop_model = build_model(troops, priors=ModelPriors(), inflation=InflationPrior())
 
     assert {"sigma_ratio", "z_ratio"} <= _free_names(casualty_model)

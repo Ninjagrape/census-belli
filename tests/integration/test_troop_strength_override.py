@@ -416,3 +416,12 @@ def test_the_span_checks_read_the_latest_runs_diagnostics(
     assert error.passed is error_passes, error
     assert warning.passed is warning_passes, warning
     assert error.severity.value == "error" and warning.severity.value == "warning"
+
+
+def test_the_span_guard_fails_when_no_source_disagreement_run_completed(conn: Any) -> None:
+    conn.execute(text("DELETE FROM model_runs"))
+
+    error = QualityRunner(conn).run_one(_quality_check("troop_span_guard"))
+
+    assert "SQL execution failed" not in error.message, error
+    assert not error.passed, "no completed run means the guard did not run"

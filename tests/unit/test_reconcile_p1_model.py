@@ -1,9 +1,9 @@
 """P1 troop side prior: structure of the built model, no sampling.
 
 Troops take ``mu_side = m0 + e[era_bin] + b[battle] + s_d * zd[side]`` (``e``, ``b``
-centred) with a Normal likelihood, informative noise and no ``sigma_round`` / ``sigma_estimate`` /
-``s0``. Casualties keep their original model exactly. Unlabelled rows from 1800 on
-are read at face value (the level anchor), which the compiled graph must honour.
+non-centred) with a Normal likelihood, informative noise and no ``sigma_round`` /
+``sigma_estimate`` / ``s0``. Casualties keep their original model exactly. Unlabelled
+rows from 1800 on are read at face value (the level anchor), which the compiled graph must honour.
 """
 
 from __future__ import annotations
@@ -191,7 +191,9 @@ def test_troops_use_the_era_battle_deviation_prior_and_drop_the_old_terms() -> N
 
 def test_casualties_keep_s0_z_side_and_their_dispersion_terms() -> None:
     model = build_model(
-        _mixed_design("casualties"), priors=ModelPriors(), inflation=InflationPrior()
+        _mixed_design("casualties"),
+        priors=ModelPriors.from_params({}, quantity="casualties"),
+        inflation=InflationPrior(),
     )
 
     free = _free_names(model)

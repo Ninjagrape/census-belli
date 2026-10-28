@@ -348,11 +348,11 @@ def filter_troop_reports(
     """
     for report in reports:
         if is_override_report(report) and report.reported_value < min_plausible_troops:
-            entry_id = report.source_key.url.removeprefix(OVERRIDE_SOURCE_PREFIX)
             raise ValueError(
-                f"troop_strength override {entry_id}"
-                f" gives {report.reported_value:g} troops, below min_plausible_troops "
-                f"({min_plausible_troops:g}); fix the override or lower the floor"
+                f"troop_strength override {report.source_key.url} (side {report.side_id},"
+                f" battle {report.battle_id}) gives {report.reported_value:g} troops, below"
+                f" min_plausible_troops {min_plausible_troops:g}; fix the override or lower"
+                f" the floor"
             )
     reason_counter = {
         "date_context": "excluded_date_context",

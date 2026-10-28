@@ -330,7 +330,7 @@ quality_checks:
           ORDER BY run_id DESC
           LIMIT 1
         ) latest
-      ), 0)
+      ), -1)
     threshold: "= 0"
     severity: error
     description: >
@@ -341,7 +341,8 @@ quality_checks:
       under troop_span_guard -> sides. A side with a troop_strength override
       (a report whose url starts "override:") is exempt: a curator settled its
       figure. A run whose diagnostics lack troop_span_guard -> n_errors fails
-      (the query returns -1): the guard did not run, which is not the same as
+      (the query returns -1), and so does a database with no completed
+      source_disagreement run: the guard did not run, which is not the same as
       finding nothing. Bounds are the load constants
       SPAN_WARN_LOG_RATIO and SPAN_ERROR_LOG_RATIO, or params troop_span_warn_log
       and troop_span_error_log.
@@ -538,7 +539,10 @@ quality_checks:
       is in a tail. Replicating around the fitted mu_side (the check used until
       2026-10-23) cannot pass for any non-zero noise. Published and neutral fit,
       whichever is lower. Skipped below recovery_min_battles two-sided battles
-      (null, passes).
+      (null, passes). Expected to fail under the side_prior_independent ablation
+      (diagnostics troops -> side_prior_independent is true): with no battle
+      effect the model cannot reproduce the between-battle spread. The pass/fail
+      rule is unchanged.
 
   - name: side_deviation_not_collapsed
     check: >

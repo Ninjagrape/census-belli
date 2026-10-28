@@ -223,6 +223,9 @@ def summarise_fit(
         # Casualties keep s0; troops have the P1 side prior instead (side_prior).
         "s0": _scalar_stats(idata, "s0") if "s0" in idata.posterior.data_vars else None,
         "side_prior": _side_prior_stats(idata),
+        # Read by between_battle_variance_is_plausible: the ablation has no battle
+        # effect, so that check is expected to fail under it.
+        "side_prior_independent": priors.side_prior_independent,
         # Type-level observation scale: sqrt(sigma_sq_type) per source type, the
         # sigma a pooled key uses.
         "sigma_type": _sigma_type_stats(idata),

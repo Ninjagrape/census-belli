@@ -206,24 +206,30 @@ def _both_unlabelled() -> list[Report]:
 LEAK_REGIME = "administrative_partisan"
 LEAK_BATTLES = 10
 LEAK_SCALE = 5.0
-# A fraction of the way along the prior sd; the regime's posterior mean may move
-# this far when only the opposing sides' reports change.
-LEAK_LIMIT = 0.5
+# Absolute tolerance between the measured cross-side pass-through and the one the
+# fitted prior implies, s_b^2 / (s_b^2 + s_d^2).
+PASS_THROUGH_TOLERANCE = 0.25
+# Largest cross-side term allowed for the fit with no battle effect.
+INDEPENDENT_CROSS_LIMIT = 0.15
+_UNPAIRED_BATTLE_BASE = 10_000
 
 
-def _leak_corpus(opposing_scale: float) -> list[Report]:
+def _leak_corpus(opposing_scale: float, *, paired: bool = True) -> list[Report]:
     """Regime ``LEAK_REGIME`` appears only on side A of ten battles.
 
     Side B of each battle reports modern_scholarly (the anchor), so the regime
     has no co-reporting side of its own. ``opposing_scale`` multiplies B's
-    reports and nothing else: whatever the regime's posterior does in response
-    is information that crossed from one side of a battle to the other.
+    reports and nothing else. With ``paired=False`` each B side gets its own
+    battle id, so no battle effect joins it to A: whatever the regime does in
+    response is then the corpus path (shared type biases and scales), and the
+    paired fit's extra movement is the cross-side term.
     """
     rng = np.random.default_rng(SEED + 1)
     reports = _background()
     report_id = 5000
     for battle in range(LEAK_BATTLES):
         battle_id = 100 + battle
+        battle_id_b = battle_id if paired else _UNPAIRED_BATTLE_BASE + battle
         truth_a = 30_000.0 * math.exp(rng.normal(0.0, 0.5))
         truth_b = truth_a * math.exp(rng.normal(0.0, 0.3))
         for key in (_INFOBOX, _BOOK):
@@ -241,17 +247,24 @@ def _leak_corpus(opposing_scale: float) -> list[Report]:
                     key,
                     round(value * opposing_scale, -2),
                     "modern_scholarly",
-                    battle_id,
+                    battle_id_b,
                 )
             )
             report_id += 1
     return reports
 
 
-def _regime_mean_and_prior_sd(
-    reports: list[Report], inflation: InflationPrior, *, independent: bool
-) -> tuple[float, float]:
-    from pipeline.reconcilers.summarise import _convergence, g_regime_stats
+@dataclass(frozen=True)
+class LeakFit:
+    """The regime's posterior mean and, under P1, the fitted prior scales."""
+
+    mean: float
+    s_b: float | None
+    s_d: float | None
+
+
+def _fit_leak(reports: list[Report], inflation: InflationPrior, *, independent: bool) -> LeakFit:
+    from pipeline.reconcilers.summarise import _convergence, _side_prior_stats, g_regime_stats
 
     design = build_design(reports, quantity="troops", ancient_cutoff_year=CUTOFF)
     params = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))["params"]
@@ -265,58 +278,96 @@ def _regime_mean_and_prior_sd(
         converged=lambda fit: _neutral_converged(_convergence(fit)[0]),
         describe=lambda fit: _convergence(fit)[:2],
     )
-    stats = g_regime_stats(idata, design, inflation)[LEAK_REGIME]
-    assert stats["mean"] is not None and stats["prior_sd"] is not None
-    return stats["mean"], stats["prior_sd"]
+    mean = g_regime_stats(idata, design, inflation)[LEAK_REGIME]["mean"]
+    assert mean is not None
+    scales = _side_prior_stats(idata) or {}
+    return LeakFit(
+        mean=mean,
+        s_b=scales.get("s_b", {}).get("median"),
+        s_d=scales.get("s_d", {}).get("median"),
+    )
 
 
-def _leak(inflation: InflationPrior, *, independent: bool) -> float:
-    """Movement of the regime's posterior mean, in prior sds, when only B changes."""
-    base, prior_sd = _regime_mean_and_prior_sd(
-        _leak_corpus(1.0), inflation, independent=independent
-    )
-    scaled, _ = _regime_mean_and_prior_sd(
-        _leak_corpus(LEAK_SCALE), inflation, independent=independent
-    )
-    return abs(scaled - base) / prior_sd
+def _movement(base: LeakFit, scaled: LeakFit) -> float:
+    """Regime mean movement as a fraction of the log of the opposing scale."""
+    return abs(scaled.mean - base.mean) / math.log(LEAK_SCALE)
+
+
+@dataclass(frozen=True)
+class LeakResult:
+    """Pass-through fractions of the opposing sides' log scale-up."""
+
+    p1_movement: float
+    control_movement: float
+    independent_movement: float
+    implied: float
+
+    @property
+    def p1_cross(self) -> float:
+        return self.p1_movement - self.control_movement
+
+    @property
+    def independent_cross(self) -> float:
+        # Compared with the P1 control (unpaired ids), not a matching independent
+        # control: the independent model has no battle effect, so it is cheaper
+        # to read its whole movement against the corpus path measured once.
+        return self.independent_movement - self.control_movement
 
 
 @pytest.fixture(scope="module")
-def leak_p1(inflation: InflationPrior) -> float:
-    return _leak(inflation, independent=False)
-
-
-@pytest.fixture(scope="module")
-def leak_independent(inflation: InflationPrior) -> float:
-    return _leak(inflation, independent=True)
+def leak(inflation: InflationPrior) -> LeakResult:
+    base = _fit_leak(_leak_corpus(1.0), inflation, independent=False)
+    scaled = _fit_leak(_leak_corpus(LEAK_SCALE), inflation, independent=False)
+    base_c = _fit_leak(_leak_corpus(1.0, paired=False), inflation, independent=False)
+    scaled_c = _fit_leak(_leak_corpus(LEAK_SCALE, paired=False), inflation, independent=False)
+    base_i = _fit_leak(_leak_corpus(1.0), inflation, independent=True)
+    scaled_i = _fit_leak(_leak_corpus(LEAK_SCALE), inflation, independent=True)
+    assert base.s_b is not None and base.s_d is not None
+    implied = base.s_b**2 / (base.s_b**2 + base.s_d**2)
+    result = LeakResult(
+        p1_movement=_movement(base, scaled),
+        control_movement=_movement(base_c, scaled_c),
+        independent_movement=_movement(base_i, scaled_i),
+        implied=implied,
+    )
+    print(
+        f"leak (fractions of log {LEAK_SCALE:g}): P1 movement {result.p1_movement:.3f}, "
+        f"control movement {result.control_movement:.3f}, "
+        f"P1 cross-side {result.p1_cross:.3f}, "
+        f"implied s_b^2/(s_b^2+s_d^2) {result.implied:.3f} "
+        f"(s_b {base.s_b:.3f}, s_d {base.s_d:.3f}), "
+        f"independent movement {result.independent_movement:.3f}, "
+        f"independent cross-side {result.independent_cross:.3f}"
+    )
+    return result
 
 
 @pytest.mark.xfail(
     strict=False,
     reason=(
-        "measured 2026-10-29: P1 leaks 1.598 prior sds across sides (limit 0.5); "
-        "independent sides leak 0.626. The shared battle effect moves a one-sided "
-        "regime when only the opposing sides change; not tuned away."
+        "measured 2026-10-29: P1 movement 0.900, control movement 0.460, cross-side "
+        "pass-through 0.439 against an implied s_b^2/(s_b^2+s_d^2) of 0.731 "
+        "(s_b 0.467, s_d 0.283); gap 0.292 against a tolerance of 0.25. Not tuned."
     ),
 )
-def test_a_regime_seen_on_one_side_only_barely_moves_when_the_opposing_sides_change(
-    leak_p1: float, record_property: pytest.RecordProperty
+def test_the_cross_side_pass_through_matches_what_the_fitted_prior_implies(
+    leak: LeakResult, record_property: pytest.RecordProperty
 ) -> None:
-    record_property("leak_p1_prior_sds", f"{leak_p1:.3f}")
-    print(f"cross-side leak under P1: {leak_p1:.3f} prior sds")
+    record_property("p1_cross", f"{leak.p1_cross:.3f}")
+    record_property("implied", f"{leak.implied:.3f}")
 
-    assert leak_p1 < LEAK_LIMIT, leak_p1
+    assert abs(leak.p1_cross - leak.implied) <= PASS_THROUGH_TOLERANCE, (
+        leak.p1_cross,
+        leak.implied,
+    )
 
 
-def test_independent_sides_leak_less_than_the_shared_battle_effect(
-    leak_p1: float, leak_independent: float, record_property: pytest.RecordProperty
+def test_the_fit_without_a_battle_effect_has_almost_no_cross_side_term(
+    leak: LeakResult, record_property: pytest.RecordProperty
 ) -> None:
-    record_property("leak_independent_prior_sds", f"{leak_independent:.3f}")
-    print(f"cross-side leak, independent sides: {leak_independent:.3f} prior sds")
+    record_property("independent_cross", f"{leak.independent_cross:.3f}")
 
-    # Measured 0.626 against 1.598 for P1 (2026-10-29): fewer leaks, not none, so
-    # the limit is asserted for P1 only.
-    assert leak_independent < leak_p1, (leak_independent, leak_p1)
+    assert leak.independent_cross < INDEPENDENT_CROSS_LIMIT, leak.independent_cross
 
 
 @pytest.fixture(scope="module")

@@ -233,7 +233,9 @@ def _troop_report(value: float, *, url: str, source_type: str = "manual_entry") 
 def test_an_override_below_the_floor_is_rejected_loudly_not_dropped() -> None:
     report = _troop_report(50.0, url="override:ov-0007")
 
-    with pytest.raises(ValueError, match=r"ov-0007.*50"):
+    with pytest.raises(
+        ValueError, match=r"override:ov-0007 \(side \d+, battle \d+\) gives 50 troops, below"
+    ):
         filter_troop_reports([report], ReconcileCounts(), min_plausible_troops=MIN_TROOPS)
 
 

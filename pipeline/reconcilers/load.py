@@ -45,6 +45,7 @@ from typing import Any, Final
 import structlog
 from sqlalchemy import text
 
+from pipeline.extractors.store import OVERRIDE_SOURCE_PREFIX
 from pipeline.reconcilers.claims import assign_lineages, classify_regime, roundness
 from pipeline.reconcilers.plausibility import (
     exclusion_reason,
@@ -195,6 +196,37 @@ class UnfillableSide:
     reason: str
 
 
+def _troop_row_exclusion(
+    branch: str, reported_value: float, scope: str | None
+) -> tuple[str, str] | None:
+    """Name the per-row rule that excludes a troop report, if any.
+
+    Args:
+        branch: The report's ``troop_branch`` value.
+        reported_value: The report's raw value.
+        scope: The report's ``scope``. ``population`` counts people (a nation
+            on the move, its non-combatants), not an army, and is not a level
+            of the force-size hierarchy the scope offsets model.
+
+    Returns:
+        ``(counter_name, reason)`` for the first rule that excludes the row, or
+        None when the row is usable.
+    """
+    if branch == _NAVAL_BRANCH:
+        # Naval rows are also non-total; count them once, as naval, never
+        # again as a generic non-total exclusion.
+        return "excluded_naval", "naval branch"
+    if scope == _POPULATION_SCOPE:
+        # Checked before the branch rule: a "368,000 people" row is stored as a
+        # component, and calling it a non-total would hide why it was dropped.
+        return "excluded_population_scope", "population scope"
+    if branch != _TOTAL_BRANCH:
+        return "excluded_non_total_branch", f"non-total branch {branch!r}"
+    if reported_value <= 0:
+        return "excluded_non_positive", "non-positive value"
+    return None
+
+
 def _classify_troop_report(
     branch: str, reported_value: float, scope: str | None, counts: ReconcileCounts
 ) -> bool:
@@ -203,31 +235,18 @@ def _classify_troop_report(
     Args:
         branch: The report's ``troop_branch`` value.
         reported_value: The report's raw value.
-        scope: The report's ``scope``. ``population`` counts people (a nation
-            on the move, its non-combatants), not an army, and is not a level
-            of the force-size hierarchy the scope offsets model.
+        scope: The report's ``scope``.
         counts: Counters to accumulate the exclusion into.
 
     Returns:
         True if the report is usable, False if it was excluded (and counted).
     """
-    if branch == _NAVAL_BRANCH:
-        # Naval rows are also non-total; count them once, as naval, never
-        # again as a generic non-total exclusion.
-        counts.excluded_naval += 1
-        return False
-    if scope == _POPULATION_SCOPE:
-        # Counted before the branch rule: a "368,000 people" row is stored as a
-        # component, and calling it a non-total would hide why it was dropped.
-        counts.excluded_population_scope += 1
-        return False
-    if branch != _TOTAL_BRANCH:
-        counts.excluded_non_total_branch += 1
-        return False
-    if reported_value <= 0:
-        counts.excluded_non_positive += 1
-        return False
-    return True
+    exclusion = _troop_row_exclusion(branch, reported_value, scope)
+    if exclusion is None:
+        return True
+    counter, _ = exclusion
+    setattr(counts, counter, getattr(counts, counter) + 1)
+    return False
 
 
 def _sides_with_modern_estimate(reports: list[Report]) -> set[int]:
@@ -443,6 +462,14 @@ def _build_troop_reports(
         counts.reports_read += 1
         value = float(reported_value)
         if not _classify_troop_report(str(branch), value, scope, counts):
+            if str(url).startswith(OVERRIDE_SOURCE_PREFIX):
+                # A curator entered this on purpose; dropping it silently would
+                # discard the correction without a trace.
+                _, reason = _troop_row_exclusion(str(branch), value, scope) or ("", "")
+                raise ValueError(
+                    f"troop_strength override {url} (side {side_id}) would be excluded"
+                    f" by the loader: {reason}; fix the override"
+                )
             continue
 
         regime = classify_regime(extracted_context, value=value)

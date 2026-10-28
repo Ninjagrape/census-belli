@@ -162,7 +162,11 @@ def test_troops_have_no_dispersion_terms_and_casualties_keep_theirs() -> None:
 
 
 def test_casualties_and_the_legacy_switch_keep_the_inverse_gamma() -> None:
-    casualties = build_model(_design("casualties"), priors=ModelPriors(), inflation=_inflation())
+    casualties = build_model(
+        _design("casualties"),
+        priors=ModelPriors.from_params({}, quantity="casualties"),
+        inflation=_inflation(),
+    )
     legacy = build_model(
         _design(),
         priors=ModelPriors(observation_noise_prior="inverse_gamma"),
