@@ -1016,7 +1016,8 @@ HEAVY_TAIL_SAMPLER = SamplerSettings(
     tune=1500,
     chains=4,
     cores=1,
-    target_accept=0.97,
+    # The stage samples at 0.99 (agents/reconcile.yaml); 0.97 gave 1-5 divergences here.
+    target_accept=0.99,
     random_seed=SEED,
     nuts_sampler="nutpie",
 )
