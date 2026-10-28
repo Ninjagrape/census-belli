@@ -51,3 +51,4 @@ Last updated: 2026-10-10. §21 to §23 are committed (`a9abeba`, `401e1c7`, `3c6
 | §32 | Troop-number redesign review: noise experiment V1-V4 and proposed design P1 (era + battle side prior), 2026-10-23 | [32-troop-redesign-review-2026-10-23.md](32-troop-redesign-review-2026-10-23.md) |
 | §33 | Ten troop_strength override entries approved by the user (yaml), 2026-10-23 | [33-troop-strength-drafts-approved-2026-10-23.yaml](33-troop-strength-drafts-approved-2026-10-23.yaml) |
 | §34 | P1 implemented, reviewed, and sensitivity on a corpus copy (noise 0.15/0.22/0.30/free), 2026-10-25 | [34-p1-sensitivity-2026-10-25.md](34-p1-sensitivity-2026-10-25.md) |
+| §35 | P1 review fixes, merge to main 490a5d1, corpus2 refit (run 132) and both reviews, 2026-10-29 | [35-p1-merge-and-corpus2-refit-2026-10-29.md](35-p1-merge-and-corpus2-refit-2026-10-29.md) |

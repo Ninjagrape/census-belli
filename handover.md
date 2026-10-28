@@ -11,7 +11,49 @@ would otherwise get it wrong. Session narratives go in
 Code comments cite "handover §9.3" (a file in `docs/handover/`) and
 "handover-log §16" (a file in `docs/handover-log/`).
 
-Last updated: 2026-10-25 02:40 (overnight run done; awaiting the user).
+Last updated: 2026-10-29 (P1 merged; corpus2 refit running).
+
+## 00. 2026-10-29: P1 fixes done, merged to main 490a5d1, corpus2 refit
+
+**Merged to `main` 490a5d1 (not pushed)**: `wip/troop-p1` with 06cf2d0 (review
+fixes), 8e75e0b (heavy-tail fixture at 0.99), 6e9ca4d (review follow-ups).
+Verified on merged main: ruff, mypy (159 files) clean; one head d0e1f2a3b4c5;
+non-model suite **2732 passed, 0 failed, 0 skipped**
+(`data/logs/main_nonmodel_suite_20261029.log`). Model files at 8e75e0b/6e9ca4d:
+p1_recovery 13, recovery 19 + 1 xfail, contamination 3, neutral 5 + 1 xfail,
+impute_recovery 5.
+
+Departures from the 2026-10-25 decisions, with evidence:
+- **Centring (MAJOR 1) tried and reverted.** Centred `b` gave 2081 divergences
+  on the main recovery corpus; centred `e` failed convergence on tau_e/e in
+  recovery and contamination at 0.97-0.99. Non-centred stays; target_accept
+  stays 0.99 (corpus at 0.9 had 0 divergences, but fixtures diverged at 0.97;
+  the lead kept 0.99 to protect corpus2's 0-divergence write gate).
+- **Cross-side learning (MAJOR 2): no cut.** Corpus copy, P1 vs
+  `side_prior_independent`: unlabelled 0.00, staff_return 0.40, ancient_claim
+  0.09 prior sd (threshold 0.5). Leak fixture: P1 cross-side pass-through
+  0.44 vs prior-implied s_b^2/(s_b^2+s_d^2) 0.73 (xfail, measured);
+  independent cross-side -0.11. Model reviewer: no BLOCKER/MAJOR; a cut would
+  be worse. Re-raise only if a regime moves > 0.5 prior sd on corpus2.
+- Casualties were sampled at nu floor 3 since P1; now back to 2, so casualty
+  results move vs the last corpus2 run for that reason alone.
+- TODO (reviewer, optional): scale-mixture battle effect to lower target_accept.
+
+Corpus2 refit (backup `data/backups/general_war_corpus2_20261029_pre_p1_refit.dump`),
+from `main` 490a5d1, `--continue-past-deferred`, logs `data/logs/refit20261029_*`:
+extract (36/36 overrides, 237 battles, 422 sides), resolve (4 saved + 2 new
+Haiku answers: Stalin at Berlin -> Q855, Wöhler -> Q64794; 50/50 links; warning
+duplicate generals 6), reconcile (0 divergences, rhat 1.004, wb gap 0.045),
+classify (25 saved + 2 new Sonnet answers: Gazala, Walaja), impute 110
+(kept-pair 0.643), model 132 (0 div, rhat 1.003), evaluate 5/5 (held-out
+0.780, Brier 0.164), report (93 headline). **Both reviewers: no blocker for an
+internal reading; not publishable.** Compression fixed (reconcile wb 0.60 ->
+0.63, impute 0.43 -> 0.64). Khalid #4 3.71 (small-sample, unbroken wins vs
+one-off opponents); Pyrrhus #14 0.70, driven by Beneventum coded indecisive.
+**Read handover-log §35**: record, and the open list (Beneventum outcome
+override, Waterloo Blücher role, Yamama/Kalka figures, §30 subordinate MAJOR).
+Next: those overrides (draft, user signs off), then corpus3 (decision 4).
+Scratch DBs and worktrees from §0 still exist; ask before removing.
 
 ## 0. In flight (2026-10-25): P1 validated on a corpus copy, NOT merged
 
