@@ -53,7 +53,11 @@ one-off opponents); Pyrrhus #14 0.70, driven by Beneventum coded indecisive.
 **Read handover-log §35**: record, and the open list (Beneventum outcome
 override, Waterloo Blücher role, Yamama/Kalka figures, §30 subordinate MAJOR).
 Next: those overrides (draft, user signs off), then corpus3 (decision 4).
-Scratch DBs and worktrees from §0 still exist; ask before removing.
+Cleanup 2026-10-29: all `.claude/worktrees/*` removed (branches kept; only
+`wip/noise-exp` is unmerged) and old session scratchpads deleted. The 26
+scratch DBs (everything but `general_war` and `general_war_corpus2`) are
+still there: the user asked to drop them, the permission classifier blocked
+DROP DATABASE, so the user drops them or allows it.
 
 ## 0. In flight (2026-10-25): P1 validated on a corpus copy, NOT merged
 
