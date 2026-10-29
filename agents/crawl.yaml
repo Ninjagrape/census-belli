@@ -31,7 +31,7 @@ params:
   max_retries: 3
   backoff_base: 2.0
   respect_robots: true
-  user_agent: "GeneralWAR/0.1 (academic research; contact@example.com)"
+  user_agent: "GeneralWARBot/0.1 (https://github.com/Ninjagrape/census-belli)"
   # Citation hops from a battle article. Only 0 (no citations) and 1 (the
   # allow-listed citations of each article) are implemented; any other value is
   # rejected at param parsing rather than silently behaving as 1.

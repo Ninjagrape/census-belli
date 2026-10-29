@@ -800,3 +800,51 @@ entries:
     source: "Chandler, The Art of Warfare in the Age of Marlborough, p. 306 (59,000-62,500); Duffy, The Army of Frederick the Great (1974), p. 234 (Austrians 37,654 regulars plus 2,000-3,000 hussars and Croats; Saxons 22,500 regulars plus 2,600 uhlans); as cited in Wikipedia, 'Battle of Hohenfriedberg', infobox strength2"
     note: "The combined Austro-Saxon army. Its rows were the Saxon 22,500, the Austrian 37,654 and the combined 59,000-62,500, read as rival totals, so reconcile settled at 29,687 against Prussia's 43,066, inverting a battle of near parity."
     reviewed: {by: lee, "on": 2026-10-23}
+
+
+  # --- corpus3 first run (approved 2026-10-29) ---
+  - id: ov-0101
+    kind: outcome
+    target: {battle: Battle_of_Beneventum_275_BC-cac46f3a44}
+    value:
+      Roman Republic: victory
+      Epirus: defeat
+    source: "Plutarch, Pyrrhus 25; Dionysius of Halicarnassus, Roman Antiquities 20.11-12; Wikipedia, 'Battle of Beneventum (275 BC)', infobox (Result: 'Inconclusive, Roman strategic victory', citing Kent 2020, p. 122) and section 'Aftermath' (Pyrrhus returns to Tarentum, then Epirus; Franke, Cambridge Ancient History vol. 7 part 2, pp. 481-483, for the Roman strategic victory)"
+    note: "Coded indecisive on both sides. Pyrrhus' wing was routed by the elephant stampede, he left Italy within the year, and Tarentum fell to Rome in 272. Rome held the field and ended the war, and the corpus grades on tactical result, so this is a Roman victory. Minority view, stated in the Wikipedia article and attributed to Kent 2020 p. 122: some historians call the battle a draw, because Pyrrhus kept a substantial army (he sailed home with 8,000 foot and 500 horse) and the Romans gained no great victory. A draw is a defensible reading, so this entry changes Pyrrhus' record from an unscored draw to a loss. The slug is the one that holds the sides. A second, sideless row 'Battle_of_Beneventum_275_BC-91d14155d6' (battle_id 32 in corpus2) is a shell and is not targeted."
+    reviewed: {by: lee, "on": 2026-10-29}
+
+  - id: ov-0102
+    kind: attribution
+    target: {battle: Battle_of_Waterloo-059b45c1f1, side: United Kingdom of Great Britain and Ireland}
+    value:
+      - {general: Q131691, role: field_commander, rank: 0, weight: 0.40}
+      - {general: Q153522, role: field_commander, rank: 0, weight: 0.25}
+      - {general: Earl of Uxbridge, role: subordinate, rank: 1, weight: 0.05, reports_to: Q131691}
+      - {general: "William, Prince of Orange", role: subordinate, rank: 1, weight: 0.04, reports_to: Q131691}
+      - {general: Q121734, role: subordinate, rank: 1, weight: 0.04, reports_to: Q131691}
+      - {general: Q336485, role: subordinate, rank: 1, weight: 0.04, reports_to: Q131691}
+      - {general: Q67913, role: subordinate, rank: 1, weight: 0.04, reports_to: Q153522}
+      - {general: Q165519, role: subordinate, rank: 1, weight: 0.05, reports_to: Q153522}
+      - {general: Friedrich von Bülow, role: subordinate, rank: 1, weight: 0.05, reports_to: Q153522}
+      - {general: Ludwig von Pirch, role: subordinate, rank: 1, weight: 0.04, reports_to: Q153522}
+    source: "Wikipedia, 'Battle of Waterloo', infobox (separate commanders and units for Wellington's army and Blücher's army; Blücher's army: I, II and IV Corps under Zieten, Pirch and Bülow) and sections 'Prelude' and 'Armies' (two independent armies; on 18 June Blücher assured Wellington of Prussian support)"
+    note: "The side holds two allied armies, and Blücher commanded the Prussian one in his own right, not as Wellington's subordinate: Wellington could not give him orders. The LLM made him a rank-1 subordinate with no reports_to. He becomes a co-field commander (rank 0) with his weight unchanged at 0.25, and the Prussian corps and staff officers report to him as rank 1. Wellington stays at 0.40, and all other weights are unchanged. The weights still sum to 1.00. The 0.40/0.25 split is the classifier's, not a scholarly measure of relative credit."
+    reviewed: {by: lee, "on": 2026-10-29}
+
+  - id: ov-0103
+    kind: troop_strength
+    target: {battle: Battle_of_the_Kalka_River-644c126698, side: Principality of Kiev}
+    value: {low: 10000, high: 30000}
+    scope: deployed
+    source: "D. G. Khrustalev (2013), Russkie na Kalke / Rus' i mongoly, pp. 85-86, 416 (c. 10,000 Rus' plus 5,000 Cuman cavalry); Leo de Hartog, Genghis Khan: Conqueror of the World (1989), p. 120 (30,000); Carl Fredrik Sverdrup, The Mongol Conquests (Helion 2017), p. 206 (about 8,000; calls 30,000 and 80,000 'enormous exaggerations'); John Fennell, The Crisis of Medieval Russia 1200-1304 (1983), pp. 66-68 (chronicle figures imply about 11,000); all as cited in Wikipedia, 'Battle of the Kalka River', section on army sizes"
+    note: "Current rows are one 'modern estimates' line of 60,000-100,000 (no author, no page), which reconciled to 61,620. The books above were not opened, and each figure is read through the Wikipedia article's citation. Gabriel (p. 98) and Munro give 80,000, and Soviet-era historians gave 80,000-100,000, but these trace to the chronicles. Astaykin and Pyatnov (2023) give 20,000-30,000 Rus' warriors plus an unknown number of Cumans and Black Klobuks. The range 10,000-30,000 covers the quantified modern estimates except Sverdrup's 8,000. No consensus; a judgement call the user approved. The Mongol side (reconciled 26,307) already sits near de Hartog's 20,000 and Gabriel's 23,000, so no entry for it."
+    reviewed: {by: lee, "on": 2026-10-29}
+
+  - id: ov-0104
+    kind: troop_strength
+    target: {battle: Operation_Torch-047bfa5615, side: Vichy France}
+    value: {point: 105000}
+    scope: deployed
+    source: "George F. Howe, Northwest Africa: Seizing the Initiative in the West (US Army in World War II, CMH 1957), chapter II 'Strategic Planning' ('55,000 were believed to be in Morocco, 50,000 in Algeria, and 15,000 in Tunisia'; footnote 6 cites AFHQ Intelligence Reports 1 and 2 of 11 and 18 September 1942, and notes that Barjot, Le débarquement du 8 novembre 1942, gives slightly lower totals based on troops actually present); Wikipedia, 'Operation Torch', section 'Vichy French forces' (60,000 Morocco, 50,000 Algeria, 15,000 Tunisia, citing Stamford Historical Society)"
+    note: "Current rows are '125,000 troops' (reconciled 127,728), which is all French North Africa including 15,000 in Tunisia where nobody landed. Morocco plus Algeria (Casablanca, Oran, Algiers) is 105,000 on Howe's Allied-intelligence planning figures; Wikipedia's 60,000 for Morocco would give 110,000. These are garrisons, not troops engaged: most units were not in action, and Barjot's present-for-duty totals are lower. No engaged-strength or per-landing figure exists. Paired with ov-0099, whose Allied total of 107,000 is the three task forces."
+    reviewed: {by: lee, "on": 2026-10-29}
