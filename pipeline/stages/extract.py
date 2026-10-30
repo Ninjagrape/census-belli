@@ -40,7 +40,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Final
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit
 
 import structlog
 
@@ -202,29 +202,67 @@ def _article_title(raw: str) -> str:
     return re.sub(r"\s*[-–—]\s*Wikipedia\s*$", "", title).strip()
 
 
-def _wikidata_index(wikidata_dir: Path) -> dict[str, Path]:
+def _article_key(url: str) -> str:
+    """Reduce an English Wikipedia URL to a spelling-independent identity.
+
+    ``article_filename`` hashes the raw URL, so the same article reached as
+    ``http://.../Battle_of_X_%281809%29`` and ``https://.../Battle_of_X_(1809)``
+    gets two slugs. The key ignores scheme, host, percent-encoding, spaces
+    versus underscores and fragments.
+
+    Args:
+        url: An article URL, encoded or literal.
+
+    Returns:
+        ``https://en.wikipedia.org`` plus the decoded path with underscores.
+    """
+    path = unquote(urlsplit(url).path).replace(" ", "_")
+    return f"https://en.wikipedia.org{path}"
+
+
+def _wikidata_index(
+    wikidata_dir: Path, article_slugs: dict[str, str] | None = None
+) -> dict[str, Path]:
     """Map each Wikidata entity file onto the article slug it belongs to.
 
     Wikidata files are keyed by Q-id, not by article, so the join runs
-    through the entity's ``enwiki`` sitelink and the crawl stage's own
-    filename rule. An entity with no English sitelink has no battle to
-    attach to and is skipped.
+    through the entity's ``enwiki`` sitelink. Sitelinks use literal
+    characters while crawled URLs are often percent-encoded, so the sitelink
+    is matched to the crawled article by normalised URL rather than by
+    ``article_filename`` of the raw string. An entity matching no crawled
+    article falls back to the filename rule and becomes a Wikidata-only
+    battle. An entity with no English sitelink is skipped.
 
     Args:
         wikidata_dir: The ``data/raw/wikidata`` directory.
+        article_slugs: Normalised article key to the slug of the crawled
+            article, as built from the crawl state. Empty or None disables
+            the match.
 
     Returns:
         Article slug to entity file.
     """
     index: dict[str, Path] = {}
+    known = article_slugs or {}
+    unmatched: list[str] = []
 
     for path in sorted(wikidata_dir.glob("*.json")):
         payload = _read_json(path)
         if payload is None:
             continue
         for url in _enwiki_urls(payload):
-            index[Path(article_filename(url)).stem] = path
+            slug = known.get(_article_key(url))
+            if slug is None:
+                unmatched.append(url)
+                slug = Path(article_filename(url)).stem
+            index[slug] = path
 
+    if unmatched:
+        logger.info(
+            "wikidata_entities_without_article",
+            count=len(unmatched),
+            sample=unmatched[:5],
+        )
     return index
 
 
@@ -317,15 +355,16 @@ def discover_battles(raw_root: Path = RAW_ROOT) -> list[RawBattle]:
         for path in sorted(dbpedia_dir.glob("*.json")):
             battles.setdefault(path.stem, RawBattle(slug=path.stem)).dbpedia_path = path
 
+    crawl_urls = _crawl_urls(raw_root)
     wikidata_dir = raw_root / _WIKIDATA_DIR
     if wikidata_dir.is_dir():
         matched = 0
-        for slug, path in _wikidata_index(wikidata_dir).items():
+        article_slugs = {_article_key(url): slug for slug, url in crawl_urls.items()}
+        for slug, path in _wikidata_index(wikidata_dir, article_slugs).items():
             battles.setdefault(slug, RawBattle(slug=slug)).wikidata_path = path
             matched += 1
         logger.info("wikidata_entities_joined_to_articles", joined=matched)
 
-    crawl_urls = _crawl_urls(raw_root)
     for battle in battles.values():
         battle.wikipedia_url = crawl_urls.get(battle.slug, "")
         if battle.article_path is None:

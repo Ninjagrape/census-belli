@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import structlog.testing
 
 from pipeline.crawlers import citations
 from pipeline.crawlers.wikipedia import article_filename
@@ -283,3 +284,76 @@ def test_a_limited_run_leaves_the_full_outputs_alone(tmp_path: Path) -> None:
     assert (processed / "battles.limited.jsonl").exists()
     for name in ("commanders_raw", "troop_reports", "casualty_reports"):
         assert (processed / f"{name}.limited.jsonl").exists()
+
+
+# ─── Wikidata join across URL spellings ──────────────────────────────────────
+
+
+def _entity(qid: str, sitelink: str) -> dict[str, Any]:
+    return {"entities": {qid: {"sitelinks": {"enwiki": {"url": sitelink}}}}}
+
+
+def _raw_with_crawled(root: Path, crawl_url: str, sitelink: str | None) -> str:
+    slug = _slug(crawl_url)
+    (root / "battles_html").mkdir(parents=True)
+    (root / "battles_html" / f"{slug}.html").write_text("<html></html>", encoding="utf-8")
+    (root / "crawl_state.json").write_text(json.dumps({"battle_urls": [crawl_url]}), "utf-8")
+    if sitelink is not None:
+        (root / "wikidata").mkdir()
+        (root / "wikidata" / "Q1.json").write_text(
+            json.dumps(_entity("Q1", sitelink)), encoding="utf-8"
+        )
+    return slug
+
+
+@pytest.mark.parametrize(
+    ("crawl_url", "sitelink"),
+    [
+        (
+            "https://en.wikipedia.org/wiki/Battle_of_Alc%C3%A1ntara_%281809%29",
+            "https://en.wikipedia.org/wiki/Battle_of_Alcántara_(1809)",
+        ),
+        (
+            "http://en.wikipedia.org/wiki/Battle_of_Actium",
+            "https://en.wikipedia.org/wiki/Battle_of_Actium",
+        ),
+        (
+            "https://en.wikipedia.org/wiki/Battle_of_Akroinon_%28732%29",
+            "https://en.wikipedia.org/wiki/Battle_of_Akroinon_(732)",
+        ),
+    ],
+)
+def test_a_sitelink_joins_the_crawled_article_whatever_its_spelling(
+    tmp_path: Path, crawl_url: str, sitelink: str
+) -> None:
+    slug = _raw_with_crawled(tmp_path, crawl_url, sitelink)
+
+    battles = extract_stage.discover_battles(tmp_path)
+
+    assert [b.slug for b in battles] == [slug]
+    assert battles[0].article_path is not None
+    assert battles[0].wikidata_path is not None
+
+
+def test_an_entity_without_an_article_keeps_its_own_battle_and_is_counted(
+    tmp_path: Path,
+) -> None:
+    slug = _raw_with_crawled(
+        tmp_path, "https://en.wikipedia.org/wiki/Battle_of_Actium", None
+    )
+    (tmp_path / "wikidata").mkdir()
+    orphan = "https://en.wikipedia.org/wiki/Battle_of_Beneventum"
+    (tmp_path / "wikidata" / "Q2.json").write_text(
+        json.dumps(_entity("Q2", orphan)), encoding="utf-8"
+    )
+
+    with structlog.testing.capture_logs() as logs:
+        battles = extract_stage.discover_battles(tmp_path)
+
+    by_slug = {b.slug: b for b in battles}
+    assert set(by_slug) == {slug, _slug(orphan)}
+    assert by_slug[_slug(orphan)].article_path is None
+    assert by_slug[_slug(orphan)].wikidata_path is not None
+    event = next(e for e in logs if e["event"] == "wikidata_entities_without_article")
+    assert event["count"] == 1
+    assert event["sample"] == [orphan]
