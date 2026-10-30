@@ -486,8 +486,7 @@ def write_identity(
     placements: list[tuple[Mention, int, int, float]] = []
     for group in identity.groups:
         for mention in group.mentions:
-            # Slug first: it is unique per article, whereas two battles can share a name.
-            battle_id = battles.get(mention.battle_slug) or battles.get(mention.battle_name)
+            battle_id = _battle_id_for(mention, battles)
             if battle_id is None:
                 counts.battles_not_in_db += 1
                 logger.debug("resolve_battle_not_in_database", battle=mention.battle_name)
@@ -560,6 +559,22 @@ def write_identity(
     return general_id
 
 
+def _battle_id_for(mention: Mention, battles: dict[str, int]) -> int | None:
+    """Look a mention's battle up, slug first.
+
+    The slug is unique per article, whereas two battles can share a name, in
+    which case the name key is absent from the index.
+
+    Args:
+        mention: A commander mention.
+        battles: Battle slug and name to id, from :func:`load_battle_index`.
+
+    Returns:
+        The battle id, or None when the battle is not in the database.
+    """
+    return battles.get(mention.battle_slug) or battles.get(mention.battle_name)
+
+
 def _log_mentions(
     conn: Any,
     mentions: list[Mention],
@@ -576,7 +591,7 @@ def _log_mentions(
     Args:
         conn: An open database connection.
         mentions: The mentions to record.
-        battles: Battle name to id.
+        battles: Battle slug and name to id.
         sides: Side id by (battle id, label).
         counts: Counters to accumulate into.
         field_name: The ``missing_data_log.field_name`` to write under.
@@ -590,7 +605,7 @@ def _log_mentions(
     """
     homeless: list[Mention] = []
     for mention in mentions:
-        battle_id = battles.get(mention.battle_name)
+        battle_id = _battle_id_for(mention, battles)
         if battle_id is None:
             homeless.append(mention)
             continue
@@ -637,7 +652,7 @@ def log_unresolved(
     Args:
         conn: An open database connection.
         mentions: Every mention belonging to an unresolved group.
-        battles: Battle name to id.
+        battles: Battle slug and name to id.
         sides: Side id by (battle id, label).
         counts: Counters to accumulate into.
         clear_first: Whether to delete this stage's previous rows. True on a
@@ -665,7 +680,7 @@ def log_unresolved(
 
     homeless: list[Mention] = []
     for mention in mentions:
-        if mention.battle_name not in battles:
+        if _battle_id_for(mention, battles) is None:
             counts.battles_not_in_db += 1
 
     homeless.extend(
@@ -755,7 +770,7 @@ def side_of(
     Returns:
         The battle and side ids, or None when either is not in the database.
     """
-    battle_id = battles.get(mention.battle_slug) or battles.get(mention.battle_name)
+    battle_id = _battle_id_for(mention, battles)
     if battle_id is None:
         return None
     side_id = sides.get((battle_id, mention.side_label))

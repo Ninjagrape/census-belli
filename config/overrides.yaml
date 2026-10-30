@@ -848,3 +848,33 @@ entries:
     source: "George F. Howe, Northwest Africa: Seizing the Initiative in the West (US Army in World War II, CMH 1957), chapter II 'Strategic Planning' ('55,000 were believed to be in Morocco, 50,000 in Algeria, and 15,000 in Tunisia'; footnote 6 cites AFHQ Intelligence Reports 1 and 2 of 11 and 18 September 1942, and notes that Barjot, Le débarquement du 8 novembre 1942, gives slightly lower totals based on troops actually present); Wikipedia, 'Operation Torch', section 'Vichy French forces' (60,000 Morocco, 50,000 Algeria, 15,000 Tunisia, citing Stamford Historical Society)"
     note: "Current rows are '125,000 troops' (reconciled 127,728), which is all French North Africa including 15,000 in Tunisia where nobody landed. Morocco plus Algeria (Casablanca, Oran, Algiers) is 105,000 on Howe's Allied-intelligence planning figures; Wikipedia's 60,000 for Morocco would give 110,000. These are garrisons, not troops engaged: most units were not in action, and Barjot's present-for-duty totals are lower. No engaged-strength or per-landing figure exists. Paired with ov-0099, whose Allied total of 107,000 is the three task forces."
     reviewed: {by: lee, "on": 2026-10-29}
+
+  # --- corpus3: dynasty names in commander fields (approved 2026-10-30) ---
+  - id: ov-0105
+    kind: commander_link
+    target: {battle: Siege_of_Namwon-a121a0a4cb, side: Korean Garrison, mention: "Ming:"}
+    value: none
+    source: "Wikipedia, 'Siege of Namwon', infobox (commander field lists the Ming dynasty)"
+    note: "'Ming' is the dynasty named in the infobox commander field, not a person. Resolve made it a corpus-local general linked to four Imjin War sieges, so the mention is unlinked."
+    reviewed: {by: lee, "on": 2026-10-30}
+  - id: ov-0106
+    kind: commander_link
+    target: {battle: Siege_of_Pyongyang_1593-7979707e96, side: Ming dynasty, mention: Ming}
+    value: none
+    source: "Wikipedia, 'Siege of Pyongyang 1593', infobox (commander field lists the Ming dynasty)"
+    note: "'Ming' is the dynasty named in the infobox commander field, not a person. Resolve made it a corpus-local general linked to four Imjin War sieges, so the mention is unlinked."
+    reviewed: {by: lee, "on": 2026-10-30}
+  - id: ov-0107
+    kind: commander_link
+    target: {battle: Siege_of_Suncheon-8bafceb374, side: Joseon and Ming dynasties, mention: Ming}
+    value: none
+    source: "Wikipedia, 'Siege of Suncheon', infobox (commander field lists the Ming dynasty)"
+    note: "'Ming' is the dynasty named in the infobox commander field, not a person. Resolve made it a corpus-local general linked to four Imjin War sieges, so the mention is unlinked."
+    reviewed: {by: lee, "on": 2026-10-30}
+  - id: ov-0108
+    kind: commander_link
+    target: {battle: Siege_of_Ulsan-06b1513ec8, side: Joseon and Ming dynasty, mention: "Ming:"}
+    value: none
+    source: "Wikipedia, 'Siege of Ulsan', infobox (commander field lists the Ming dynasty)"
+    note: "'Ming' is the dynasty named in the infobox commander field, not a person. Resolve made it a corpus-local general linked to four Imjin War sieges, so the mention is unlinked."
+    reviewed: {by: lee, "on": 2026-10-30}
