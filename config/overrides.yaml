@@ -878,3 +878,2243 @@ entries:
     source: "Wikipedia, 'Siege of Ulsan', infobox (commander field lists the Ming dynasty)"
     note: "'Ming' is the dynasty named in the infobox commander field, not a person. Resolve made it a corpus-local general linked to four Imjin War sieges, so the mention is unlinked."
     reviewed: {by: lee, "on": 2026-10-30}
+
+  # --- corpus3 review 2026-10-30 (proposed by historiography-reviewer, approved by user subject to verification) ---
+  - id: ov-0109
+    kind: general_merge
+    target: {general: "Jean Moreau"}
+    value: Q333806
+    source: "Wikidata Q333806 (Jean Victor Marie Moreau, French General 1763-1813; wbgetentities); Wikipedia, 'Jean Victor Marie Moreau' (Rhine 1796-97, Dresden 1813)"
+    note: "Ten battles (Tourcoing to Dresden) sit on a local row; Q333806 holds only Neresheim."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0110
+    kind: general_merge
+    target: {general: "Marshal Suchet"}
+    value: Q316518
+    source: "Wikidata Q316518 (Louis-Gabriel Suchet, 1770-1826)"
+    note: "Local duplicate of Suchet: 7 Spanish-campaign battles split from his 11 on Q316518."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0111
+    kind: general_merge
+    target: {general: "Count of Clerfayt"}
+    value: Q78696
+    source: "Wikidata Q78696 (Count of Clerfayt, Austrian marshal)"
+    note: "13 battles, 1792-95, on a local row. All are the one marshal."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0112
+    kind: general_merge
+    target: {general: "Thomas J. \"Stonewall\" Jackson"}
+    value: Q216124
+    source: "Wikidata Q216124 (Stonewall Jackson)"
+    note: "Front Royal, McDowell and White Oak Swamp are split from his 11 other battles."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0113
+    kind: general_merge
+    target: {general: "François Lefebvre"}
+    value: Q83808
+    source: "Wikidata Q83808 (François Joseph Lefebvre, Marshal of France)"
+    note: "Six battles (1795 and 1809) on a local row."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0114
+    kind: general_merge
+    target: {general: "David D. Porter"}
+    value: Q387130
+    source: "Wikidata Q387130 (David Dixon Porter, USN admiral)"
+    note: "Six river and coastal battles on a local row; Q387130 holds one. Baton Rouge 1862 is on the local row only because the infobox links 'David D. Porter' there; the Essex was commanded by William D. Porter, so that one battle is probably wrong."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0115
+    kind: general_merge
+    target: {general: "Daniel H. Hill"}
+    value: Q1161058
+    source: "Wikidata Q1161058 (Daniel Harvey Hill)"
+    note: "Local duplicate of D. H. Hill, whose linked row has 3 battles."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0116
+    kind: general_merge
+    target: {general: "Friedrich von Bülow"}
+    value: Q63023
+    source: "Wikidata Q63023 (Friedrich Wilhelm Bülow von Dennewitz, 1755-1816); Hoogstraten, Antwerp, Laon and Waterloo are his battles"
+    note: "Local duplicate."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0117
+    kind: general_merge
+    target: {general: "Karl von Wrede"}
+    value: Q64759
+    source: "Wikidata Q64759 (Carl Philipp von Wrede, 1767-1838)"
+    note: "Local duplicate."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0118
+    kind: general_merge
+    target: {general: "Gebhard Blücher"}
+    value: Q153522
+    source: "Wikidata Q153522 (Gebhard Leberecht von Blücher)"
+    note: "La Rothière and Paris 1814 sit on a local duplicate."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0119
+    kind: general_merge
+    target: {general: "Nicolas Soult"}
+    value: Q296023
+    source: "Wikidata Q296023 (Jean-de-Dieu Soult)"
+    note: "Local duplicate with two battles."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0120
+    kind: general_merge
+    target: {general: "Jan de Winter"}
+    value: Q1376953
+    source: "Wikidata Q1376953 (Jan Willem de Winter, Dutch admiral)"
+    note: "Siege of Ypres 1794 is split from his 3 other battles."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0121
+    kind: commander_link
+    target: {battle: Battle_of_Alexandria_1801-3f8ddb124a, side: United Kingdom, mention: John Moore}
+    value: Q711378
+    source: "Wikidata Q711378 (John Moore, British Army general 1761-1809)"
+    note: "Sir John Moore. The local row also carries the 1759 Martinique commander, a different man."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0122
+    kind: commander_link
+    target: {battle: Battle_of_Corunna-44723d44c4, side: United Kingdom, mention: John Moore}
+    value: Q711378
+    source: "Wikidata Q711378 (John Moore, 1761-1809)"
+    note: "Sir John Moore, killed at Corunna."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0123
+    kind: commander_link
+    target: {battle: Invasion_of_Martinique_1759-5adaf98222, side: Kingdom of Great Britain, mention: John Moore}
+    value: none
+    source: "Wikipedia, 'Invasion of Martinique (1759)'; Wikidata Q711378 gives Sir John Moore's birth as 1761"
+    note: "A namesake, the naval commander in 1759. I did not find his Q-id, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0124
+    kind: commander_link
+    target: {battle: Battle_of_Alexandria_1801-3f8ddb124a, side: United Kingdom, mention: Eyre Coote}
+    value: Q3301855
+    source: "Wikidata Q3301855 (Eyre Coote, British general 1759-1823); Wikipedia, 'Eyre Coote (British Army officer, born 1762)' (Egypt 1801)"
+    note: "The younger Coote. Wikidata's description says 1759 but its birth statement (P569) is 1762, matching the Wikipedia title; either way he was alive in 1801."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0125
+    kind: commander_link
+    target: {battle: Battle_of_Wandiwash-a9a1162f51, side: British East India Company, mention: Sir Eyre Coote}
+    value: Q2613325
+    source: "Wikidata Q2613325 (Eyre Coote, British Army general 1726-1783)"
+    note: "The elder Coote. Extract wrote the mention as 'Sir Eyre Coote' here ('Eyre Coote' elsewhere). The Pondicherry entry is ov-0134."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0126
+    kind: commander_link
+    target: {battle: Battle_of_Quatre_Bras-85d71570b9, side: "Seventh Coalition:", mention: William of Orange}
+    value: Q154287
+    source: "Wikidata Q154287 (William II of the Netherlands, 1792-1849)"
+    note: "Commanded I Corps in 1815 (Q154287 is William II, 1792-1849). Menin and Fleurus are the Hereditary Prince, later William I (Q2079957): ov-0135 and ov-0136."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0127
+    kind: commander_link
+    target: {battle: Battle_of_Epierre-f20237d395, side: Republican France, mention: François Kellermann}
+    value: Q356933
+    source: "Wikidata Q356933 (François Christophe de Kellermann, 1735-1820, the father)"
+    note: "Epierre 1793 is the father. Alba de Tormes, Marengo and Mormant link to the son, Q138105: ov-0137 to ov-0139."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0128
+    kind: outcome
+    target: {battle: Battle_of_Perryville-3163c655ba}
+    value: {United States (Union): indecisive, Confederate States: indecisive}
+    source: "Wikipedia, 'Battle of Perryville', Aftermath (tactical Confederate success, strategic Union success)"
+    note: "Same treatment as Belmont (ov-0002). Union losses were also higher."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0129
+    kind: outcome
+    target: {battle: First_Battle_of_Polotsk-cfe522b69f}
+    value: {French Empire: indecisive, Russian Empire: indecisive}
+    source: "Wikipedia, 'First Battle of Polotsk', lead ('tactically ... a draw'); Clodfelter (French victory) and Bodart (neither) as cited there"
+    note: "The strategic Russian success is not scored on the corpus's tactical scale."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0130
+    kind: outcome
+    target: {battle: Battle_of_Rhegium_278_BC-5c03ddb36e}
+    value: {Roman Republic: indecisive, Epirus: indecisive}
+    source: "Wikipedia, 'Battle of Rhegium (278 BC)', infobox result ('Control maintained by the Campanian garrison; Pyrrhus bypasses the straits')"
+    note: "No engagement occurred, and the garrison had turned on Rome. Exclude the battle if the model allows it."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0131
+    kind: outcome
+    target: {battle: Siege_of_Dunkirk_1944_1945-95250a8884}
+    value: {Canada: indecisive, Nazi Germany: indecisive}
+    source: "Wikipedia, 'Siege of Dunkirk (1944-1945)', infobox ('See End of war': garrison surrendered 9 May 1945)"
+    note: "It ended with the German surrender, not an Allied assault."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0132
+    kind: outcome
+    target: {battle: Battle_of_Ammunition_Hill-d57cf485fa}
+    value: {side 1: victory, side 2: defeat}
+    source: "Wikipedia, 'Battle of Ammunition Hill' (Israeli victory); infobox result \"Israeli victory\"; side 1 holds Gur, Narkiss and Yafe (flagged Israel in the infobox)."
+    note: "Both outcomes are NULL. The second side holds Hussein and Zaid ibn Shaker (flagged Jordan)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0133
+    kind: side_polity
+    target: {battle: Battle_of_Ammunition_Hill-d57cf485fa, side: side 1}
+    value: Israel
+    source: "Wikipedia, 'Battle of Ammunition Hill'"
+    note: "The placeholder label left the polity empty. Side 2 is ov-0140."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0134
+    kind: commander_link
+    target: {battle: Siege_of_Pondicherry_1760-40beb71765, side: Kingdom of Great Britain, mention: Eyre Coote}
+    value: Q2613325
+    source: "Wikidata Q2613325 (Eyre Coote, British Army general 1726-1783); Wikipedia, 'Siege of Pondicherry (1760)'"
+    note: "The elder Coote, who took Pondicherry in 1761 after Wandiwash (ov-0125). The same local row also carries Alexandria 1801 (ov-0124)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0135
+    kind: commander_link
+    target: {battle: Battle_of_Menin_1793-4943b0ee05, side: Dutch Republic, mention: Prince William of Orange}
+    value: Q2079957
+    source: "Wikidata Q2079957 (William I of the Netherlands, 1772-1843); Wikipedia, 'Battle of Wervik (1793)', infobox and lead (commanded by William, Hereditary Prince of Orange, with his brother Prince Frederick)"
+    note: "The infobox itself links this mention to William I. The Hereditary Prince, aged 21. Q154287 is William II (born 1792) and is wrong here."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0136
+    kind: commander_link
+    target: {battle: Battle_of_Fleurus_1794-c7045587a8, side: Habsburg Monarchy, mention: William of Orange}
+    value: Q2079957
+    source: "Wikidata Q2079957 (William I of the Netherlands, 1772-1843); Wikipedia, 'Battle of Fleurus (1794)', infobox commander2 (links William of Orange to William I)"
+    note: "The Hereditary Prince commanded the Allied left wing. The article body calls him 'William V', which is his father, the stadtholder, who was not in the field."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0137
+    kind: commander_link
+    target: {battle: Battle_of_Alba_de_Tormes-eaeeb6509a, side: French Empire, mention: François Kellermann}
+    value: Q138105
+    source: "Wikidata Q138105 (François Etienne de Kellermann, French cavalry general 1770-1835)"
+    note: "The son, a cavalry general in Spain in 1809 (already linked to Q138105 at Carpio and Waterloo). The local row mixes him with the father."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0138
+    kind: commander_link
+    target: {battle: Battle_of_Marengo-811cf0c0d7, side: France, mention: François Kellermann}
+    value: Q138105
+    source: "Wikidata Q138105 (François Etienne de Kellermann, 1770-1835); the cavalry charge at Marengo is the son's"
+    note: "Born 1770, so a brigade commander in 1800; the father was 65 and not in Italy."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0139
+    kind: commander_link
+    target: {battle: Battle_of_Mormant-20d1cae266, side: France, mention: François Kellermann}
+    value: Q138105
+    source: "Wikidata Q138105 (François Etienne de Kellermann, 1770-1835); Wikipedia, 'Battle of Mormant', infobox (links the mention to François Étienne de Kellermann)"
+    note: "The infobox link names the son."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0140
+    kind: side_polity
+    target: {battle: Battle_of_Ammunition_Hill-d57cf485fa, side: side 2}
+    value: Jordan
+    source: "Wikipedia, 'Battle of Ammunition Hill', infobox (commander2 flagged Jordan: Hussein, Zaid ibn Shaker)"
+    note: "The placeholder label left the polity empty. Pair of ov-0133."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0141
+    kind: commander_link
+    target: {battle: Battle_of_Baton_Rouge_1862-4f0da14a4d, side: United States, mention: David D. Porter}
+    value: none
+    source: "Wikipedia, 'Battle of Baton Rouge (1862)' (USS Essex under Commander William D. Porter); Wikidata Q387130 is David Dixon Porter"
+    note: "The infobox links David D. Porter, but the Essex at Baton Rouge was under his brother William D. Porter. Unlinked so ov-0114 does not move this battle onto David Dixon Porter."
+    reviewed: {by: lee, "on": 2026-10-30}
+
+  # --- corpus3 review 2026-10-30, extra split sweep (historiography-reviewer; Q-ids verified with wbgetentities) ---
+  - id: ov-0160
+    kind: general_merge
+    target: {general: "Bon-Adrien Moncey"}
+    value: Q350662
+    source: "Wikidata Q350662 (Bon-Adrien Jeannot de Moncey, 1754-1842); Wikipedia, 'Bon-Adrien Jeannot de Moncey'"
+    note: "Local row 1955, 1 (Paris 1814) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0161
+    kind: general_merge
+    target: {general: "Jeannot de Moncey"}
+    value: Q350662
+    source: "Wikidata Q350662 (Bon-Adrien Jeannot de Moncey, 1754-1842); Wikipedia, 'Bon-Adrien Jeannot de Moncey'"
+    note: "Local row 3309, 1 (Second Siege of Zaragoza 1808) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0162
+    kind: general_merge
+    target: {general: "Bogislav von Tauentzien"}
+    value: Q75738
+    source: "Wikidata Q75738 (Bogislav Friedrich Emanuel von Tauentzien, 1760-1824); Wikipedia, 'Bogislav Friedrich Emanuel von Tauentzien'"
+    note: "Local row 1009, 2 (Schleiz 1806, Dennewitz 1813) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0163
+    kind: general_merge
+    target: {general: "Count Baillet de Latour"}
+    value: Q84514
+    source: "Wikidata Q84514 (Maximilian Anton Karl, Count Baillet de Latour, 1737-1806); Wikipedia, 'Maximilian Baillet de Latour'"
+    note: "Local row 2211, 1 (Sprimont 1794) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0164
+    kind: general_merge
+    target: {general: "Count Latour"}
+    value: Q84514
+    source: "Wikidata Q84514 (Maximilian Anton Karl, Count Baillet de Latour, 1737-1806); Wikipedia, 'Maximilian Baillet de Latour'"
+    note: "Local row 1224, 3 (Rastatt, Neresheim, Friedberg 1796) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0165
+    kind: general_merge
+    target: {general: "Charles-Alexandre Linois"}
+    value: Q926692
+    source: "Wikidata Q926692 (Charles-Alexandre Durand Linois, 1761-1848); Wikipedia, 'Charles-Alexandre Durand Linois'"
+    note: "Local row 2045, 2 (1804) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0166
+    kind: general_merge
+    target: {general: "Charles II, Duke of Brunswick-Wolfenbüttel"}
+    value: Q58773
+    source: "Wikidata Q58773 (Charles William Ferdinand, Duke of Brunswick, 1735-1806); Wikipedia, 'Charles William Ferdinand, Duke of Brunswick'"
+    note: "Local row 2379, 1 (Verdun 1792) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0167
+    kind: general_merge
+    target: {general: "Duke of Brunswick-Wolfenbüttel"}
+    value: Q58773
+    source: "Wikidata Q58773 (Charles William Ferdinand, Duke of Brunswick, 1735-1806); Wikipedia, 'Charles William Ferdinand, Duke of Brunswick'"
+    note: "Local row 2996, 1 (Second Wissembourg 1793); medium confidence, the only reigning duke in 1793 battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0168
+    kind: general_merge
+    target: {general: "Heinrich XV, Prince Reuss of Greiz"}
+    value: Q508415
+    source: "Wikidata Q508415 (Heinrich XV Reuss, Austrian field marshal, 1751-1825); Wikipedia, 'Heinrich XV, Prince Reuss of Greiz'"
+    note: "Local row 2076, 1 (Rivoli 1797; the article names Heinrich of Reuss-Plauen leading a column) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0169
+    kind: general_merge
+    target: {general: "Étienne Bierre"}
+    value: Q3592194
+    source: "Wikidata Q3592194 (Étienne Heudelet de Bierre, 1770-1857); Wikipedia, 'Étienne Heudelet de Bierre'"
+    note: "Local row 651, 1 (1809) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0170
+    kind: general_merge
+    target: {general: "Feldmarshall Lieutenant Ernst Gideon von Laudon"}
+    value: Q440276
+    source: "Wikidata Q440276 (Ernst Gideon von Laudon, 1717-1790); Wikipedia, 'Ernst Gideon von Laudon'"
+    note: "Local row 1962, 1 (Peterswalde 1759) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0171
+    kind: general_merge
+    target: {general: "General von Laudon"}
+    value: Q440276
+    source: "Wikidata Q440276 (Ernst Gideon von Laudon, 1717-1790); Wikipedia, 'Ernst Gideon von Laudon'"
+    note: "Local row 3109, 1 (Siege of Glatz 1760) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0172
+    kind: general_merge
+    target: {general: "Ferdinand Fyodorovich Wintzingerode"}
+    value: Q64442
+    source: "Wikidata Q64442 (Ferdinand von Wintzingerode, 1770-1818); Wikipedia, 'Ferdinand von Wintzingerode'"
+    note: "Local row 957, 1 (1814) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0173
+    kind: general_merge
+    target: {general: "François Bastien Sébastiani"}
+    value: Q115849
+    source: "Wikidata Q115849 (Horace Sébastiani, 1772-1851); Wikipedia, 'Horace Sébastiani'"
+    note: "Local row 2615, 1 (1813) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0174
+    kind: general_merge
+    target: {general: "François Schwarz"}
+    value: Q3086078
+    source: "Wikidata Q3086078 (François Xavier de Schwarz, 1762-1826); Wikipedia, 'François Xavier de Schwarz'"
+    note: "Local row 2835, 1 (1808) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0175
+    kind: general_merge
+    target: {general: "Friedrich Seydlitz"}
+    value: Q61714
+    source: "Wikidata Q61714 (Friedrich Wilhelm von Seydlitz, 1721-1773); Wikipedia, 'Friedrich Wilhelm von Seydlitz'"
+    note: "Local row 1372, 1 (1758) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0176
+    kind: general_merge
+    target: {general: "Georges Dufour"}
+    value: Q3102959
+    source: "Wikidata Q3102959 (Georges Joseph Dufour, 1758-1820); Wikipedia, 'Georges Joseph Dufour'"
+    note: "Local row 1331, 1 (Handschuhsheim 1795) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0177
+    kind: general_merge
+    target: {general: "Gustavus W. Smith"}
+    value: Q1556831
+    source: "Wikidata Q1556831 (Gustavus Woodson Smith, 1821-1896); Wikipedia, 'Gustavus Woodson Smith'"
+    note: "Local row 441, 2 (Atlanta, Honey Hill 1864) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0178
+    kind: general_merge
+    target: {general: "James Fagan"}
+    value: Q1680390
+    source: "Wikidata Q1680390 (James Fleming Fagan, 1828-1893); Wikipedia, 'James Fleming Fagan'"
+    note: "Local row 1178, 1 (1864) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0179
+    kind: general_merge
+    target: {general: "James R. Chalmers"}
+    value: Q975506
+    source: "Wikidata Q975506 (James Ronald Chalmers, 1831-1898); Wikipedia, 'James R. Chalmers'"
+    note: "Local row 616, 4 (1862-1864) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0180
+    kind: general_merge
+    target: {general: "Honoré Reille"}
+    value: Q281781
+    source: "Wikidata Q281781 (Honoré Charles Reille, 1774-1860); Wikipedia, 'Honoré Charles Reille'"
+    note: "Local row 3001, 2 (1808) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0181
+    kind: general_merge
+    target: {general: "Joseph Dupleix"}
+    value: Q560071
+    source: "Wikidata Q560071 (Joseph François Dupleix, 1697-1763); Wikipedia, 'Joseph François Dupleix'"
+    note: "Local row 3067, 1 (1748) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0182
+    kind: general_merge
+    target: {general: "Juan de Vives"}
+    value: Q6300532
+    source: "Wikidata Q6300532 (Juan Miguel de Vives y Feliu, 1750-1809); Wikipedia, 'Juan Miguel de Vives'"
+    note: "Local row 1803, 1 (1808) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0183
+    kind: general_merge
+    target: {general: "Karl W. von Toll"}
+    value: Q571642
+    source: "Wikidata Q571642 (Karl Wilhelm von Toll, 1777-1842); Wikipedia, 'Karl Wilhelm von Toll'"
+    note: "Local row 633, 1 (1812) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0184
+    kind: general_merge
+    target: {general: "Kurt v.d. Chevallerie"}
+    value: Q68452
+    source: "Wikidata Q68452 (Kurt von der Chevallerie, 1891-1945); Wikipedia, 'Kurt von der Chevallerie'"
+    note: "Local row 2934, 1 (1944) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0185
+    kind: general_merge
+    target: {general: "Kurt von Schwerin"}
+    value: Q70874
+    source: "Wikidata Q70874 (Kurt Christoph Graf von Schwerin, 1684-1757); Wikipedia, 'Kurt Christoph von Schwerin'"
+    note: "Local row 3024, 1 (Siege of Brieg 1741) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0186
+    kind: general_merge
+    target: {general: "Count Schwerin"}
+    value: Q70874
+    source: "Wikidata Q70874 (Kurt Christoph Graf von Schwerin, 1684-1757); Wikipedia, 'Kurt Christoph von Schwerin'"
+    note: "Local row 1806, 1 (Mollwitz 1741) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0187
+    kind: general_merge
+    target: {general: "L. Gouvion Saint-Cyr"}
+    value: Q347652
+    source: "Wikidata Q347652 (Laurent Gouvion Saint-Cyr, 1764-1830); Wikipedia, 'Laurent de Gouvion Saint-Cyr'"
+    note: "Local row 818, 3 (Castelfranco Veneto 1805, Roses and Molins de Rey 1808) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0188
+    kind: general_merge
+    target: {general: "Levin A. von Bennigsen"}
+    value: Q57777
+    source: "Wikidata Q57777 (Levin August von Bennigsen, 1745-1826); Wikipedia, 'Levin August von Bennigsen'"
+    note: "Local row 2042, 1 (1806) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0189
+    kind: general_merge
+    target: {general: "Louis de Contades"}
+    value: Q454837
+    source: "Wikidata Q454837 (Louis Georges Érasme de Contades, 1704-1795); Wikipedia, 'Louis Georges Érasme de Contades'"
+    note: "Local row 1777, 1 (1759) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0190
+    kind: general_merge
+    target: {general: "Louis H. Loison"}
+    value: Q643722
+    source: "Wikidata Q643722 (Louis Henri Loison, 1771-1816); Wikipedia, 'Louis Henri Loison'"
+    note: "Local row 2764, 1 (1810) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0191
+    kind: general_merge
+    target: {general: "Magnus G. von Essen"}
+    value: Q2996594
+    source: "Wikidata Q2996594 (Magnus Gustav von Essen, 1759-1813); Wikipedia, 'Magnus Gustav von Essen'"
+    note: "Local row 3245, 1 (1812) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0192
+    kind: general_merge
+    target: {general: "Mahé de La Bourdonnais"}
+    value: Q828583
+    source: "Wikidata Q828583 (Bertrand-François Mahé de La Bourdonnais, 1699-1753); Wikipedia, 'Bertrand-François Mahé de La Bourdonnais'"
+    note: "Local row 3066, 1 (1748) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0193
+    kind: general_merge
+    target: {general: "Marquis La Romana"}
+    value: Q717699
+    source: "Wikidata Q717699 (Pedro Caro, 3rd Marquis of la Romana, 1761-1811); Wikipedia, 'Pedro Caro Sureda, 3rd Marquis of La Romana'"
+    note: "Local row 1718, 1 (1808) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0194
+    kind: general_merge
+    target: {general: "General La Romana"}
+    value: Q717699
+    source: "Wikidata Q717699 (Pedro Caro, 3rd Marquis of la Romana, 1761-1811); Wikipedia, 'Pedro Caro Sureda, 3rd Marquis of La Romana'"
+    note: "Local row 2390, 1 (1809) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0195
+    kind: general_merge
+    target: {general: "Michael A. Barclay de Tolly"}
+    value: Q157632
+    source: "Wikidata Q157632 (Michael Andreas Barclay de Tolly, 1761-1818); Wikipedia, 'Michael Andreas Barclay de Tolly'"
+    note: "Local row 632, 1 (1812) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0196
+    kind: general_merge
+    target: {general: "Paul Kray of Krajowa"}
+    value: Q78695
+    source: "Wikidata Q78695 (Paul Kray, 1735-1804); Wikipedia, 'Paul Kray'"
+    note: "Local row 1514, 1 (1796) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0197
+    kind: general_merge
+    target: {general: "Peter Pahlen"}
+    value: Q481283
+    source: "Wikidata Q481283 (Peter von der Pahlen, 1777-1864 (the younger; the elder Pahlen died 1826)); Wikipedia, 'Peter Graf von der Pahlen'"
+    note: "Local row 1827, 1 (1814) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0198
+    kind: general_merge
+    target: {general: "Pierre Dupont"}
+    value: Q969823
+    source: "Wikidata Q969823 (Pierre Antoine Dupont de l'Étang, 1765-1840); Wikipedia, 'Pierre Dupont de l'Étang'"
+    note: "Local row 288, 3 (1805-1808) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0199
+    kind: general_merge
+    target: {general: "Scipio Calvus"}
+    value: Q316475
+    source: "Wikidata Q316475 (Gnaeus Cornelius Scipio Calvus, c.256-211 BC); Wikipedia, 'Gnaeus Cornelius Scipio Calvus'"
+    note: "Local row 1080, 1 (Ebro 217 BC) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0200
+    kind: general_merge
+    target: {general: "William E. \"Grumble\" Jones"}
+    value: Q4160431
+    source: "Wikidata Q4160431 (William E. Jones, 1824-1864); Wikipedia, 'William E. Jones (general)'"
+    note: "Local row 1139, 2 (1863) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0201
+    kind: general_merge
+    target: {general: "Yoshiaki Katō"}
+    value: Q1371657
+    source: "Wikidata Q1371657 (Katō Yoshiaki, 1563-1631); Wikipedia, 'Katō Yoshiaki'"
+    note: "Local row 3198, 1 (1597) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0202
+    kind: general_merge
+    target: {general: "Alan Vasey"}
+    value: Q5536120
+    source: "Wikidata Q5536120 (George Alan Vasey, 1895-1945 (not Q65122737, George Vasey, 1880-1951)); Wikipedia, 'George Alan Vasey'"
+    note: "Local row 2180, 1 (1944) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0203
+    kind: general_merge
+    target: {general: "Jean d.L. de Tassigny"}
+    value: Q81114
+    source: "Wikidata Q81114 (Jean de Lattre de Tassigny, 1889-1952); Wikipedia, 'Jean de Lattre de Tassigny'"
+    note: "Local row 2745, 2 (1944-1945) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0204
+    kind: general_merge
+    target: {general: "Joseph de Monsabert"}
+    value: Q2035422
+    source: "Wikidata Q2035422 (Joseph de Goislard de Monsabert, 1887-1981); Wikipedia, 'Joseph de Goislard de Monsabert'"
+    note: "Local row 2930, 1 (Operation Nordwind 1944) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0205
+    kind: general_merge
+    target: {general: "J d.G. de Monsabert"}
+    value: Q2035422
+    source: "Wikidata Q2035422 (Joseph de Goislard de Monsabert, 1887-1981); Wikipedia, 'Joseph de Goislard de Monsabert'"
+    note: "Local row 2747, 1 (Colmar Pocket 1945) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0206
+    kind: general_merge
+    target: {general: "C. W. Flusser"}
+    value: Q1066462
+    source: "Wikidata Q1066462 (Charles W. Flusser, 1832-1864); Wikipedia, 'Charles W. Flusser'"
+    note: "Local row 2861, 1 (1862) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0207
+    kind: general_merge
+    target: {general: "April 6: Thomas L. Rosser"}
+    value: Q3530770
+    source: "Wikidata Q3530770 (Thomas L. Rosser, 1836-1910); Wikipedia, 'Thomas L. Rosser'"
+    note: "Local row 1357, 1 (High Bridge 1865); the name is an infobox date-prefix artefact battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0208
+    kind: general_merge
+    target: {general: "April 7: William Mahone"}
+    value: Q925055
+    source: "Wikidata Q925055 (William Mahone, 1826-1895); Wikipedia, 'William Mahone'"
+    note: "Local row 1358, 1 (High Bridge 1865); the name is an infobox date-prefix artefact battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0209
+    kind: general_merge
+    target: {general: "Marshal Saxe"}
+    value: Q76723
+    source: "Wikidata Q76723 (Maurice de Saxe, 1696-1750); Wikipedia, 'Maurice, Comte de Saxe'"
+    note: "Local row 3281, 1 (Fontenoy 1745) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0210
+    kind: general_merge
+    target: {general: "von Neipperg"}
+    value: Q112124
+    source: "Wikidata Q112124 (Wilhelm Reinhard von Neipperg, 1684-1774); Wikipedia, 'Wilhelm Reinhard von Neipperg'"
+    note: "Local row 1012, 1 (Dettingen 1743, Austrian contingent) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0211
+    kind: general_merge
+    target: {general: "von Daun"}
+    value: Q93365
+    source: "Wikidata Q93365 (Leopold Joseph von Daun, 1705-1766); Wikipedia, 'Leopold Joseph von Daun'"
+    note: "Local row 892, 1 (Lauffeld 1747; the infobox links von Daun to this article) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0212
+    kind: general_merge
+    target: {general: "Victor de Broglie"}
+    value: Q695929
+    source: "Wikidata Q695929 (Victor-François, 2nd duc de Broglie, 1718-1804); Wikipedia, 'Victor-François, 2nd duc de Broglie'"
+    note: "Local row 1778, 1 (Minden 1759) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0213
+    kind: general_merge
+    target: {general: "Cumberland"}
+    value: Q378088
+    source: "Wikidata Q378088 (Prince William, Duke of Cumberland, 1721-1765); Wikipedia, 'Prince William, Duke of Cumberland'"
+    note: "Local row 1163, 2 (Fontenoy 1745, Lauffeld 1747) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0214
+    kind: general_merge
+    target: {general: "Graf von Wurmser"}
+    value: Q78691
+    source: "Wikidata Q78691 (Dagobert Sigmund von Wurmser, 1724-1797); Wikipedia, 'Dagobert Sigmund von Wurmser'"
+    note: "Local row 57, 1 (1795) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0215
+    kind: general_merge
+    target: {general: "Count of Wallis"}
+    value: Q7088110
+    source: "Wikidata Q7088110 (Olivier, Count of Wallis, 1742-1799); Wikipedia, 'Olivier, Count of Wallis'"
+    note: "Local row 1653, 1 (Loano 1795) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0216
+    kind: general_merge
+    target: {general: "Henri de Stengel"}
+    value: Q1596941
+    source: "Wikidata Q1596941 (Henri Christian Michel de Stengel, 1744-1796); Wikipedia, 'Henri Christian Michel de Stengel'"
+    note: "Local row 292, 1 (Aldenhoven 1793) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0217
+    kind: general_merge
+    target: {general: "Jacques Menou"}
+    value: Q1345264
+    source: "Wikidata Q1345264 (Jacques-François Menou, 1750-1810); Wikipedia, 'Jacques-François Menou'"
+    note: "Local row 2388, 2 (1793, 1801) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0218
+    kind: general_merge
+    target: {general: "Obergeneral Jean-Baptiste Kléber"}
+    value: Q319302
+    source: "Wikidata Q319302 (Jean-Baptiste Kléber, 1753-1800); Wikipedia, 'Jean-Baptiste Kléber'"
+    note: "Local row 2193, 1 (1796) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0219
+    kind: general_merge
+    target: {general: "J.-B. Bernadotte"}
+    value: Q52927
+    source: "Wikidata Q52927 (Charles XIV John, 1763-1844 (Jean-Baptiste Bernadotte); not Q15968159, his brother Jean-Évangéliste); Wikipedia, 'Charles XIV John'"
+    note: "Local row 1308, 1 (Guttstadt-Deppen 1807) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0220
+    kind: general_merge
+    target: {general: "General of Division Bernadotte"}
+    value: Q52927
+    source: "Wikidata Q52927 (Charles XIV John, 1763-1844 (Jean-Baptiste Bernadotte); not Q15968159, his brother Jean-Évangéliste); Wikipedia, 'Charles XIV John'"
+    note: "Local row 2282, 1 (Theiningen 1796) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0221
+    kind: general_merge
+    target: {general: "Jean Bompart"}
+    value: Q3163894
+    source: "Wikidata Q3163894 (Jean-Baptiste-François Bompart, 1757-1841); Wikipedia, 'Jean-Baptiste-François Bompart'"
+    note: "Local row 2310, 1 (1798) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0222
+    kind: general_merge
+    target: {general: "Jean Ambert"}
+    value: Q3166159
+    source: "Wikidata Q3166159 (Jean-Jacques Ambert, 1765-1851); Wikipedia, 'Jean-Jacques Ambert'"
+    note: "Local row 1473, 1 (Kaiserslautern 1794; the infobox links Jean Ambert to this article) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0223
+    kind: general_merge
+    target: {general: "Thielmann"}
+    value: Q70858
+    source: "Wikidata Q70858 (Johann von Thielmann, 1765-1824); Wikipedia, 'Johann von Thielmann'"
+    note: "Local row 319, 1 (1813) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0224
+    kind: general_merge
+    target: {general: "Jean Broussier"}
+    value: Q1276231
+    source: "Wikidata Q1276231 (Jean-Baptiste Broussier, 1766-1814); Wikipedia, 'Jean-Baptiste Broussier'"
+    note: "Local row 1284, 1 (1809) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0225
+    kind: general_merge
+    target: {general: "Jean Bessières"}
+    value: Q345551
+    source: "Wikidata Q345551 (Jean-Baptiste Bessières, 1768-1813); Wikipedia, 'Jean-Baptiste Bessières'"
+    note: "Local row 968, 1 (1806) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0226
+    kind: general_merge
+    target: {general: "Jean Bonet"}
+    value: Q3173984
+    source: "Wikidata Q3173984 (Jean Pierre François Bonet, 1768-1857); Wikipedia, 'Jean Pierre François Bonet'"
+    note: "Local row 2132, 1 (1812) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0227
+    kind: general_merge
+    target: {general: "Jean Harispe"}
+    value: Q128807
+    source: "Wikidata Q128807 (Jean Isidore Harispe, 1768-1855); Wikipedia, 'Jean Isidore Harispe'"
+    note: "Local row 817, 1 (1812) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0228
+    kind: general_merge
+    target: {general: "Jean Pierre Semellé"}
+    value: Q3164363
+    source: "Wikidata Q3164363 (Jean-Baptiste Pierre de Semellé, 1773-1839; medium confidence, forename order differs); Wikipedia, 'Jean-Baptiste Pierre de Semellé'"
+    note: "Local row 625, 1 (1811) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0229
+    kind: general_merge
+    target: {general: "Jean Marchand"}
+    value: Q2499629
+    source: "Wikidata Q2499629 (Jean Gabriel Marchand, 1765-1851); Wikipedia, 'Jean Gabriel Marchand'"
+    note: "Local row 969, 2 (1806-1809) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0230
+    kind: general_merge
+    target: {general: "A. Ostermann-Tolstoy"}
+    value: Q675595
+    source: "Wikidata Q675595 (Alexander Ivanovich Ostermann-Tolstoy, 1770-1857); Wikipedia, 'Alexander Ivanovich Ostermann-Tolstoy'"
+    note: "Local row 971, 2 (Czarnowo 1806, Ostrovno 1812) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0231
+    kind: general_merge
+    target: {general: "Alexander Osterman-Tolstoy"}
+    value: Q675595
+    source: "Wikidata Q675595 (Alexander Ivanovich Ostermann-Tolstoy, 1770-1857); Wikipedia, 'Alexander Ivanovich Ostermann-Tolstoy'"
+    note: "Local row 1558, 1 (Kulm 1813) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0232
+    kind: general_merge
+    target: {general: "D. Vandamme"}
+    value: Q506328
+    source: "Wikidata Q506328 (Dominique Vandamme, 1770-1830); Wikipedia, 'Dominique Vandamme'"
+    note: "Local row 1649, 1 (1809) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0233
+    kind: general_merge
+    target: {general: "L.-N. Davout"}
+    value: Q158778
+    source: "Wikidata Q158778 (Louis-Nicolas Davout, 1770-1823); Wikipedia, 'Louis-Nicolas Davout'"
+    note: "Local row 628, 1 (1812) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0234
+    kind: general_merge
+    target: {general: "Armand C. Guilleminot"}
+    value: Q326179
+    source: "Wikidata Q326179 (Armand-Charles Guilleminot, 1774-1840); Wikipedia, 'Armand Charles Guilleminot'"
+    note: "Local row 1696, 1 (1812) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0235
+    kind: general_merge
+    target: {general: "Duke of Saragossa"}
+    value: Q332481
+    source: "Wikidata Q332481 (José de Palafox, 1st Duke of Zaragoza, 1775-1847); Wikipedia, 'José de Palafox y Melci'"
+    note: "Local row 2327, 1 (1808) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0236
+    kind: general_merge
+    target: {general: "E.R.S. Canby"}
+    value: Q1190016
+    source: "Wikidata Q1190016 (Edward Canby, 1817-1873); Wikipedia, 'Edward Canby'"
+    note: "Local row 2207, 1 (1865) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0237
+    kind: general_merge
+    target: {general: "G.H. Reinhardt"}
+    value: Q60552
+    source: "Wikidata Q60552 (Georg-Hans Reinhardt, 1887-1963); Wikipedia, 'Georg-Hans Reinhardt'"
+    note: "Local row 1832, 1 (1941) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0238
+    kind: general_merge
+    target: {general: "W. F. von Richthofen"}
+    value: Q57177
+    source: "Wikidata Q57177 (Wolfram von Richthofen, 1895-1945); Wikipedia, 'Wolfram von Richthofen'"
+    note: "Local row 2616, 2 (Kerch Peninsula, Sevastopol 1941) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0239
+    kind: general_merge
+    target: {general: "W. von Richthofen"}
+    value: Q57177
+    source: "Wikidata Q57177 (Wolfram von Richthofen, 1895-1945); Wikipedia, 'Wolfram von Richthofen'"
+    note: "Local row 2167, 1 (Sedan 1940) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0240
+    kind: general_merge
+    target: {general: "Binyamin Peled"}
+    value: Q2915872
+    source: "Wikidata Q2915872 (Benny Peled, 1928-2002); Wikipedia, 'Benny Peled'"
+    note: "Local row 3372, 1 (1973) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0241
+    kind: general_merge
+    target: {general: "John Lloyd"}
+    value: Q12792539
+    source: "Wikidata Q12792539 (John Edward Lloyd, 1894-1965, Australian brigadier); Wikipedia, 'John Lloyd (brigadier)'"
+    note: "Local row 1927, 1 (Oivi-Gorari 1942) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0242
+    kind: general_merge
+    target: {general: "John Gordon"}
+    value: Q118774
+    source: "Wikidata Q118774 (John B. Gordon, 1832-1904); Wikipedia, 'John Brown Gordon'"
+    note: "Local row 833, 2 (Opequon, Cedar Creek 1864) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0243
+    kind: general_merge
+    target: {general: "William L. Jackson"}
+    value: Q2579774
+    source: "Wikidata Q2579774 (William Lowther Jackson, 1825-1890); Wikipedia, 'William Lowther Jackson'"
+    note: "Local row 1055, 1 (Droop Mountain 1863) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0244
+    kind: general_merge
+    target: {general: "Brig. Gen. James H. Lane"}
+    value: Q5934173
+    source: "Wikidata Q5934173 (James Henry Lane (Jim Lane), 1814-1866); Wikipedia, 'Jim Lane (politician)'"
+    note: "Local row 1057, 1 (Dry Wood Creek 1861, Union Kansas brigade) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0245
+    kind: general_merge
+    target: {general: "Brig. Gen. Henry Jackson"}
+    value: Q5727301
+    source: "Wikidata Q5727301 (Henry R. Jackson, 1820-1898); Wikipedia, 'Henry R. Jackson'"
+    note: "Local row 1285, 1 (Greenbrier River 1861) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0246
+    kind: general_merge
+    target: {general: "George W. Anderson"}
+    value: Q23765888
+    source: "Wikidata Q23765888 (George Wayne Anderson, 1839-1906); Wikipedia, 'George Wayne Anderson'"
+    note: "Local row 2988, 1 (Second Fort McAllister 1864) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0247
+    kind: general_merge
+    target: {general: "John Bowen"}
+    value: Q1533438
+    source: "Wikidata Q1533438 (John Stevens Bowen, 1830-1863); Wikipedia, 'John S. Bowen'"
+    note: "Local row 593, 1 (Big Black River Bridge 1863) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0248
+    kind: general_merge
+    target: {general: "Brig. Gen. J. S. Marmaduke"}
+    value: Q373590
+    source: "Wikidata Q373590 (John S. Marmaduke, 1833-1887); Wikipedia, 'John S. Marmaduke'"
+    note: "Local row 850, 1 (Chalk Bluff 1863) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0249
+    kind: general_merge
+    target: {general: "Brigadier General John M. Brannan"}
+    value: Q4096296
+    source: "Wikidata Q4096296 (John Milton Brannan, 1819-1892); Wikipedia, 'John Milton Brannan'"
+    note: "Local row 2992, 1 (Pocotaligo 1862) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0250
+    kind: general_merge
+    target: {general: "Field Marshal von Kalckreuth"}
+    value: Q73253
+    source: "Wikidata Q73253 (Friedrich Adolf, Count von Kalckreuth, 1737-1818); Wikipedia, 'Friedrich Adolf, Count von Kalckreuth'"
+    note: "Local row 3174, 1 (Siege of Mainz 1793) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0251
+    kind: general_merge
+    target: {general: "François de Lignery"}
+    value: Q3083554
+    source: "Wikidata Q3083554 (François-Marie Le Marchand de Lignery, 1703-1759); Wikipedia, 'François-Marie Le Marchand de Lignery'"
+    note: "Local row 1572, 1 (La Belle-Famille 1759) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0252
+    kind: general_merge
+    target: {general: "Marquis de Montcalm"}
+    value: Q453589
+    source: "Wikidata Q453589 (Louis-Joseph de Montcalm, 1712-1759); Wikipedia, 'Louis-Joseph de Montcalm'"
+    note: "Local row 547, 1 (Beauport 1759) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0253
+    kind: general_merge
+    target: {general: "Jean Drouet d'Erlon"}
+    value: Q921887
+    source: "Wikidata Q921887 (Jean-Baptiste Drouet, Comte d'Erlon, 1765-1844); Wikipedia, 'Jean-Baptiste Drouet, Comte d'Erlon'"
+    note: "Local row 2696, 1 (Bergisel 1809) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0254
+    kind: general_merge
+    target: {general: "Baron Sénarmont"}
+    value: Q2833336
+    source: "Wikidata Q2833336 (Alexandre-Antoine Hureau de Sénarmont, 1769-1810); Wikipedia, 'Alexandre-Antoine Hureau de Sénarmont'"
+    note: "Local row 3036, 1 (Siege of Cádiz 1810) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0255
+    kind: general_merge
+    target: {general: "Jean Abbatucci"}
+    value: Q727261
+    source: "Wikidata Q727261 (Jean Charles Abbatucci, 1771-1796); Wikipedia, 'Jean Charles Abbatucci'"
+    note: "Local row 1503, 1 (Kehl 1796) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0256
+    kind: general_merge
+    target: {general: "Frederick ll"}
+    value: Q33550
+    source: "Wikidata Q33550 (Frederick II of Prussia, 1712-1786); Wikipedia, 'Frederick the Great'"
+    note: "Local row 1373, 1 (Hohenfriedberg 1745, the name has a lowercase L typo for II) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0257
+    kind: general_merge
+    target: {general: "Decimus Brutus Albinus"}
+    value: Q294846
+    source: "Wikidata Q294846 (Decimus Junius Brutus Albinus, c.85-43 BC); Wikipedia, 'Decimus Junius Brutus Albinus'"
+    note: "Local row 1877, 1 (43 BC) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0258
+    kind: general_merge
+    target: {general: "Captain Charles Philippe Aubry"}
+    value: Q2959987
+    source: "Wikidata Q2959987 (Charles Philippe Aubry, c.1720-1770); Wikipedia, 'Charles Philippe Aubry'"
+    note: "Local row 1193, 1 (Fort Ligonier 1758) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0259
+    kind: general_merge
+    target: {general: "Henry, Lord Paget"}
+    value: Q335133
+    source: "Wikidata Q335133 (Henry Paget, 1st Marquess of Anglesey, 1768-1854; not Edward Paget Q4385579, his brother); Wikipedia, 'Henry Paget, 1st Marquess of Anglesey'"
+    note: "Local row 552, 1 (Benavente 1808) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0260
+    kind: general_merge
+    target: {general: "Lord Paget"}
+    value: Q335133
+    source: "Wikidata Q335133 (Henry Paget, 1st Marquess of Anglesey, 1768-1854; not Edward Paget Q4385579, his brother); Wikipedia, 'Henry Paget, 1st Marquess of Anglesey'"
+    note: "Local row 2114, 1 (Sahagun 1808) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0261
+    kind: general_merge
+    target: {general: "Earl of Uxbridge"}
+    value: Q335133
+    source: "Wikidata Q335133 (Henry Paget, 1st Marquess of Anglesey, 1768-1854); Wikipedia, 'Henry Paget, 1st Marquess of Anglesey'"
+    note: "Local row 2434, 1 (Waterloo 1815) battle(s) moved. Same person as the Wikidata item; the name matcher left it corpus-local."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0262
+    kind: general_merge
+    target: {general: Q127329180}
+    value: Q316475
+    source: "Wikidata Q316475 (Gnaeus Cornelius Scipio Calvus, c.256-211 BC); Wikidata Q127329180; Wikipedia, 'Gnaeus Cornelius Scipio Calvus'"
+    note: "Wrong Q-id on a linked row. Linked row 1388 (Dertosa 215 BC, Upper Baetis 211 BC) carries Q127329180, a triumvir of 218 BC, beside Q316475 (Cissa 218 BC). Both rows are the consul of 222 BC."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0263
+    kind: general_merge
+    target: {general: Q137675733}
+    value: Q2959987
+    source: "Wikidata Q2959987 (Charles Philippe Aubry, c.1720-1770); Wikidata Q137675733; Wikipedia, 'Charles Philippe Aubry'"
+    note: "Wrong Q-id on a linked row. Linked row 1573 (La Belle-Famille 1759) carries Q137675733, a Canadian political candidate with no dates. The commander at La Belle-Famille was Aubry."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0264
+    kind: general_merge
+    target: {general: Q135665800}
+    value: Q347652
+    source: "Wikidata Q347652 (Laurent Gouvion Saint-Cyr, 1764-1830); Wikidata Q135665800; Wikipedia, 'Laurent de Gouvion Saint-Cyr'"
+    note: "Wrong Q-id on a linked row. Linked row 1901 (Trippstadt 1794, Neresheim 1796) carries Q135665800, an acting president of Haiti in 2025-26. The commander was Gouvion Saint-Cyr."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0265
+    kind: general_merge
+    target: {general: Q1531906}
+    value: Q921887
+    source: "Wikidata Q921887 (Jean-Baptiste Drouet, Comte d'Erlon, 1765-1844); Wikidata Q1531906; Wikipedia, 'Jean-Baptiste Drouet, Comte d'Erlon'"
+    note: "Wrong Q-id on a linked row. Linked row 2158 carries Q1531906, Jean-Baptiste Drouet the revolutionary (Varennes, 1763-1824). The marshal is Q921887."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0266
+    kind: commander_link
+    target: {battle: Battle_of_Bayou_Bourbeux-6b16d07cc5, side: "Confederate States of America", mention: Thomas Green}
+    value: Q7790172
+    source: "Wikidata Q7790172 (Thomas Green, Texas general, 1814-1864); Wikipedia, 'Thomas Green (general)'"
+    note: "Local row 3403 (5 battles) shares its canonical name with linked row 536 (Q7790172, listed as Tom Green), so a name merge is ambiguous. Links the Bayou Bourbeux 1863 mention only."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0267
+    kind: commander_link
+    target: {battle: Battle_of_Peralta-596d9a9cf0, side: "Confederate States", mention: Thomas Green}
+    value: Q7790172
+    source: "Wikidata Q7790172 (Thomas Green, Texas general, 1814-1864); Wikipedia, 'Thomas Green (general)'"
+    note: "Local row 3403 (5 battles) shares its canonical name with linked row 536 (Q7790172, listed as Tom Green), so a name merge is ambiguous. Links the Peralta 1862 mention only."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0268
+    kind: commander_link
+    target: {battle: Battle_of_Stirling_s_Plantation-c9ab23d9bc, side: "CSA (Confederacy)", mention: Thomas Green}
+    value: Q7790172
+    source: "Wikidata Q7790172 (Thomas Green, Texas general, 1814-1864); Wikipedia, 'Thomas Green (general)'"
+    note: "Local row 3403 (5 battles) shares its canonical name with linked row 536 (Q7790172, listed as Tom Green), so a name merge is ambiguous. Links the Stirling's Plantation 1863 mention only."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0269
+    kind: commander_link
+    target: {battle: Battle_of_Valverde-640a2e129b, side: "Confederate States", mention: Thomas Green}
+    value: Q7790172
+    source: "Wikidata Q7790172 (Thomas Green, Texas general, 1814-1864); Wikipedia, 'Thomas Green (general)'"
+    note: "Local row 3403 (5 battles) shares its canonical name with linked row 536 (Q7790172, listed as Tom Green), so a name merge is ambiguous. Links the Valverde 1862 mention only."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0270
+    kind: commander_link
+    target: {battle: New_Mexico_campaign-7a32421dca, side: "Confederate States of America", mention: Thomas Green}
+    value: Q7790172
+    source: "Wikidata Q7790172 (Thomas Green, Texas general, 1814-1864); Wikipedia, 'Thomas Green (general)'"
+    note: "Local row 3403 (5 battles) shares its canonical name with linked row 536 (Q7790172, listed as Tom Green), so a name merge is ambiguous. Links the New Mexico campaign 1862 mention only."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+
+# Wrong-Wikidata-person commander links in corpus3, drafted 2026-10-30. Fragment: append under 'entries:'.
+# Found by comparing each linked commander's Wikidata record with the Wikipedia infobox link for the same mention.
+  - id: ov-0300
+    kind: general_merge
+    target: {general: Q111912206}
+    value: Q192780
+    source: "Wikidata Q192780 (Abdullah I of Jordan, Ruler of Transjordan and Jordan from 1921 to 1951, 1882-1951); Wikidata Q111912206 (Abdallah I, sultan of Anjouan Island (1782–1788 and 1792–1796)); Wikipedia, '1948 Arab–Israeli War' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 26 (1 battle: 1948 Arab–Israeli War) carries Q111912206, sultan of Anjouan Island (1782–1788 and 1792–1796). The infobox mention 'Abdallah I' links Abdullah I of Jordan (Q192780)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0301
+    kind: general_merge
+    target: {general: Q99001172}
+    value: Q1584140
+    source: "Wikidata Q1584140 (Sir Michael Seymour, 1st Baronet, British admiral (1768-1834), 1768-1834); Wikidata Q99001172 (Michael Seymour, art historian); Wikipedia, 'Action of 10 November 1808' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 61 (3 battles: Action of 10 November 1808; Action of 6 April 1809; Battle of Jobourg) carries Q99001172, art historian. The infobox mention 'Michael Seymour' links Sir Michael Seymour, 1st Baronet (Q1584140)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0302
+    kind: general_merge
+    target: {general: Q22984922}
+    value: Q3434742
+    source: "Wikidata Q3434742 (Robert Carthew Reynolds, Royal Navy rear admiral (1745-1811), 1745-1811); Wikidata Q22984922 (Robert Carthew Reynolds, English naval officer, died 1804); Wikipedia, 'Action of 13 January 1797' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 64 (1 battle: Action of 13 January 1797) carries Q22984922, English naval officer, died 1804. The infobox mention 'Robert Reynolds' links Robert Carthew Reynolds (Q3434742)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0303
+    kind: commander_link
+    target: {battle: Yom_Kippur_War-3c934020bf, side: "Egypt", mention: "Abdel el-Gamasy"}
+    value: Q2468387
+    source: "Wikidata Q2468387 (Muhammad Abd El-Ghani El-Gamasy, Egyptian Field Marshal (1921–2003), 1921-2003); Wikipedia, 'Yom Kippur War', infobox commander link"
+    note: "Linked row 137 (Ahmed Abdel Rahman Nasser, Q4695696: Egyptian Air Force officer, 1934-2020) is the wrong person for the mention 'Abdel el-Gamasy' at this battle (2 battles on the row). The infobox links Muhammad Abd El-Ghani El-Gamasy."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0304
+    kind: general_merge
+    target: {general: Q137858428}
+    value: Q334980
+    source: "Wikidata Q334980 (Arthur Tedder, 1st Baron Tedder, Royal Air Force World War II air marshal (1890-1967), 1890-1967); Wikidata Q137858428 (Arthur Tedder, Estonian engineer (1882-1972)); Wikipedia, 'Allied invasion of Italy' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 144 (1 battle: Allied invasion of Italy) carries Q137858428, Estonian engineer (1882-1972). The infobox mention 'Arthur Tedder' links Arthur Tedder, 1st Baron Tedder (Q334980)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0305
+    kind: commander_link
+    target: {battle: Allied_siege_of_La_Rochelle-1f8a6510c6, side: "Germany", mention: "Vice-Admiral Ernst Schirlitz"}
+    value: Q88983
+    source: "Wikidata Q88983 (Ernst Schirlitz, German admiral (1893–1978), 1893-1978); Wikipedia, 'Allied siege of La Rochelle', infobox commander link"
+    note: "Linked row 148 (Ernst Gonell, Q1358316: German military personnel, 1902-1945) is the wrong person for the mention 'Vice-Admiral Ernst Schirlitz' at this battle (2 battles on the row). The infobox links Ernst Schirlitz."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0306
+    kind: general_merge
+    target: {general: Q127694330}
+    value: Q936673
+    source: "Wikidata Q936673 (Quintus Titurius Sabinus, Quintus Titurius Sabinus was one of Caesar's legates during the Gallic Wars, 50 BC-54 BC); Wikidata Q127694330 (Quintus Sabinus Secundio, no description); Wikipedia, 'Ambiorix's revolt' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 151 (1 battle: Ambiorix's revolt) carries Q127694330, no description. The infobox mention 'Quintus Sabinus' links Quintus Titurius Sabinus (Q936673)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0307
+    kind: general_merge
+    target: {general: Q58484135}
+    value: Q4302934
+    source: "Wikidata Q4302934 (unlabelled, no description, ?-?); Wikidata Q58484135 (Vasily Morozov, Russian author, pupil of Leo Tolstoy); Wikipedia, 'Baltic operation' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 175 (1 battle: Baltic operation) carries Q58484135, Russian author, pupil of Leo Tolstoy. The infobox mention 'Vasili Morozov' links unlabelled (Q4302934)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0308
+    kind: general_merge
+    target: {general: Q94628146}
+    value: Q936528
+    source: "Wikidata Q936528 (Dov Joseph, Israeli politician (1899–1980), 1899-1980); Wikidata Q94628146 (Dov Yosefi, no description); Wikipedia, 'Battle for Jerusalem' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 181 (1 battle: Battle for Jerusalem) carries Q94628146, no description. The infobox mention 'Dov Yosef' links Dov Joseph (Q936528)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0309
+    kind: commander_link
+    target: {battle: Battle_of_Abbeville-d09d1697de, side: "French Third Republic", mention: "Archibald Beauman"}
+    value: Q17524770
+    source: "Wikidata Q17524770 (Archibald Bentley Beauman, British Army officer (1888-1977), 1888-1977); Wikipedia, 'Battle of Abbeville', infobox commander link"
+    note: "Linked row 203 (Archibald Wavell, 1st Earl Wavell, Q315540: British Army general and Viceroy of India, 1883-1950) is the wrong person for the mention 'Archibald Beauman' at this battle (4 battles on the row). The infobox links Archibald Bentley Beauman."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0310
+    kind: general_merge
+    target: {general: Q98528136}
+    value: Q41635
+    source: "Wikidata Q41635 (Konstantinos V, emperor of Byzantium, 718-775); Wikidata Q98528136 (Constantine Vellidis, particle physicist at University of Athens); Wikipedia, 'Battle of Akroinon' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 265 (1 battle: Battle of Akroinon) carries Q98528136, particle physicist at University of Athens. The infobox mention 'Constantine V' links Konstantinos V (Q41635)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0311
+    kind: general_merge
+    target: {general: Q56703202}
+    value: Q161106
+    source: "Wikidata Q161106 (Grand Duke Konstantin Pavlovich of Russia, Russian grand duke (1779–1831), 1779-1831); Wikidata Q56703202 (Guillaume-Jean Constantin, French painter (1755-1816)); Wikipedia, 'Battle of Fère-Champenoise' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 267 (1 battle: Battle of Fère-Champenoise) carries Q56703202, French painter (1755-1816). The infobox mention 'Grand Duke Constantine' links Grand Duke Konstantin Pavlovich of Russia (Q161106)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0312
+    kind: commander_link
+    target: {battle: Battle_of_Al_Khankah-b56b926c8d, side: "Ottoman Empire", mention: "Yusuf Pasha"}
+    value: Q6098127
+    source: "Wikidata Q6098127 (Kör Yusuf Ziyaüddin Paşa, grand vizier of the Ottoman Empire, 1750-1819); Wikipedia, 'Battle of Al Khankah', infobox commander link"
+    note: "Linked row 268 (Küçük Hüseyin Pasha, Q11930016: Ottoman statesman and admiral (1757–1803), 1757-1803) is the wrong person for the mention 'Yusuf Pasha' at this battle (4 battles on the row). The infobox links Kör Yusuf Ziyaüddin Paşa."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0313
+    kind: commander_link
+    target: {battle: Second_Siege_of_El_Arish-40a9252489, side: "Ottoman Empire", mention: "Yusuf Pasha"}
+    value: Q6098127
+    source: "Wikidata Q6098127 (Kör Yusuf Ziyaüddin Paşa, grand vizier of the Ottoman Empire, 1750-1819); Wikipedia, 'Second Siege of El Arish', infobox commander link"
+    note: "Linked row 268 (Küçük Hüseyin Pasha, Q11930016: Ottoman statesman and admiral (1757–1803), 1757-1803) is the wrong person for the mention 'Yusuf Pasha' at this battle (4 battles on the row). The infobox links Kör Yusuf Ziyaüddin Paşa."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0314
+    kind: commander_link
+    target: {battle: Battle_of_Allatoona-822dd1976f, side: "CSA (Confederacy)", mention: "Samuel G. French"}
+    value: Q2218305
+    source: "Wikidata Q2218305 (Samuel Gibbs French, Confederate Army general (1818–1910), 1818-1910); Wikipedia, 'Battle of Allatoona', infobox commander link"
+    note: "Linked row 310 (Stephen G. Burbridge, Q7609262: Union Army general (1831-1894), 1831-1894) is the wrong person for the mention 'Samuel G. French' at this battle (7 battles on the row). The infobox links Samuel Gibbs French."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0315
+    kind: commander_link
+    target: {battle: Battle_of_Cockpit_Point-48cf400e1a, side: "CSA", mention: "Samuel G. French"}
+    value: Q2218305
+    source: "Wikidata Q2218305 (Samuel Gibbs French, Confederate Army general (1818–1910), 1818-1910); Wikipedia, 'Battle of Cockpit Point', infobox commander link"
+    note: "Linked row 310 (Stephen G. Burbridge, Q7609262: Union Army general (1831-1894), 1831-1894) is the wrong person for the mention 'Samuel G. French' at this battle (7 battles on the row). The infobox links Samuel Gibbs French."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0316
+    kind: general_merge
+    target: {general: Q118096952}
+    value: Q3017333
+    source: "Wikidata Q3017333 (David-Maurice-Joseph Mathieu de La Redorte, French general (1768-1833), 1768-1833); Wikidata Q118096952 (Maurice Mathieu, magistrate); Wikipedia, 'Battle of Altafulla' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 317 (3 battles: Battle of Altafulla; Battle of Puerto de Baños; Siege of Tarragona (1813)) carries Q118096952, magistrate. The infobox mention 'Maurice Mathieu' links David-Maurice-Joseph Mathieu de La Redorte (Q3017333)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0317
+    kind: commander_link
+    target: {battle: Battle_of_Britton_s_Lane-bdd098ba3c, side: "CSA", mention: "Frank C. Armstrong"}
+    value: Q1443106
+    source: "Wikidata Q1443106 (Frank Crawford Armstrong, United States Army officer and Confederate Army general (1835–1909), 1835-1909); Wikipedia, 'Battle of Britton's Lane', infobox commander link"
+    note: "Linked row 369 (E. O. C. Ord, Q712376: United States Army officer (1818–1883), 1818-1883) is the wrong person for the mention 'Frank C. Armstrong' at this battle (7 battles on the row). The infobox links Frank Crawford Armstrong."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0318
+    kind: commander_link
+    target: {battle: Battle_of_Dallas-5444f6839f, side: "Confederate States", mention: "Frank C. Armstrong"}
+    value: Q1443106
+    source: "Wikidata Q1443106 (Frank Crawford Armstrong, United States Army officer and Confederate Army general (1835–1909), 1835-1909); Wikipedia, 'Battle of Dallas', infobox commander link"
+    note: "Linked row 369 (E. O. C. Ord, Q712376: United States Army officer (1818–1883), 1818-1883) is the wrong person for the mention 'Frank C. Armstrong' at this battle (7 battles on the row). The infobox links Frank Crawford Armstrong."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0319
+    kind: commander_link
+    target: {battle: Second_Battle_of_Mesilla-08aeaa0ff0, side: "Confederate States", mention: "Captain Sherod Hunter"}
+    value: Q7495299
+    source: "Wikidata Q7495299 (unlabelled, Confederate Army officer, 1834-1870); Wikipedia, 'Second Battle of Mesilla', infobox commander link"
+    note: "Linked row 374 (David Hunter Strother, Q5235271: American author and illustrator (1816–1888), 1816-1888) is the wrong person for the mention 'Captain Sherod Hunter' at this battle (2 battles on the row). The infobox links unlabelled."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0320
+    kind: general_merge
+    target: {general: Q110721608}
+    value: Q698430
+    source: "Wikidata Q698430 (Heinrich Joseph Johann von Bellegarde, Austrian marshal (1756-1845), 1756-1845); Wikidata Q110721608 (Heinrich von Bellegarde, no description); Wikipedia, 'Battle of the Mincio River (1814)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 428 (1 battle: Battle of the Mincio River (1814)) carries Q110721608, no description. The infobox mention 'Heinrich von Bellegarde' links Heinrich Joseph Johann von Bellegarde (Q698430)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0321
+    kind: general_merge
+    target: {general: Q551544}
+    value: Q474448
+    source: "Wikidata Q474448 (Prince Friedrich Franz Xaver of Hohenzollern-Hechingen, Austrian general (1757-1844), 1757-1844); Wikidata Q551544 (Friedrich Hermann Otto, Prince of Hohenzollern-Hechingen, German prince); Wikipedia, 'Battle of Aspern–Essling' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 429 (2 battles: Battle of Aspern–Essling; Second Battle of Bassano) carries Q551544, German prince. The infobox mention 'Friedrich von Hohenzollern-Hechingen' links Prince Friedrich Franz Xaver of Hohenzollern-Hechingen (Q474448)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0322
+    kind: commander_link
+    target: {battle: Battle_of_Barbourville-5a66193f56, side: "United States of America (Union)", mention: "Isaac J. Black"}
+    value: none
+    source: "Wikipedia, 'Battle of Barbourville', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 494 (J. E. B. Stuart, Q313583) is the wrong person for the mention 'Isaac J. Black' at this battle: Q313583 is Confederate cavalry general (1833–1864) (1833-1864). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0323
+    kind: commander_link
+    target: {battle: Battle_of_Cumberland_Church-809c35b5b5, side: "United States (Union)", mention: "J. Irvin Gregg"}
+    value: Q1444207
+    source: "Wikidata Q1444207 (John Irvin Gregg, Union Army general (1826–1892), 1826-1892); Wikipedia, 'Battle of Cumberland Church', infobox commander link"
+    note: "Linked row 494 (J. E. B. Stuart, Q313583: Confederate cavalry general (1833–1864), 1833-1864) is the wrong person for the mention 'J. Irvin Gregg' at this battle (21 battles on the row). The infobox links John Irvin Gregg."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0324
+    kind: commander_link
+    target: {battle: Battle_of_Hartsville-6dbd445274, side: "United States (Union)", mention: "Absalom B. Moore"}
+    value: none
+    source: "Wikipedia, 'Battle of Hartsville', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 494 (J. E. B. Stuart, Q313583) is the wrong person for the mention 'Absalom B. Moore' at this battle: Q313583 is Confederate cavalry general (1833–1864) (1833-1864). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0325
+    kind: commander_link
+    target: {battle: Siege_of_Fort_Macon-da47fa465d, side: "CSA (Confederacy)", mention: "Moses J. White"}
+    value: none
+    source: "Wikipedia, 'Siege of Fort Macon', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 494 (J. E. B. Stuart, Q313583) is the wrong person for the mention 'Moses J. White' at this battle: Q313583 is Confederate cavalry general (1833–1864) (1833-1864). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0326
+    kind: commander_link
+    target: {battle: Battle_of_Walker_s_Ford-d9c8847f68, side: "United States (Union)", mention: "Felix W. Graham"}
+    value: none
+    source: "Wikipedia, 'Battle of Walker's Ford', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 495 (Felix Zollicoffer, Q1403915) is the wrong person for the mention 'Felix W. Graham' at this battle: Q1403915 is Confederate Army general and American politician (1812-1862) (1812-1862). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0327
+    kind: general_merge
+    target: {general: Q58739712}
+    value: Q213784
+    source: "Wikidata Q213784 (Friedrich Graf Kleist von Nollendorf, Prussian general (1762-1823), 1762-1823); Wikidata Q58739712 (Friedrich von Kleist, no description); Wikipedia, 'Battle of Gué-à-Tresmes' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 523 (2 battles: Battle of Gué-à-Tresmes; Battle of Kulm) carries Q58739712, no description. The infobox mention 'Friedrich von Kleist' links Friedrich Graf Kleist von Nollendorf (Q213784)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0328
+    kind: general_merge
+    target: {general: Q7526383}
+    value: Q1791677
+    source: "Wikidata Q1791677 (Sir David Baird, 1st Baronet, British Army general (1757-1829), 1757-1829); Wikidata Q7526383 (Sir David Baird, 2nd Baronet, British peer); Wikipedia, 'Battle of Corunna' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 599 (1 battle: Battle of Corunna) carries Q7526383, British peer. The infobox mention 'David Baird' links Sir David Baird, 1st Baronet (Q1791677)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0329
+    kind: commander_link
+    target: {battle: Battle_of_Santa_Rosa_Island-3a80e0b9d5, side: "United States (Union)", mention: "Israel Vodges"}
+    value: Q6087287
+    source: "Wikidata Q6087287 (unlabelled, Union Army general, 1816-1889); Wikipedia, 'Battle of Santa Rosa Island', infobox commander link"
+    note: "Linked row 603 (Israel Bush Richardson, Q4394975: Union Army general (1815–1862), 1815-1862) is the wrong person for the mention 'Israel Vodges' at this battle (2 battles on the row). The infobox links unlabelled."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0330
+    kind: general_merge
+    target: {general: Q64021039}
+    value: Q6242827
+    source: "Wikidata Q6242827 (John Stuart Williams, Confederate Army general, 1818-1898); Wikidata Q64021039 (John S. Williams, no description); Wikipedia, 'Battle of Blue Springs' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 609 (2 battles: Battle of Blue Springs; Battle of Fayetteville (1862)) carries Q64021039, no description. The infobox mention 'John S. Williams' links John Stuart Williams (Q6242827)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0331
+    kind: commander_link
+    target: {battle: Battle_of_Britton_s_Lane-bdd098ba3c, side: "United States (Union)", mention: "Elias S. Dennis"}
+    value: Q5360606
+    source: "Wikidata Q5360606 (Elias Smith Dennis, United States Army general during American Civil War, 1812-1894); Wikipedia, 'Battle of Britton's Lane', infobox commander link"
+    note: "Linked row 673 (Shin-Da Lee, Q30505449: researcher, ?-?) is the wrong person for the mention 'Elias S. Dennis' at this battle (3 battles on the row). The infobox links Elias Smith Dennis."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0332
+    kind: commander_link
+    target: {battle: Battle_of_Cherokee_Station-9802ad99c3, side: "Confederate States", mention: "S.D. Lee"}
+    value: Q327002
+    source: "Wikidata Q327002 (Stephen D. Lee, Confederate general (1833-1908), 1833-1908); Wikipedia, 'Battle of Cherokee Station', infobox commander link"
+    note: "Linked row 673 (Shin-Da Lee, Q30505449: researcher, ?-?) is the wrong person for the mention 'S.D. Lee' at this battle (3 battles on the row). The infobox links Stephen D. Lee."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0333
+    kind: commander_link
+    target: {battle: Battle_of_Galveston-66301f24e9, side: "United States", mention: "Isaac S. Burrell"}
+    value: none
+    source: "Wikipedia, 'Battle of Galveston', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 673 (Shin-Da Lee, Q30505449) is the wrong person for the mention 'Isaac S. Burrell' at this battle: Q30505449 is researcher (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0334
+    kind: commander_link
+    target: {battle: Battle_of_Bulltown-09a2522643, side: "United States of America", mention: "William Mattingly"}
+    value: none
+    source: "Wikipedia, 'Battle of Bulltown', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 698 (William A. Mattingly, Q40553506) is the wrong person for the mention 'William Mattingly' at this battle: Q40553506 is researcher (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0335
+    kind: commander_link
+    target: {battle: Battle_of_Lauffeld-7a1c47f06c, side: "Kingdom of Great Britain", mention: "Frederick II"}
+    value: Q454473
+    source: "Wikidata Q454473 (Friedrich II, Landgrave of Hesse-Kassel, Landgrave of Hesse-Kassel (or Hesse-Cassel) from 1760 to 1785, 1720-1785); Wikipedia, 'Battle of Lauffeld', infobox commander link"
+    note: "Linked row 700 (Frederick II of Prussia, Q33550: King of Prussia from 1740 to 1786 (1712-1786), 1712-1786) is the wrong person for the mention 'Frederick II' at this battle (22 battles on the row). The infobox links Friedrich II, Landgrave of Hesse-Kassel."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0336
+    kind: general_merge
+    target: {general: Q87970683}
+    value: Q603213
+    source: "Wikidata Q603213 (Gregorio García de la Cuesta, Spanish general and noble (1741-1811), 1741-1811); Wikidata Q87970683 (unlabelled, researcher); Wikipedia, 'Battle of Cabezón' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 732 (1 battle: Battle of Cabezón) carries Q87970683, researcher. The infobox mention 'Cuesta' links Gregorio García de la Cuesta (Q603213)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0337
+    kind: commander_link
+    target: {battle: Battle_of_Caesar_s_Camp-ed7aca8584, side: "Habsburg Monarchy", mention: "Wenzel Colloredo"}
+    value: Q90199
+    source: "Wikidata Q90199 (Wenzel Joseph von Colloredo-Mels und Waldsee, Austrian politician (1738-1822), 1738-1822); Wikipedia, 'Battle of Caesar's Camp', infobox commander link"
+    note: "Linked row 736 (Hieronymus Karl Graf von Colloredo-Mansfeld, Q78916: (1775-1822) Austrian general, 1775-1822) is the wrong person for the mention 'Wenzel Colloredo' at this battle (3 battles on the row). The infobox links Wenzel Joseph von Colloredo-Mels und Waldsee."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0338
+    kind: general_merge
+    target: {general: Q75655839}
+    value: Q2960764
+    source: "Wikidata Q2960764 (Charles Edward Jennings de Kilmaine, Irish soldier (1751–1799), 1751-1799); Wikidata Q75655839 (Charles Kilmaine Blake, (died 1867)); Wikipedia, 'Battle of Caesar's Camp' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 737 (1 battle: Battle of Caesar's Camp) carries Q75655839, (died 1867). The infobox mention 'Charles Kilmaine' links Charles Edward Jennings de Kilmaine (Q2960764)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0339
+    kind: general_merge
+    target: {general: Q62519511}
+    value: Q335334
+    source: "Wikidata Q335334 (Adam Duncan, 1st Viscount Duncan, Royal Navy admiral (1731-1804), 1731-1804); Wikidata Q62519511 (Adam Duncan, Australian politician); Wikipedia, 'Battle of Camperdown' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 764 (1 battle: Battle of Camperdown) carries Q62519511, Australian politician. The infobox mention 'Adam Duncan' links Adam Duncan, 1st Viscount Duncan (Q335334)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0340
+    kind: commander_link
+    target: {battle: Siege_of_Dongnae-fcddc38b0f, side: "Kingdom of Joseon", mention: "Cho Yŏnggyu"}
+    value: Q16261863
+    source: "Wikidata Q16261863 (Jo Yeong-gyu, Joseon military official (1535 -1592), 1535-1592); Wikipedia, 'Siege of Dongnae', infobox commander link"
+    note: "Linked row 872 (Cho Hŏn, Q12617154: Joseon dynasty official and Righteous army leader in the Imjin war (1544 – 1592), 1544-1592) is the wrong person for the mention 'Cho Yŏnggyu' at this battle (2 battles on the row). The infobox links Jo Yeong-gyu."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0341
+    kind: commander_link
+    target: {battle: Battle_of_Cherbourg_1864-f351c10c3b, side: "United States", mention: "John Winslow"}
+    value: Q6218920
+    source: "Wikidata Q6218920 (John Ancrum Winslow, United States Navy admiral (1811-1873), 1811-1873); Wikipedia, 'Battle of Cherbourg (1864)', infobox commander link"
+    note: "Linked row 874 (John Winslow, Q113330735: American politician and soldier (1802 – 1874), 1802-1874) is the wrong person for the mention 'John Winslow' at this battle (2 battles on the row). The infobox links John Ancrum Winslow."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0342
+    kind: commander_link
+    target: {battle: Battle_of_Fort_Beaus_jour-30032c9718, side: "Kingdom of Great Britain", mention: "John Winslow"}
+    value: Q3182773
+    source: "Wikidata Q3182773 (John Winslow, British Army general (1703-1774), 1703-1774); Wikipedia, 'Battle of Fort Beauséjour', infobox commander link"
+    note: "Linked row 874 (John Winslow, Q113330735: American politician and soldier (1802 – 1874), 1802-1874) is the wrong person for the mention 'John Winslow' at this battle (2 battles on the row). The infobox links John Winslow."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0343
+    kind: general_merge
+    target: {general: Q3760531}
+    value: Q740330
+    source: "Wikidata Q740330 (George Henry Thomas, United States Army general (1816-1870), 1816-1870); Wikidata Q3760531 (George Housman Thomas, British engraver, illustrator and painter (1824-1868)); Wikipedia, 'Battle of Chickamauga' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 878 (8 battles: Battle of Chickamauga; Battle of Jonesborough; Battle of Mill Springs; Battle of Nashville; Battle of Peachtree Creek; Battle of Resaca; Battle of Stones River; First Battle of Dalton) carries Q3760531, British engraver, illustrator and painter (1824-1868). The infobox mention 'George H. Thomas' links George Henry Thomas (Q740330)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0344
+    kind: general_merge
+    target: {general: Q59693167}
+    value: Q4383537
+    source: "Wikidata Q4383537 (Alexander McDowell McCook, Union Army general (1831–1903), 1831-1903); Wikidata Q59693167 (Alexander McCook Guard, West Point graduate, class of 1871); Wikipedia, 'Battle of Chickamauga' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 880 (2 battles: Battle of Chickamauga; Battle of Stones River) carries Q59693167, West Point graduate, class of 1871. The infobox mention 'Alexander McCook' links Alexander McDowell McCook (Q4383537)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0345
+    kind: general_merge
+    target: {general: Q3659993}
+    value: Q158232
+    source: "Wikidata Q158232 (Prince Charles Alexander of Lorraine, Austrian general (1712-1780), 1712-1780); Wikidata Q3659993 (Charles of Lorraine, Count of Armagnac); Wikipedia, 'Battle of Rocoux' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 890 (1 battle: Battle of Rocoux) carries Q3659993, Count of Armagnac. The infobox mention 'Charles of Lorraine' links Prince Charles Alexander of Lorraine (Q158232)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0346
+    kind: general_merge
+    target: {general: Q136707916}
+    value: Q16856964
+    source: "Wikidata Q16856964 (William Henry Parsons, Confederate Army officer (1826–1907), 1826-1907); Wikidata Q136707916 (William Henry Parsons, American paper manufacturer (1831–1905)); Wikipedia, 'Battle of Cotton Plant' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 951 (2 battles: Battle of Cotton Plant; Battle of Goodrich's Landing) carries Q136707916, American paper manufacturer (1831–1905). The infobox mention 'William H. Parsons' links William Henry Parsons (Q16856964)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0347
+    kind: general_merge
+    target: {general: Q16720693}
+    value: Q1599668
+    source: "Wikidata Q1599668 (Johann Heinrich von Schmitt, Austrian army commander, 1744-1805); Wikidata Q16720693 (Johann Baptist Anton Schmitt, (1775-1841)); Wikipedia, 'Battle of Dürenstein' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 980 (1 battle: Battle of Dürenstein) carries Q16720693, (1775-1841). The infobox mention 'Johann Schmitt' links Johann Heinrich von Schmitt (Q1599668)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0348
+    kind: general_merge
+    target: {general: Q87844024}
+    value: Q6145523
+    source: "Wikidata Q6145523 (James Wilkes Maurice, British officer of the Royal Navy (1775-1857), 1775-1857); Wikidata Q87844024 (James B Maurice, researcher); Wikipedia, 'Battle of Diamond Rock' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1029 (1 battle: Battle of Diamond Rock) carries Q87844024, researcher. The infobox mention 'James Maurice' links James Wilkes Maurice (Q6145523)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0349
+    kind: general_merge
+    target: {general: Q7364630}
+    value: Q1971445
+    source: "Wikidata Q1971445 (Ronald Forbes Adam, British Army general (1885–1982), 1885-1982); Wikidata Q7364630 (Ronald Adam, British RAF officer, actor and theatre manager (1896-1979)); Wikipedia, 'Battle of Dunkirk' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1064 (1 battle: Battle of Dunkirk) carries Q7364630, British RAF officer, actor and theatre manager (1896-1979). The infobox mention 'Ronald Adam' links Ronald Forbes Adam (Q1971445)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0350
+    kind: general_merge
+    target: {general: Q7350328}
+    value: Q2156348
+    source: "Wikidata Q2156348 (Robert Alfred Theobald, United States admiral (1884–1957), 1884-1957); Wikidata Q7350328 (Robert Theobald, Economist and Futurist (1929–1999)); Wikipedia, 'Battle of Dutch Harbor' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1073 (1 battle: Battle of Dutch Harbor) carries Q7350328, Economist and Futurist (1929–1999). The infobox mention 'Robert Theobald' links Robert Alfred Theobald (Q2156348)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0351
+    kind: general_merge
+    target: {general: Q139174453}
+    value: Q57570
+    source: "Wikidata Q57570 (Hans-Jürgen von Arnim, German general (1889-1962), 1889-1962); Wikidata Q139174453 (unlabelled, no description); Wikipedia, 'Battle of El Guettar' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1089 (1 battle: Battle of El Guettar) carries Q139174453, no description. The infobox mention 'Jürgen von Arnim' links Hans-Jürgen von Arnim (Q57570)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0352
+    kind: commander_link
+    target: {battle: Battle_of_El_Pla-c5ff780f5d, side: "First French Empire", mention: "Francesco Eugenio"}
+    value: none
+    source: "Wikipedia, 'Battle of El Pla', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 1090 (Francesco Eugenio Iannuzzi, Q118977833) is the wrong person for the mention 'Francesco Eugenio' at this battle: Q118977833 is researcher (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0353
+    kind: general_merge
+    target: {general: Q107134215}
+    value: Q50333874
+    source: "Wikidata Q50333874 (Giuseppe Federico Palombini, (1774-1850), 1774-1850); Wikidata Q107134215 (Giuseppe Palombini, Italian sculptor); Wikipedia, 'Battle of El Pla' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1091 (2 battles: Battle of El Pla; Battle of Saguntum) carries Q107134215, Italian sculptor. The infobox mention 'Giuseppe Palombini' links Giuseppe Federico Palombini (Q50333874)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0354
+    kind: general_merge
+    target: {general: Q43875418}
+    value: Q16230439
+    source: "Wikidata Q16230439 (John Nepomuk of Nostitz-Rieneck, Austrian general, 1768-1840); Wikidata Q43875418 (Johann von Nostitz und Jänkendorf, German landowner); Wikipedia, 'Battle of Fère-Champenoise' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1122 (1 battle: Battle of Fère-Champenoise) carries Q43875418, German landowner. The infobox mention 'Johann von Nostitz' links John Nepomuk of Nostitz-Rieneck (Q16230439)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0355
+    kind: general_merge
+    target: {general: Q1145757}
+    value: Q22917037
+    source: "Wikidata Q22917037 (Abu'l-Awar, Arab military commander, ?-?); Wikidata Q1145757 (Sa'id ibn Zayd, companion of Muhammad); Wikipedia, 'Battle of Fahl' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1128 (2 battles: Battle of Fahl; Battle of the Masts) carries Q1145757, companion of Muhammad. The infobox mention 'Abu al-A'war' links Abu'l-Awar (Q22917037)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0356
+    kind: general_merge
+    target: {general: Q80167164}
+    value: Q4888655
+    source: "Wikidata Q4888655 (Benjamin Franklin Kelley, Union Army general, 1807-1891); Wikidata Q80167164 (Benjamin F Kelley, researcher); Wikipedia, 'Battle of Folck's Mill' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1156 (1 battle: Battle of Folck's Mill) carries Q80167164, researcher. The infobox mention 'Benjamin F. Kelley' links Benjamin Franklin Kelley (Q4888655)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0357
+    kind: general_merge
+    target: {general: Q47503567}
+    value: Q697562
+    source: "Wikidata Q697562 (Armand de Vignerot du Plessis, French diplomat (1696-1788), 1696-1788); Wikidata Q47503567 (Stefan du Plessis, researcher); Wikipedia, 'Battle of Fontenoy' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1161 (1 battle: Battle of Fontenoy) carries Q47503567, researcher. The infobox mention 'du Plessis' links Armand de Vignerot du Plessis (Q697562)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0358
+    kind: general_merge
+    target: {general: Q69878}
+    value: Q685689
+    source: "Wikidata Q685689 (Dominik von Königsegg-Rothenfels, Austrian imperial Fieldmarshal (1673-1751), 1673-1751); Wikidata Q69878 (Maximilian Frederick of  Königsegg-Rothenfels, Roman Catholic archbishop (1708-1784)); Wikipedia, 'Battle of Fontenoy' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1166 (1 battle: Battle of Fontenoy) carries Q69878, Roman Catholic archbishop (1708-1784). The infobox mention 'Königsegg-Rothenfels' links Dominik von Königsegg-Rothenfels (Q685689)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0359
+    kind: general_merge
+    target: {general: Q111229843}
+    value: Q4757475
+    source: "Wikidata Q4757475 (Andrew Jackson Smith, American military officer (1815–1897), 1815-1897); Wikidata Q111229843 (Andrew J. Smith, American politician in Minnesota (born 1927)); Wikipedia, 'Battle of Fort DeRussy' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1180 (2 battles: Battle of Fort DeRussy; Battle of Tupelo) carries Q111229843, American politician in Minnesota (born 1927). The infobox mention 'A.J. Smith' links Andrew Jackson Smith (Q4757475)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0360
+    kind: general_merge
+    target: {general: Q61162446}
+    value: Q3184505
+    source: "Wikidata Q3184505 (Joseph A. Mower, United States Army officer (1827–1870), 1827-1870); Wikidata Q61162446 (Joseph D Mowery, researcher ORCID ID = 0000-0001-7128-1397); Wikipedia, 'Battle of Fort DeRussy' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1181 (2 battles: Battle of Fort DeRussy; Battle of Old River Lake) carries Q61162446, researcher ORCID ID = 0000-0001-7128-1397. The infobox mention 'Joseph Mower' links Joseph A. Mower (Q3184505)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0361
+    kind: commander_link
+    target: {battle: Battle_of_Forum_Gallorum-046f694d7c, side: "Roman Senate", mention: "Gaius Pansa"}
+    value: Q431423
+    source: "Wikidata Q431423 (Gaius Vibius Pansa Caetronianus, Roman consul 43 BC, 89 BC-43 BC); Wikipedia, 'Battle of Forum Gallorum', infobox commander link"
+    note: "Linked row 1212 (Gaius Antonius Hybrida, Q435213: uncle of the triumvir Mark Antony, 200 BC-100 BC) is the wrong person for the mention 'Gaius Pansa' at this battle (2 battles on the row). The infobox links Gaius Vibius Pansa Caetronianus."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0362
+    kind: general_merge
+    target: {general: Q457386}
+    value: Q50993
+    source: "Wikidata Q50993 (Prince Heinrich of Prussia, Prince of Prussia (1726-1802), 1726-1802); Wikidata Q457386 (Prince Henry of Prussia, Prussian prince (1747–1767)); Wikipedia, 'Battle of Freiberg' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1222 (1 battle: Battle of Freiberg) carries Q457386, Prussian prince (1747–1767). The infobox mention 'Prince Henry of Prussia' links Prince Heinrich of Prussia (Q50993)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0363
+    kind: general_merge
+    target: {general: Q133363117}
+    value: Q3169292
+    source: "Wikidata Q3169292 (Jean-Pierre Firmin Malher, French general (1761-1808), 1761-1808); Wikidata Q133363117 (unlabelled, no description); Wikipedia, 'Battle of Günzburg' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1232 (1 battle: Battle of Günzburg) carries Q133363117, no description. The infobox mention 'Jean Malher' links Jean-Pierre Firmin Malher (Q3169292)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0364
+    kind: general_merge
+    target: {general: Q510721}
+    value: Q62029
+    source: "Wikidata Q62029 (Frederick William, Duke of Brunswick-Wolfenbüttel, German officer (1771–1815), ruler of Brunswick (1806–1807; 1813–15), 1771-1815); Wikidata Q510721 (Frederick William Beechey, English naval officer and hydrographer (1796-1856)); Wikipedia, 'Battle of Gefrees' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1252 (2 battles: Battle of Gefrees; Battle of Ölper (1809)) carries Q510721, English naval officer and hydrographer (1796-1856). The infobox mention 'Frederick William' links Frederick William, Duke of Brunswick-Wolfenbüttel (Q62029)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0365
+    kind: commander_link
+    target: {battle: Battle_of_Genoa_1795-b4b8ba82e4, side: "Kingdom of Great Britain", mention: "William Hotham"}
+    value: Q3568715
+    source: "Wikidata Q3568715 (William Hotham, 1st Baron Hotham, officer in the British Royal Navy (1736-1813), 1736-1813); Wikipedia, 'Battle of Genoa (1795)', infobox commander link"
+    note: "Linked row 1264 (William Hotham, Q8012539: British Royal Navy officer (1772-1848), 1772-1848) is the wrong person for the mention 'William Hotham' at this battle (3 battles on the row). The infobox links William Hotham, 1st Baron Hotham."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0366
+    kind: commander_link
+    target: {battle: Battle_of_the_Hy_res_Islands-91f7a2bad5, side: "Kingdom of Great Britain", mention: "William Hotham"}
+    value: Q3568715
+    source: "Wikidata Q3568715 (William Hotham, 1st Baron Hotham, officer in the British Royal Navy (1736-1813), 1736-1813); Wikipedia, 'Battle of the Hyères Islands', infobox commander link"
+    note: "Linked row 1264 (William Hotham, Q8012539: British Royal Navy officer (1772-1848), 1772-1848) is the wrong person for the mention 'William Hotham' at this battle (3 battles on the row). The infobox links William Hotham, 1st Baron Hotham."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0367
+    kind: general_merge
+    target: {general: Q880319}
+    value: Q616138
+    source: "Wikidata Q616138 (Henry Hopkins Sibley, Confederate Army general (1816–1886), 1816-1886); Wikidata Q880319 (Henry Hastings Sibley, American politician and military leader (1811–1891)); Wikipedia, 'Battle of Glorieta Pass' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1278 (1 battle: Battle of Glorieta Pass) carries Q880319, American politician and military leader (1811–1891). The infobox mention 'Henry H. Sibley' links Henry Hopkins Sibley (Q616138)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0368
+    kind: general_merge
+    target: {general: Q55837102}
+    value: Q5536640
+    source: "Wikidata Q5536640 (George Balch, United States Navy admiral (1821-1908), 1821-1908); Wikidata Q55837102 (George Thatcher Balch, Union Army officer (1828-1894)); Wikipedia, 'Battle of Grimball's Landing' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1287 (1 battle: Battle of Grimball's Landing) carries Q55837102, Union Army officer (1828-1894). The infobox mention 'George Balch' links George Balch (Q5536640)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0369
+    kind: general_merge
+    target: {general: Q1407752}
+    value: Q332644
+    source: "Wikidata Q332644 (Alexander Hood, 1st Viscount Bridport, Royal Navy admiral and the brother of Admiral Samuel Hood, 1st Viscount Hood (1726-1814), 1726-1814); Wikidata Q1407752 (Alexander Hood, British Royal Navy officer (1758-1798)); Wikipedia, 'Battle of Groix' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1293 (1 battle: Battle of Groix) carries Q1407752, British Royal Navy officer (1758-1798). The infobox mention 'Alexander Hood' links Alexander Hood, 1st Viscount Bridport (Q332644)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0370
+    kind: commander_link
+    target: {battle: Battle_of_Molins_de_Rei-3b15356a31, side: "Kingdom of Spain", mention: "Conde Caldagues"}
+    value: Q106557549
+    source: "Wikidata Q106557549 (Count of Caldagues, Spanish commander of the Peninsular War, 1752-1824); Wikipedia, 'Battle of Molins de Rei', infobox commander link"
+    note: "Linked row 1319 (Louis Joseph, Prince of Condé, Q430775: French noble (1736-1818), 1736-1818) is the wrong person for the mention 'Conde Caldagues' at this battle (3 battles on the row). The infobox links Count of Caldagues."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0371
+    kind: general_merge
+    target: {general: Q136633784}
+    value: Q2313698
+    source: "Wikidata Q2313698 (Claude Juste Alexandre Legrand, French general (1762–1815), 1762-1815); Wikidata Q136633784 (unlabelled, no description); Wikipedia, 'Battle of Heilsberg' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1348 (3 battles: Battle of Heilsberg; Combat of Korneuburg; Combat of Schöngrabern) carries Q136633784, no description. The infobox mention 'Claude Legrand' links Claude Juste Alexandre Legrand (Q2313698)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0372
+    kind: general_merge
+    target: {general: Q974502}
+    value: Q974512
+    source: "Wikidata Q974512 (Gnaeus Fulvius Centumalus Maximus, Roman consul, 245 BC-210 BC); Wikidata Q974502 (Gnaeus Fulvius Centumalus, politician); Wikipedia, 'Battle of Herdonia (210 BC)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1355 (1 battle: Battle of Herdonia (210 BC)) carries Q974502, politician. The infobox mention 'Gnaeus Fulvius Centumalus' links Gnaeus Fulvius Centumalus Maximus (Q974512)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0373
+    kind: commander_link
+    target: {battle: Battle_of_Husayd-7b9d982f05, side: "Sasanian Empire", mention: "Ruzbih"}
+    value: none
+    source: "Wikipedia, 'Battle of Husayd', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 1387 (Ruzbihan Muhammad al-Tab‘i al-Shirazi, Q108097479) is the wrong person for the mention 'Ruzbih' at this battle: Q108097479 is Persian calligrapher active in Shiraz in the first half of 16th century (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0374
+    kind: commander_link
+    target: {battle: Battle_of_Imjin_River_1592-e0211ad8b5, side: "Joseon", mention: "Sin Hal"}
+    value: none
+    source: "Wikipedia, 'Battle of Imjin River (1592)', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 1398 (Sin-Horng Chen, Q115598415) is the wrong person for the mention 'Sin Hal' at this battle: Q115598415 is researcher (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0375
+    kind: commander_link
+    target: {battle: Siege_of_Namwon-a121a0a4cb, side: "Korean Garrison", mention: "Sin Ho"}
+    value: none
+    source: "Wikipedia, 'Siege of Namwon', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 1398 (Sin-Horng Chen, Q115598415) is the wrong person for the mention 'Sin Ho' at this battle: Q115598415 is researcher (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0376
+    kind: general_merge
+    target: {general: Q3633198}
+    value: Q804609
+    source: "Wikidata Q804609 (Balacrus, Satrap of Cilicia, 400 BC-324 BC); Wikidata Q3633198 (Balagrus, Macedonian historian); Wikipedia, 'Battle of Issus' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1419 (1 battle: Battle of Issus) carries Q3633198, Macedonian historian. The infobox mention 'Balakros' links Balacrus (Q804609)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0377
+    kind: commander_link
+    target: {battle: Battle_of_Krefeld-f2e295e3c2, side: "Hanover", mention: "Duke of Brunswick"}
+    value: Q215480
+    source: "Wikidata Q215480 (Duke Ferdinand of Brunswick-Wolfenbüttel, German general (1721–1792), 1721-1792); Wikipedia, 'Battle of Krefeld', infobox commander link"
+    note: "Linked row 1447 (Charles William Ferdinand, Duke of Brunswick-Wolfenbüttel, Q58773: Prince of Brunswick-Wolfenbüttel and Duke of Brunswick-Lüneburg, 1735-1806) is the wrong person for the mention 'Duke of Brunswick' at this battle (11 battles on the row). The infobox links Duke Ferdinand of Brunswick-Wolfenbüttel."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0378
+    kind: commander_link
+    target: {battle: Battle_of_Lutterberg_1762-5a0a5ee03d, side: "Brunswick", mention: "Duke of Brunswick"}
+    value: Q215480
+    source: "Wikidata Q215480 (Duke Ferdinand of Brunswick-Wolfenbüttel, German general (1721–1792), 1721-1792); Wikipedia, 'Battle of Lutterberg (1762)', infobox commander link"
+    note: "Linked row 1447 (Charles William Ferdinand, Duke of Brunswick-Wolfenbüttel, Q58773: Prince of Brunswick-Wolfenbüttel and Duke of Brunswick-Lüneburg, 1735-1806) is the wrong person for the mention 'Duke of Brunswick' at this battle (11 battles on the row). The infobox links Duke Ferdinand of Brunswick-Wolfenbüttel."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0379
+    kind: commander_link
+    target: {battle: Battle_of_Reichenberg-e269208109, side: "Prussia", mention: "Duke of Brunswick-Bevern"}
+    value: Q68683
+    source: "Wikidata Q68683 (Augustus William, Duke of Brunswick-Bevern, Duke of Brunswick-Bevern, 1715-1781); Wikipedia, 'Battle of Reichenberg', infobox commander link"
+    note: "Linked row 1447 (Charles William Ferdinand, Duke of Brunswick-Wolfenbüttel, Q58773: Prince of Brunswick-Wolfenbüttel and Duke of Brunswick-Lüneburg, 1735-1806) is the wrong person for the mention 'Duke of Brunswick-Bevern' at this battle (11 battles on the row). The infobox links Augustus William, Duke of Brunswick-Bevern."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0380
+    kind: commander_link
+    target: {battle: Battle_of_Rheinberg-2774570be7, side: "Hanover", mention: "Duke of Brunswick"}
+    value: Q215480
+    source: "Wikidata Q215480 (Duke Ferdinand of Brunswick-Wolfenbüttel, German general (1721–1792), 1721-1792); Wikipedia, 'Battle of Rheinberg', infobox commander link"
+    note: "Linked row 1447 (Charles William Ferdinand, Duke of Brunswick-Wolfenbüttel, Q58773: Prince of Brunswick-Wolfenbüttel and Duke of Brunswick-Lüneburg, 1735-1806) is the wrong person for the mention 'Duke of Brunswick' at this battle (11 battles on the row). The infobox links Duke Ferdinand of Brunswick-Wolfenbüttel."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0381
+    kind: commander_link
+    target: {battle: Battle_of_Kalach-d7dbe4850f, side: "Soviet Union", mention: "Vasily Kryuchyonkin"}
+    value: Q4243230
+    source: "Wikidata Q4243230 (Vasily Kryuchenkin, Soviet Lieutenant general during World War II (1894-1976), 1894-1976); Wikipedia, 'Battle of Kalach', infobox commander link"
+    note: "Linked row 1486 (Vasily Aleksandrovich Yushkevich, Q4535564: Soviet general (1897–1951), 1897-1951) is the wrong person for the mention 'Vasily Kryuchyonkin' at this battle (4 battles on the row). The infobox links Vasily Kryuchenkin."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0382
+    kind: commander_link
+    target: {battle: Battle_of_Stalingrad-9e41ff979f, side: "Soviet Union", mention: "Vasily Gerasimenko"}
+    value: Q4135976
+    source: "Wikidata Q4135976 (Vasyl Herasymenko, Soviet general (1900–1961), 1900-1961); Wikipedia, 'Battle of Stalingrad', infobox commander link"
+    note: "Linked row 1486 (Vasily Aleksandrovich Yushkevich, Q4535564: Soviet general (1897–1951), 1897-1951) is the wrong person for the mention 'Vasily Gerasimenko' at this battle (4 battles on the row). The infobox links Vasyl Herasymenko."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0383
+    kind: commander_link
+    target: {battle: Operation_Little_Saturn-81c6e504d0, side: "Soviet Union", mention: "Vasily Gerasimenko"}
+    value: Q4135976
+    source: "Wikidata Q4135976 (Vasyl Herasymenko, Soviet general (1900–1961), 1900-1961); Wikipedia, 'Operation Little Saturn', infobox commander link"
+    note: "Linked row 1486 (Vasily Aleksandrovich Yushkevich, Q4535564: Soviet general (1897–1951), 1897-1951) is the wrong person for the mention 'Vasily Gerasimenko' at this battle (4 battles on the row). The infobox links Vasyl Herasymenko."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0384
+    kind: commander_link
+    target: {battle: Battle_of_Kardia-255e1b770e, side: "Emirate of Crete", mention: "Photios"}
+    value: none
+    source: "Wikipedia, 'Battle of Kardia', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 1489 (Photios I of Constantinople, Q243187) is the wrong person for the mention 'Photios' at this battle: Q243187 is 9th Century Ecumenical Patriarch of Constantinople (827-896). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0385
+    kind: commander_link
+    target: {battle: Battle_of_the_Gulf_of_Corinth-eb3e7f6a92, side: "Emirate of Crete", mention: "Photios"}
+    value: none
+    source: "Wikipedia, 'Battle of the Gulf of Corinth', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 1489 (Photios I of Constantinople, Q243187) is the wrong person for the mention 'Photios' at this battle: Q243187 is 9th Century Ecumenical Patriarch of Constantinople (827-896). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0386
+    kind: general_merge
+    target: {general: Q61816832}
+    value: Q84514
+    source: "Wikidata Q84514 (Maximilian Anton Karl, Count Baillet de Latour, General in Austrian service (1737-1806), 1737-1806); Wikidata Q61816832 (Maximilian Karl, researcher ORCID ID = 0000-0002-3946-0317); Wikipedia, 'Battle of Kehl (1796)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1504 (1 battle: Battle of Kehl (1796)) carries Q61816832, researcher ORCID ID = 0000-0002-3946-0317. The infobox mention 'Maximilian Karl' links Maximilian Anton Karl, Count Baillet de Latour (Q84514)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0387
+    kind: general_merge
+    target: {general: Q95782642}
+    value: Q2429662
+    source: "Wikidata Q2429662 (Charles de Lambert, soldier (1773-1843), 1773-1843); Wikidata Q95782642 (Karl Lambert Einsink, no description); Wikipedia, 'Battle of Kobrin' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1519 (1 battle: Battle of Kobrin) carries Q95782642, no description. The infobox mention 'Karl Lambert' links Charles de Lambert (Q2429662)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0388
+    kind: general_merge
+    target: {general: Q135401853}
+    value: Q165519
+    source: "Wikidata Q165519 (August Neidhardt von Gneisenau, Prussian field marshal (1760-1831), 1760-1831); Wikidata Q135401853 (unlabelled, no description); Wikipedia, 'Siege of Kolberg (1807)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1607 (1 battle: Siege of Kolberg (1807)) carries Q135401853, no description. The infobox mention 'August von Gneisenau' links August Neidhardt von Gneisenau (Q165519)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0389
+    kind: commander_link
+    target: {battle: Battle_of_Mohi-00ef65eee9, side: "Kingdom of Hungary", mention: "Frederick II of Austria"}
+    value: Q280338
+    source: "Wikidata Q280338 (Frederick II, Duke of Austria, Duke of Austria and the Duke of Styria from 1230 to his death in 1246, 1211-1246); Wikipedia, 'Battle of Mohi', infobox commander link"
+    note: "Linked row 1626 (Mieszko II the Fat, Q694128: 13th-century duke of Opole-Racibórz, Kalisz and Wieluń, 1220-1246) is the wrong person for the mention 'Frederick II of Austria' at this battle (2 battles on the row). The infobox links Frederick II, Duke of Austria."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0390
+    kind: general_merge
+    target: {general: Q18808797}
+    value: Q439984
+    source: "Wikidata Q439984 (William Halsey Jr., United States admiral (1882–1959), 1882-1959); Wikidata Q18808797 (unlabelled, Abstract expressionist artist (1915–1999)); Wikipedia, 'Battle of Leyte Gulf' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1635 (1 battle: Battle of Leyte Gulf) carries Q18808797, Abstract expressionist artist (1915–1999). The infobox mention 'William Halsey' links William Halsey Jr. (Q439984)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0391
+    kind: general_merge
+    target: {general: Q15968159}
+    value: Q52927
+    source: "Wikidata Q52927 (Charles XIV John of Sweden, King of Sweden and Norway between 1818–1844. Prince of Ponte Corvo 1806–1810 and French field marshal (1763–1844), 1763-1844); Wikidata Q15968159 (Jean-Évangéliste Bernadotte, 1st Baron Bernadotte); Wikipedia, 'Battle of Linz-Urfahr' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1648 (2 battles: Battle of Linz-Urfahr; Battle of Schleiz) carries Q15968159, 1st Baron Bernadotte. The infobox mention 'Jean Bernadotte' links Charles XIV John of Sweden (Q52927)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0392
+    kind: general_merge
+    target: {general: Q1971889}
+    value: Q8012314
+    source: "Wikidata Q8012314 (William Hicks Jackson, Confederate Army general (1835–1903), 1835-1903); Wikidata Q1971889 (William Henry Jackson, American photographer and painter (1843-1942)); Wikipedia, 'Battle of Lovejoy's Station' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1664 (1 battle: Battle of Lovejoy's Station) carries Q1971889, American photographer and painter (1843-1942). The infobox mention 'William H. Jackson' links William Hicks Jackson (Q8012314)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0393
+    kind: general_merge
+    target: {general: Q65122737}
+    value: Q5536120
+    source: "Wikidata Q5536120 (George Alan Vasey, Australian general (1895-1945), 1895-1945); Wikidata Q65122737 (George Vasey, English cricketer (1880-1951)); Wikipedia, 'Battle of Madang' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1680 (4 battles: Battle of Madang; Battle of Oivi–Gorari; Battle of Vevi (1941); Battle of the Pimple) carries Q65122737, English cricketer (1880-1951). The infobox mention 'George Vasey' links George Alan Vasey (Q5536120)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0394
+    kind: general_merge
+    target: {general: Q137271866}
+    value: Q1961477
+    source: "Wikidata Q1961477 (Charles Lallemand, French general (1774-1839), 1774-1839); Wikidata Q137271866 (unlabelled, no description); Wikipedia, 'Battle of Maguilla' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1690 (2 battles: Battle of Maguilla; Battle of Villagarcia) carries Q137271866, no description. The infobox mention 'François Antoine Lallemand' links Charles Lallemand (Q1961477)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0395
+    kind: general_merge
+    target: {general: Q75931519}
+    value: Q7528077
+    source: "Wikidata Q7528077 (Sir John Slade, 1st Baronet, British general, 1762-1859); Wikidata Q75931519 (John Slade, (born 1762)); Wikipedia, 'Battle of Maguilla' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1691 (2 battles: Battle of Maguilla; Combat of Aldea da Ponte) carries Q75931519, (born 1762). The infobox mention 'John Slade' links Sir John Slade, 1st Baronet (Q7528077)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0396
+    kind: general_merge
+    target: {general: Q9015392}
+    value: Q56400990
+    source: "Wikidata Q56400990 (Juan Caro Sureda, Spanish military personnel (1769-1829), 1769-1829); Wikidata Q9015392 (Juan Caro de Tavira, Spanish painter); Wikipedia, 'Battle of Manresa (1810)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1714 (1 battle: Battle of Manresa (1810)) carries Q9015392, Spanish painter. The infobox mention 'Juan Caro' links Juan Caro Sureda (Q56400990)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0397
+    kind: general_merge
+    target: {general: Q130797092}
+    value: Q5479048
+    source: "Wikidata Q5479048 (Francesc Rovira i Sala, Spanish commander, 1769-1820); Wikidata Q130797092 (Francesc Rovira, no description); Wikipedia, 'Battle of Manresa (1810)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1716 (3 battles: Battle of Manresa (1810); Battle of Vic; Siege of Figueras (1811)) carries Q130797092, no description. The infobox mention 'Francesc Rovira' links Francesc Rovira i Sala (Q5479048)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0398
+    kind: general_merge
+    target: {general: Q140078072}
+    value: Q155734
+    source: "Wikidata Q155734 (Luis Alejandro Berthier, Marshal and Vice-Constable of France (1753-1815), 1753-1815); Wikidata Q140078072 (unlabelled, no description); Wikipedia, 'Battle of Vihiers' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1733 (1 battle: Battle of Vihiers) carries Q140078072, no description. The infobox mention 'Louis Berthier' links Luis Alejandro Berthier (Q155734)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0399
+    kind: general_merge
+    target: {general: Q113761168}
+    value: Q4503353
+    source: "Wikidata Q4503353 (Anton von Zach, Austrian general, 1747-1826); Wikidata Q113761168 (Anton Zacharias Helms, no description); Wikipedia, 'Battle of Marengo' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1735 (1 battle: Battle of Marengo) carries Q113761168, no description. The infobox mention 'Anton Zach' links Anton von Zach (Q4503353)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0400
+    kind: general_merge
+    target: {general: Q21066948}
+    value: Q7327492
+    source: "Wikidata Q7327492 (Richard Lucian Page, Confederate Army general (1807-1901), 1807-1901); Wikidata Q21066948 (Richard Page, American physician and educator); Wikipedia, 'Battle of Mobile Bay' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1786 (2 battles: Battle of Mobile Bay; Siege of Fort Morgan) carries Q21066948, American physician and educator. The infobox mention 'Richard L. Page' links Richard Lucian Page (Q7327492)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0401
+    kind: general_merge
+    target: {general: Q112125482}
+    value: Q288094
+    source: "Wikidata Q288094 (Louis François Jean Chabot, French general (1757–1837), 1757-1837); Wikidata Q112125482 (Louis Chabot, comte de Jarnac, no description); Wikipedia, 'Battle of Molins de Rei' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1802 (1 battle: Battle of Molins de Rei) carries Q112125482, no description. The infobox mention 'Louis Chabot' links Louis François Jean Chabot (Q288094)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0402
+    kind: general_merge
+    target: {general: Q2959031}
+    value: Q1373606
+    source: "Wikidata Q1373606 (Eugen von Argentau, Austrian general, 1743-1819); Wikidata Q2959031 (Charles Eugène Gabriel de Sombreuil, French general (1770-1795)); Wikipedia, 'Battle of Montenotte' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1822 (2 battles: Battle of Montenotte; Second Battle of Dego) carries Q2959031, French general (1770-1795). The infobox mention 'Eugène Argenteau' links Eugen von Argentau (Q1373606)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0403
+    kind: general_merge
+    target: {general: Q137539877}
+    value: Q289255
+    source: "Wikidata Q289255 (Étienne Maurice Gérard, Marshal of France (1773-1852), 1773-1852); Wikidata Q137539877 (Étienne Gérard, no description); Wikipedia, 'Battle of Mormant' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1824 (1 battle: Battle of Mormant) carries Q137539877, no description. The infobox mention 'Étienne Gérard' links Étienne Maurice Gérard (Q289255)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0404
+    kind: general_merge
+    target: {general: Q2041613}
+    value: Q846019
+    source: "Wikidata Q846019 (Georgiy Zakharov, Soviet general (1897–1957), 1897-1957); Wikidata Q2041613 (Georgy Zakharov, Soviet air force general (1908-1996)); Wikipedia, 'Battle of Moscow' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1845 (1 battle: Battle of Moscow) carries Q2041613, Soviet air force general (1908-1996). The infobox mention 'Georgy Zakharov' links Georgiy Zakharov (Q846019)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0405
+    kind: commander_link
+    target: {battle: Battle_of_Mycale-f551014a0d, side: "Achaemenid Empire", mention: "Tigranes"}
+    value: none
+    source: "Wikipedia, 'Battle of Mycale', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 1887 (Tigranes, Q7801693) is the wrong person for the mention 'Tigranes' at this battle: Q7801693 is son of Khosroes IV (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0406
+    kind: commander_link
+    target: {battle: Siege_of_Jinju_1592-e0e877f7d4, side: "Korean army, citizens", mention: "Kim Sŏngil"}
+    value: Q5954097
+    source: "Wikidata Q5954097 (Kim Seong-il, Joseon dynasty civil servant (1538 – 1593), 1538-1593); Wikipedia, 'Siege of Jinju (1592)', infobox commander link"
+    note: "Linked row 1891 (Kim Su, Q21575799: Joseon civil servant (1547 - 1615), 1547-1615) is the wrong person for the mention 'Kim Sŏngil' at this battle (3 battles on the row). The infobox links Kim Seong-il."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0407
+    kind: commander_link
+    target: {battle: Battle_of_Myeongnyang-c67e641032, side: "Joseon", mention: "An Wi"}
+    value: none
+    source: "Wikipedia, 'Battle of Myeongnyang', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 1892 (An Willemsen, Q52614461) is the wrong person for the mention 'An Wi' at this battle: Q52614461 is no description (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0408
+    kind: commander_link
+    target: {battle: Battle_of_Namaraq-357cc86f96, side: "Sasanian Empire", mention: "Jaban"}
+    value: none
+    source: "Wikipedia, 'Battle of Namaraq', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 1894 (Jaban Meher, Q102403683) is the wrong person for the mention 'Jaban' at this battle: Q102403683 is Ph.D. Harish-Chandra Research Institute 2012 (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0409
+    kind: commander_link
+    target: {battle: Battle_of_Ullais-74b0ba0418, side: "Sasanian Empire", mention: "Jaban"}
+    value: none
+    source: "Wikipedia, 'Battle of Ullais', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 1894 (Jaban Meher, Q102403683) is the wrong person for the mention 'Jaban' at this battle: Q102403683 is Ph.D. Harish-Chandra Research Institute 2012 (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0410
+    kind: general_merge
+    target: {general: Q11917619}
+    value: Q383846
+    source: "Wikidata Q383846 (Gnaeus Domitius Calvinus, Roman consul in 53 and 40 BC, ?-60 BC); Wikidata Q11917619 (Domitius Calvinus, praetor after 240 BC); Wikipedia, 'Battle of Pharsalus' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1969 (1 battle: Battle of Pharsalus) carries Q11917619, praetor after 240 BC. The infobox mention 'Domitius Calvinus' links Gnaeus Domitius Calvinus (Q383846)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0411
+    kind: commander_link
+    target: {battle: Battle_of_Pharsalus-b83ea9d015, side: "Pompeians", mention: "Lentulus"}
+    value: Q521670
+    source: "Wikidata Q521670 (Lucius Cornelius Lentulus Crus, ancient Roman politician, consul in 49 BCE, 98 BC-48 BC); Wikipedia, 'Battle of Pharsalus', infobox commander link"
+    note: "Linked row 1971 (Lentulus, Q20100889: Roman actor and writer of mimes, ?-?) is the wrong person for the mention 'Lentulus' at this battle (2 battles on the row). The infobox links Lucius Cornelius Lentulus Crus."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0412
+    kind: commander_link
+    target: {battle: Siege_of_Corfinium-3d06085caf, side: "Optimates", mention: "P. C. Lentulus Spinther"}
+    value: Q51380
+    source: "Wikidata Q51380 (Publius Cornelius Lentulus Spinther, Roman consul 57 BC, 100 BC-47 BC); Wikipedia, 'Siege of Corfinium', infobox commander link"
+    note: "Linked row 1971 (Lentulus, Q20100889: Roman actor and writer of mimes, ?-?) is the wrong person for the mention 'P. C. Lentulus Spinther' at this battle (2 battles on the row). The infobox links Publius Cornelius Lentulus Spinther."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0413
+    kind: general_merge
+    target: {general: Q15633620}
+    value: Q666528
+    source: "Wikidata Q666528 (Aristodemus of Sparta, 5th-century BC Spartan warrior, 550 BC-479 BC); Wikidata Q15633620 (Aristodemus, Spartan regent); Wikipedia, 'Battle of Plataea' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 1994 (1 battle: Battle of Plataea) carries Q15633620, Spartan regent. The infobox mention 'Aristodemus' links Aristodemus of Sparta (Q666528)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0414
+    kind: commander_link
+    target: {battle: Battle_of_Plataea-cf24f373ce, side: "Sparta", mention: "Olympiodoros"}
+    value: none
+    source: "Wikipedia, 'Battle of Plataea', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 1997 (Olympiodorus the Alchemist, Q3351663) is the wrong person for the mention 'Olympiodoros' at this battle: Q3351663 is no description (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0415
+    kind: commander_link
+    target: {battle: First_Battle_of_Fort_McAllister-87d5bfc497, side: "United States (Union)", mention: "Capt. Percival Drayton"}
+    value: Q7167105
+    source: "Wikidata Q7167105 (Percival Drayton, United States Navy officer (1812–1865), 1812-1865); Wikipedia, 'First Battle of Fort McAllister', infobox commander link"
+    note: "Linked row 2031 (Thomas Drayton, Q980680: Confederate Army general (1809-1891), 1809-1891) is the wrong person for the mention 'Capt. Percival Drayton' at this battle (2 battles on the row). The infobox links Percival Drayton."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0416
+    kind: general_merge
+    target: {general: Q6236438}
+    value: Q6235165
+    source: "Wikidata Q6235165 (John George Walker, Confederate States Army general, 1821-1893); Wikidata Q6236438 (John Grimes Walker, United States Navy admiral after the American Civil War); Wikipedia, 'Battle of Richmond, Louisiana' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2067 (1 battle: Battle of Richmond, Louisiana) carries Q6236438, United States Navy admiral after the American Civil War. The infobox mention 'John G. Walker' links John George Walker (Q6235165)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0417
+    kind: general_merge
+    target: {general: Q109795859}
+    value: Q1350196
+    source: "Wikidata Q1350196 (Francis Preston Blair Jr., Union Army general, politician (1821–1875), 1821-1875); Wikidata Q109795859 (Francis P. Blair, no description); Wikipedia, 'Battle of Rivers' Bridge' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2069 (1 battle: Battle of Rivers' Bridge) carries Q109795859, no description. The infobox mention 'Francis P. Blair' links Francis Preston Blair Jr. (Q1350196)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0418
+    kind: general_merge
+    target: {general: Q111153313}
+    value: Q1607013
+    source: "Wikidata Q1607013 (Henry Marchmore Shaw, American politician (1819-1864), 1819-1864); Wikidata Q111153313 (Henry M. Shawulu, politician in Nigeria); Wikipedia, 'Battle of Roanoke Island' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2080 (1 battle: Battle of Roanoke Island) carries Q111153313, politician in Nigeria. The infobox mention 'Henry M. Shaw' links Henry Marchmore Shaw (Q1607013)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0419
+    kind: general_merge
+    target: {general: Q791393}
+    value: Q681477
+    source: "Wikidata Q681477 (Charles Joseph Batthyány, Austrian field marshal (1698–1772), 1698-1772); Wikidata Q791393 (József Batthyány, Hungarian cardinal (1727–1799)); Wikipedia, 'Battle of Rocoux' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2081 (1 battle: Battle of Rocoux) carries Q791393, Hungarian cardinal (1727–1799). The infobox mention 'József Batthyány' links Charles Joseph Batthyány (Q681477)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0420
+    kind: general_merge
+    target: {general: Q6140196}
+    value: Q2668150
+    source: "Wikidata Q2668150 (James Murray, British soldier, 1721-1794); Wikidata Q6140196 (James Murray, Scottish soldier and politician); Wikipedia, 'Battle of Sainte-Foy' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2131 (2 battles: Battle of Sainte-Foy; Battle of the Plains of Abraham) carries Q6140196, Scottish soldier and politician. The infobox mention 'James Murray' links James Murray (Q2668150)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0421
+    kind: general_merge
+    target: {general: Q76090593}
+    value: Q5729889
+    source: "Wikidata Q5729889 (Henry Washington Benham, Union Army General (1813–1884), 1813-1884); Wikidata Q76090593 (Henry Benham, Peerage person ID=523787); Wikipedia, 'Battle of Secessionville' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2159 (1 battle: Battle of Secessionville) carries Q76090593, Peerage person ID=523787. The infobox mention 'Henry Benham' links Henry Washington Benham (Q5729889)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0422
+    kind: general_merge
+    target: {general: Q92028236}
+    value: Q1961477
+    source: "Wikidata Q1961477 (Charles Lallemand, French general (1774-1839), 1774-1839); Wikidata Q92028236 (François Lallemand, researcher); Wikipedia, 'Battle of Sehested' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2172 (1 battle: Battle of Sehested) carries Q92028236, researcher. The infobox mention 'François Lallemand' links Charles Lallemand (Q1961477)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0423
+    kind: commander_link
+    target: {battle: First_Battle_of_Fort_McAllister-87d5bfc497, side: "United States (Union)", mention: "Cdr. Daniel Ammen"}
+    value: Q5216405
+    source: "Wikidata Q5216405 (unlabelled, United States Navy admiral (1820-1898), 1820-1898); Wikipedia, 'First Battle of Fort McAllister', infobox commander link"
+    note: "Linked row 2179 (Daniel Harvey Hill, Q1161058: Confederate States Army general (1821–1889), 1821-1889) is the wrong person for the mention 'Cdr. Daniel Ammen' at this battle (3 battles on the row). The infobox links unlabelled."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0424
+    kind: commander_link
+    target: {battle: Battle_of_Smoliani-f7045d9730, side: "French Empire", mention: "Nicholas Oudinot"}
+    value: Q156373
+    source: "Wikidata Q156373 (Nicolas Oudinot, Marshal of France (1767-1847), 1767-1847); Wikipedia, 'Battle of Smoliani', infobox commander link"
+    note: "Linked row 2198 (Nicolas Godinot, Q3340372: French General (1765-1811), 1765-1811) is the wrong person for the mention 'Nicholas Oudinot' at this battle (2 battles on the row). The infobox links Nicolas Oudinot."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0425
+    kind: general_merge
+    target: {general: Q17631178}
+    value: Q7726
+    source: "Wikidata Q7726 (Joseph Bonaparte, brother of Napoleon Bonaparte; King of Naples (1806–08) and Spain (1808–13), 1768-1844); Wikidata Q17631178 (Joseph I, Idumean nobleman, brother of the governor of Judea Antipater and uncle of Herod the Great); Wikipedia, 'Battle of Vitoria' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2205 (1 battle: Battle of Vitoria) carries Q17631178, Idumean nobleman, brother of the governor of Judea Antipater and uncle of Herod the Great. The infobox mention 'Joseph I' links Joseph Bonaparte (Q7726)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0426
+    kind: general_merge
+    target: {general: Q46513319}
+    value: Q1003655
+    source: "Wikidata Q1003655 (François Séverin Marceau, French general (1769-1796), 1769-1796); Wikidata Q46513319 (François Marceau, researcher and professor at Université Laval); Wikipedia, 'Battle of Sprimont' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2209 (1 battle: Battle of Sprimont) carries Q46513319, researcher and professor at Université Laval. The infobox mention 'François Marceau' links François Séverin Marceau (Q1003655)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0427
+    kind: commander_link
+    target: {battle: Operation_Overlord-bd290019aa, side: "Axis", mention: "Leo v. Schweppenburg"}
+    value: Q58013
+    source: "Wikidata Q58013 (Leo Geyr von Schweppenburg, German general (1886–1974), 1886-1974); Wikipedia, 'Operation Overlord', infobox commander link"
+    note: "Linked row 2259 (Leo D. Hermle, Q18639872: US Marine Corps officer, 1890-1976) is the wrong person for the mention 'Leo v. Schweppenburg' at this battle (2 battles on the row). The infobox links Leo Geyr von Schweppenburg."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0428
+    kind: commander_link
+    target: {battle: Battle_of_Thannuris-22e628115c, side: "Byzantine Empire", mention: "Vincentius"}
+    value: none
+    source: "Wikipedia, 'Battle of Thannuris', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 2277 (Vincentius, Q104529764) is the wrong person for the mention 'Vincentius' at this battle: Q104529764 is 5th-century Latin poet (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0429
+    kind: general_merge
+    target: {general: Q10324444}
+    value: Q23061223
+    source: "Wikidata Q23061223 (Manuel Jesus Pires, Portuguese military officer & civil servant, 1895-1944); Wikidata Q10324444 (Manuel Pires, no description); Wikipedia, 'Battle of Timor' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2297 (1 battle: Battle of Timor) carries Q10324444, no description. The infobox mention 'Manuel Pires' links Manuel Jesus Pires (Q23061223)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0430
+    kind: general_merge
+    target: {general: Q105819427}
+    value: Q1750346
+    source: "Wikidata Q1750346 (Sir John Borlase Warren, 1st Baronet, British Royal Navy officer, politician and diplomat (1753-1822), 1753-1822); Wikidata Q105819427 (Sir John Warren, of Poynton (Poineton), 1540 - 1587); Wikipedia, 'Battle of Tory Island' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2309 (1 battle: Battle of Tory Island) carries Q105819427, 1540 - 1587. The infobox mention 'Sir John Warren' links Sir John Borlase Warren, 1st Baronet (Q1750346)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0431
+    kind: general_merge
+    target: {general: Q3158317}
+    value: Q1677865
+    source: "Wikidata Q1677865 (Jacques Philippe Bonnaud, French general (1757–1797), 1757-1797); Wikidata Q3158317 (Jacques Bonnaud, Haitian-French Jesuit priest and martyr); Wikipedia, 'Battle of Tourcoing' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2314 (1 battle: Battle of Tourcoing) carries Q3158317, Haitian-French Jesuit priest and martyr. The infobox mention 'Jacques Bonnaud' links Jacques Philippe Bonnaud (Q1677865)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0432
+    kind: commander_link
+    target: {battle: Siege_of_Maastricht_1793-ee074f0a0d, side: "Dutch Republic", mention: "Prince Frederick"}
+    value: Q61207
+    source: "Wikidata Q61207 (Prince Friedrich of Hesse-Kassel, German prince (1747-1837), 1747-1837); Wikipedia, 'Siege of Maastricht (1793)', infobox commander link"
+    note: "Linked row 2316 (Prince Frederick, Duke of York and Albany, Q213573: British prince (1763-1827), 1763-1827) is the wrong person for the mention 'Prince Frederick' at this battle (5 battles on the row). The infobox links Prince Friedrich of Hesse-Kassel."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0433
+    kind: commander_link
+    target: {battle: Battle_of_Tulagi_and_Gavutu_Tanambogo-3994ee7569, side: "Empire of Japan", mention: "Masaaki Suzuki"}
+    value: none
+    source: "Wikipedia, 'Battle of Tulagi and Gavutu–Tanambogo', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 2333 (Masaaki Suzuki, Q40957235) is the wrong person for the mention 'Masaaki Suzuki' at this battle: Q40957235 is researcher (ORCID 0000-0001-8843-5532) (2000-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0434
+    kind: general_merge
+    target: {general: Q137927257}
+    value: Q2350432
+    source: "Wikidata Q2350432 (Francisco Javier Venegas, Spanish noble and general, 1754-1838); Wikidata Q137927257 (unlabelled, no description); Wikipedia, 'Battle of Uclés (1809)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2337 (1 battle: Battle of Uclés (1809)) carries Q137927257, no description. The infobox mention 'Francisco Venegas' links Francisco Javier Venegas (Q2350432)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0435
+    kind: general_merge
+    target: {general: Q71708429}
+    value: Q3385065
+    source: "Wikidata Q3385065 (Pierre François Xavier Boyer, French soldier (1772–1851), 1772-1851); Wikidata Q71708429 (Pierre Boyer, magistrate); Wikipedia, 'Battle of Venta del Pozo' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2376 (1 battle: Battle of Venta del Pozo) carries Q71708429, magistrate. The infobox mention 'Pierre Boyer' links Pierre François Xavier Boyer (Q3385065)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0436
+    kind: general_merge
+    target: {general: Q98178229}
+    value: Q12849191
+    source: "Wikidata Q12849191 (Isfandyadh, an Iranian aristocrat from the Ispahbudhan family, 601-?); Wikidata Q98178229 (Isfandiyar Ismayilov, researcher); Wikipedia, 'Battle of Waj Rudh' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2423 (1 battle: Battle of Waj Rudh) carries Q98178229, researcher. The infobox mention 'Isfandiyar' links Isfandyadh (Q12849191)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0437
+    kind: general_merge
+    target: {general: Q109940660}
+    value: Q251103
+    source: "Wikidata Q251103 (Jean Reynier, French general (1771-1814), 1771-1814); Wikidata Q109940660 (Reynier Arondeaux, no description); Wikipedia, 'Battle of Wolkowisk' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2454 (1 battle: Battle of Wolkowisk) carries Q109940660, no description. The infobox mention 'Reynier' links Jean Reynier (Q251103)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0438
+    kind: general_merge
+    target: {general: Q60994760}
+    value: Q3326755
+    source: "Wikidata Q3326755 (Manuel Alberto Freire de Andrade y Armijo, Spanish general, 1767-1835); Wikidata Q60994760 (Manuel Freire, Uruguayan soldier); Wikipedia, 'Battle of Zújar' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2469 (1 battle: Battle of Zújar) carries Q60994760, Uruguayan soldier. The infobox mention 'Manuel Freire' links Manuel Alberto Freire de Andrade y Armijo (Q3326755)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0439
+    kind: commander_link
+    target: {battle: Battle_of_le_Ronde-4ec2c5752a, side: "Great Britain", mention: "Samuel Osborne"}
+    value: none
+    source: "Wikipedia, 'Battle of Île Ronde', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 2499 (Samuel Osborne, Q114756435) is the wrong person for the mention 'Samuel Osborne' at this battle: Q114756435 is news reporter (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0440
+    kind: general_merge
+    target: {general: Q120767136}
+    value: Q657148
+    source: "Wikidata Q657148 (Max Kennedy Horton, Royal Navy admiral (1883-1951), 1883-1951); Wikidata Q120767136 (Maxwell Horton, computer scientist); Wikipedia, 'Battle of the Atlantic' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2506 (1 battle: Battle of the Atlantic) carries Q120767136, computer scientist. The infobox mention 'Max Horton' links Max Kennedy Horton (Q657148)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0441
+    kind: general_merge
+    target: {general: Q76059185}
+    value: Q11802796
+    source: "Wikidata Q11802796 (Robert St Vincent Sherbrooke, recipient of the Victoria Cross, 1901-1972); Wikidata Q76059185 (Robert L. Sherbrooke, Peerage person ID=501855); Wikipedia, 'Battle of the Barents Sea' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2526 (1 battle: Battle of the Barents Sea) carries Q76059185, Peerage person ID=501855. The infobox mention 'Robert Sherbrooke' links Robert St Vincent Sherbrooke (Q11802796)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0442
+    kind: general_merge
+    target: {general: Q7791336}
+    value: Q334994
+    source: "Wikidata Q334994 (Thomas Cochrane, 10th Earl of Dundonald, British Royal Navy admiral (1775-1860), 1775-1860); Wikidata Q7791336 (Thomas Cochrane, Royal Navy admiral of the fleet (1789-1872)); Wikipedia, 'Battle of the Basque Roads' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2528 (2 battles: Battle of the Basque Roads; Siege of Roses (1808)) carries Q7791336, Royal Navy admiral of the fleet (1789-1872). The infobox mention 'Thomas Cochrane' links Thomas Cochrane, 10th Earl of Dundonald (Q334994)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0443
+    kind: general_merge
+    target: {general: Q88772800}
+    value: Q5102654
+    source: "Wikidata Q5102654 (Francisco Silveira, Count of Amarante, Portuguese general and noble, 1763-1821); Wikidata Q88772800 (Francisco Silveira, researcher); Wikipedia, 'Battle of the Bridge of Amarante' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2532 (2 battles: Battle of the Bridge of Amarante; Siege of Chaves) carries Q88772800, researcher. The infobox mention 'Francisco Silveira' links Francisco Silveira, Count of Amarante (Q5102654)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0444
+    kind: commander_link
+    target: {battle: Battle_of_the_Chinese_Farm-43022e1769, side: "Egypt", mention: "Sayed Saleh"}
+    value: none
+    source: "Wikipedia, 'Battle of the Chinese Farm', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 2544 (Sayed Saleh, Q81568180) is the wrong person for the mention 'Sayed Saleh' at this battle: Q81568180 is researcher (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0445
+    kind: commander_link
+    target: {battle: Battle_of_the_Gebora-bc6e817144, side: "Spain", mention: "Pedro Caro"}
+    value: none
+    source: "Wikipedia, 'Battle of the Gebora', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 2557 (Pedro Caro, Q85876244) is the wrong person for the mention 'Pedro Caro' at this battle: Q85876244 is Peruvian politician (1850-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0446
+    kind: general_merge
+    target: {general: Q6881657}
+    value: Q952469
+    source: "Wikidata Q952469 (Mithridates of Persia, Persian general (died 334 BC), 350 BC-334 BC); Wikidata Q6881657 (Mithradates, Satrap of Cappadocia, satrap of Cappadocia); Wikipedia, 'Battle of the Granicus' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2574 (1 battle: Battle of the Granicus) carries Q6881657, satrap of Cappadocia. The infobox mention 'Mithridates' links Mithridates of Persia (Q952469)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0447
+    kind: commander_link
+    target: {battle: Battle_of_the_Hotels-ebddb9b740, side: "Lebanese Front", mention: "Joseph Hanna"}
+    value: none
+    source: "Wikipedia, 'Battle of the Hotels', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 2600 (Joseph Hanna, Q87875584) is the wrong person for the mention 'Joseph Hanna' at this battle: Q87875584 is researcher (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0448
+    kind: general_merge
+    target: {general: Q3380190}
+    value: Q312391
+    source: "Wikidata Q312391 (Philippe Leclerc de Hauteclocque, French general (1902–1947), 1902-1947); Wikidata Q3380190 (Philippe Leclerc, French film director); Wikipedia, 'Battle of the Mareth Line' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2622 (4 battles: Battle of the Mareth Line; Battle of the Vosges (1944); Capture of Kufra; Liberation of Strasbourg) carries Q3380190, French film director. The infobox mention 'Philippe Leclerc' links Philippe Leclerc de Hauteclocque (Q312391)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0449
+    kind: general_merge
+    target: {general: Q69441100}
+    value: Q5102654
+    source: "Wikidata Q5102654 (Francisco Silveira, Count of Amarante, Portuguese general and noble, 1763-1821); Wikidata Q69441100 (Francisco da Silveira Dias, Roman Catholic clergyman); Wikipedia, 'Battle of the Monterrey Valley' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2639 (2 battles: Battle of the Monterrey Valley; Combat of Padrões de Teixeira) carries Q69441100, Roman Catholic clergyman. The infobox mention 'Francisco da Silveira' links Francisco Silveira, Count of Amarante (Q5102654)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0450
+    kind: commander_link
+    target: {battle: Siege_of_Genoa_1746-4a2d443421, side: "Kingdom of Great Britain", mention: "George Townshend"}
+    value: Q5545292
+    source: "Wikidata Q5545292 (George Townshend, Royal Navy admiral (1716-1769), 1716-1769); Wikipedia, 'Siege of Genoa (1746)', infobox commander link"
+    note: "Linked row 2650 (George Townshend, 1st Marquess Townshend, Q3101971: British Field Marshal and Marquess (1724-1807), 1724-1807) is the wrong person for the mention 'George Townshend' at this battle (2 battles on the row). The infobox links George Townshend."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0451
+    kind: general_merge
+    target: {general: Q112175679}
+    value: Q707898
+    source: "Wikidata Q707898 (Guillaume Philibert Duhesme, French general (1766-1815), 1766-1815); Wikidata Q112175679 (Guillaume Duhesme, no description); Wikipedia, 'Blockade of Barcelona' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2710 (3 battles: Blockade of Barcelona; First Siege of Girona (Peninsular War); Second Siege of Girona (Peninsular War)) carries Q112175679, no description. The infobox mention 'Guillaume Duhesme' links Guillaume Philibert Duhesme (Q707898)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0452
+    kind: general_merge
+    target: {general: Q75704889}
+    value: Q2450751
+    source: "Wikidata Q2450751 (Frederick Alfred Pile, British Army general (1884-1976), 1884-1976); Wikidata Q75704889 (Frederick Pile, Peerage person ID=295257); Wikipedia, 'Clydebank Blitz' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2741 (1 battle: Clydebank Blitz) carries Q75704889, Peerage person ID=295257. The infobox mention 'Frederick Pile' links Frederick Alfred Pile (Q2450751)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0453
+    kind: general_merge
+    target: {general: Q11934146}
+    value: Q435167
+    source: "Wikidata Q435167 (Lucius Munatius Plancus, Roman politician and soldier (87–15 BC), 87 BC-15 BC); Wikidata Q11934146 (Lucius Plautius Plancus, Roman politician); Wikipedia, 'Perusine War' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2943 (1 battle: Perusine War) carries Q11934146, Roman politician. The infobox mention 'Plancus' links Lucius Munatius Plancus (Q435167)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0454
+    kind: general_merge
+    target: {general: Q100139457}
+    value: Q319273
+    source: "Wikidata Q319273 (Gaius Asinius Pollio, Roman politician, historian and writer (75 BC–AD 4), 75 BC-4); Wikidata Q100139457 (Asinius Lepidus, governor of Roman province of Cappadocia); Wikipedia, 'Perusine War' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 2945 (1 battle: Perusine War) carries Q100139457, governor of Roman province of Cappadocia. The infobox mention 'Asinius' links Gaius Asinius Pollio (Q319273)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0455
+    kind: general_merge
+    target: {general: Q23063339}
+    value: Q1568791
+    source: "Wikidata Q1568791 (Peter Phokas, Byzantine eunuch general, ?-977); Wikidata Q23063339 (Peter, patriarch of the Greek Orthodox Church of Antioch); Wikipedia, 'Siege of Antioch (968–969)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3014 (1 battle: Siege of Antioch (968–969)) carries Q23063339, patriarch of the Greek Orthodox Church of Antioch. The infobox mention 'Petros' links Peter Phokas (Q1568791)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0456
+    kind: general_merge
+    target: {general: Q11934909}
+    value: Q3286990
+    source: "Wikidata Q3286990 (Manuel the Armenian, 9th-century Byzantine general, 701-838); Wikidata Q11934909 (Manuel, Manuel (Abat de Sant Quirze)); Wikipedia, 'Siege of Arsamosata (837)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3018 (2 battles: Siege of Arsamosata (837); Siege of Sozopetra (837)) carries Q11934909, Manuel (Abat de Sant Quirze). The infobox mention 'Manuel' links Manuel the Armenian (Q3286990)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0457
+    kind: general_merge
+    target: {general: Q109700743}
+    value: Q557378
+    source: "Wikidata Q557378 (Salman the Persian, companion of Muhammad; first Persian convert to Islam, 568-657); Wikidata Q109700743 (Salman Al Farisiy, Indonesian political candidate); Wikipedia, 'Siege of Ctesiphon (637)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3064 (1 battle: Siege of Ctesiphon (637)) carries Q109700743, Indonesian political candidate. The infobox mention 'Salman al-Farisi' links Salman the Persian (Q557378)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0458
+    kind: commander_link
+    target: {battle: Siege_of_Genoa_1747-fe3cf32998, side: "Republic of Genoa", mention: "Garrison"}
+    value: none
+    source: "Wikipedia, 'Siege of Genoa (1747)', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 3101 (Laura M. Garrison, Q18984807) is the wrong person for the mention 'Garrison' at this battle: Q18984807 is botanist (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0459
+    kind: general_merge
+    target: {general: Q96168663}
+    value: Q2453214
+    source: "Wikidata Q2453214 (Jezzar Pasha, 18th-century Ottoman governor, 1722-1804); Wikidata Q96168663 (Ahmed Al-Jazzar, researcher); Wikipedia, 'Siege of Jaffa' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3117 (1 battle: Siege of Jaffa) carries Q96168663, researcher. The infobox mention 'Ahmed al-Jazzar' links Jezzar Pasha (Q2453214)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0460
+    kind: commander_link
+    target: {battle: Siege_of_Jinju_1592-e0e877f7d4, side: "Korean army, citizens", mention: "Im Gye-yeong"}
+    value: none
+    source: "Wikipedia, 'Siege of Jinju (1592)', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 3137 (Im Hyun Wook, Q115125873) is the wrong person for the mention 'Im Gye-yeong' at this battle: Q115125873 is South Korean director (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0461
+    kind: commander_link
+    target: {battle: Siege_of_Namwon-a121a0a4cb, side: "Korean Garrison", mention: "Im Hyun"}
+    value: none
+    source: "Wikipedia, 'Siege of Namwon', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 3137 (Im Hyun Wook, Q115125873) is the wrong person for the mention 'Im Hyun' at this battle: Q115125873 is South Korean director (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0462
+    kind: general_merge
+    target: {general: Q3173925}
+    value: Q3164348
+    source: "Wikidata Q3164348 (Jean-Baptiste Perrée, French admiral, 1761-1800); Wikidata Q3173925 (Jean Perrée-Duhamel, French politician); Wikipedia, 'Siege of Malta (1798–1800)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3184 (1 battle: Siege of Malta (1798–1800)) carries Q3173925, French politician. The infobox mention 'Jean Perrée' links Jean-Baptiste Perrée (Q3164348)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0463
+    kind: general_merge
+    target: {general: Q87011592}
+    value: Q78315
+    source: "Wikidata Q78315 (Hans Ferdinand Geisler, German general, 1891-1966); Wikidata Q87011592 (Hans Geisler, researcher); Wikipedia, 'Siege of Malta (World War II)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3186 (1 battle: Siege of Malta (World War II)) carries Q87011592, researcher. The infobox mention 'Hans Geisler' links Hans Ferdinand Geisler (Q78315)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0464
+    kind: commander_link
+    target: {battle: Siege_of_Namwon-a121a0a4cb, side: "Korean Garrison", mention: "Yi Chun-won"}
+    value: none
+    source: "Wikipedia, 'Siege of Namwon', infobox commander list (no Wikidata person for the named commander)"
+    note: "Linked row 3200 (Yi-Chun Wong, Q96961157) is the wrong person for the mention 'Yi Chun-won' at this battle: Q96961157 is researcher (?-?). No verifiable Wikidata person exists for the commander named in the infobox, so the mention is unlinked."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0465
+    kind: general_merge
+    target: {general: Q76034588}
+    value: Q1374634
+    source: "Wikidata Q1374634 (Thomas Arthur, comte de Lally, Governor of French India (1702-1766), 1702-1766); Wikidata Q76034588 (Thomas Arthur, (died 1803)); Wikipedia, 'Siege of Pondicherry (1760)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3226 (1 battle: Siege of Pondicherry (1760)) carries Q76034588, (died 1803). The infobox mention 'Thomas Arthur' links Thomas Arthur, comte de Lally (Q1374634)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0466
+    kind: general_merge
+    target: {general: Q10885218}
+    value: Q8038980
+    source: "Wikidata Q8038980 (Wu Weizhong, Ming Dynasty general, ?-?); Wikidata Q10885218 (Wu Weizhong, politician); Wikipedia, 'Siege of Pyongyang (1593)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3234 (1 battle: Siege of Pyongyang (1593)) carries Q10885218, politician. The infobox mention 'Wu Weizhong' links Wu Weizhong (Q8038980)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0467
+    kind: general_merge
+    target: {general: Q106526547}
+    value: Q27967149
+    source: "Wikidata Q27967149 (Biagio Bernardo Caboga, leader of the Ragusan uprising against the French, 1779-1854); Wikidata Q106526547 (Blasius Philipp Caboga, no description); Wikipedia, 'Siege of Ragusa (1814)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3239 (1 battle: Siege of Ragusa (1814)) carries Q106526547, no description. The infobox mention 'Biagio Caboga' links Biagio Bernardo Caboga (Q27967149)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0468
+    kind: general_merge
+    target: {general: Q136468280}
+    value: Q367767
+    source: "Wikidata Q367767 (Al-Hasan ibn Ali al-Kalbi, Governor of Tunis, Emir of Sicily (911–964), 911-964); Wikidata Q136468280 (Hasān ibn Ali, no description); Wikipedia, 'Siege of Rometta' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3252 (1 battle: Siege of Rometta) carries Q136468280, no description. The infobox mention 'Hasan ibn Ali' links Al-Hasan ibn Ali al-Kalbi (Q367767)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0469
+    kind: general_merge
+    target: {general: Q982580}
+    value: Q4322707
+    source: "Wikidata Q4322707 (Pyotr Georgyevich Novikov, Soviet general, 1907-1944); Wikidata Q982580 (Pyotr Novikov, Russian mathematician (1901-1975)); Wikipedia, 'Siege of Sevastopol (1941–1942)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3260 (1 battle: Siege of Sevastopol (1941–1942)) carries Q982580, Russian mathematician (1901-1975). The infobox mention 'Pyotr Novikov' links Pyotr Georgyevich Novikov (Q4322707)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0470
+    kind: general_merge
+    target: {general: Q6237030}
+    value: Q6241237
+    source: "Wikidata Q6241237 (John J. Peck, Union United States Army general (1821–1878), 1821-1878); Wikidata Q6237030 (John H. Peck, American academic (1838-1919)); Wikipedia, 'Siege of Suffolk' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3265 (1 battle: Siege of Suffolk) carries Q6237030, American academic (1838-1919). The infobox mention 'John Peck' links John J. Peck (Q6241237)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0471
+    kind: general_merge
+    target: {general: Q65708386}
+    value: Q48084
+    source: "Wikidata Q48084 (Andrey Yeryomenko, Marshal of the Soviet Union (1892-1970), 1892-1970); Wikidata Q65708386 (Andrei Yeremenko, correspondence chess player); Wikipedia, 'Smolensk operation' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3327 (1 battle: Smolensk operation) carries Q65708386, correspondence chess player. The infobox mention 'Andrei Yeremenko' links Andrey Yeryomenko (Q48084)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0472
+    kind: commander_link
+    target: {battle: Valley_of_Tears-a38cd7a95f, side: "Israel", mention: "Maj. Gen. Avigdor Ben-Gal"}
+    value: Q958368
+    source: "Wikidata Q958368 (Avigdor Ben-Gal, Israeli general (1936–2016), 1936-2016); Wikipedia, 'Valley of Tears', infobox commander link"
+    note: "Linked row 3330 (Uri Ben Ari, Q12403598: Israeli general and writer, 1925-2009) is the wrong person for the mention 'Maj. Gen. Avigdor Ben-Gal' at this battle (2 battles on the row). The infobox links Avigdor Ben-Gal."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0473
+    kind: general_merge
+    target: {general: Q109076326}
+    value: Q335642
+    source: "Wikidata Q335642 (John Pitt, 2nd Earl of Chatham, British Army general (1756-1835), 1756-1835); Wikidata Q109076326 (Lord Chatham, no description); Wikipedia, 'Walcheren Campaign' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3363 (1 battle: Walcheren Campaign) carries Q109076326, no description. The infobox mention 'Lord Chatham' links John Pitt, 2nd Earl of Chatham (Q335642)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  - id: ov-0474
+    kind: general_merge
+    target: {general: Q1241388}
+    value: Q2253
+    source: "Wikidata Q2253 (Scipio Africanus, Roman general and politician (236/235–183 BC), 235 BC-183 BC); Wikidata Q1241388 (Publius Cornelius Scipio, Eldest son of Scipio Africanus (died 170 BC)); Wikipedia, 'Battle of Utica (203 BC)' infobox and linked commander article"
+    note: "Wrong Q-id on a linked row. Linked row 3392 (1 battle: Battle of Utica (203 BC)) carries Q1241388, Eldest son of Scipio Africanus (died 170 BC). The infobox mention 'Publius Cornelius Scipio' links Scipio Africanus (Q2253)."
+    reviewed: {by: historiography-reviewer, "on": 2026-10-30}
