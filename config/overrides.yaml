@@ -819,16 +819,16 @@ entries:
     value:
       - {general: Q131691, role: field_commander, rank: 0, weight: 0.40}
       - {general: Q153522, role: field_commander, rank: 0, weight: 0.25}
-      - {general: Earl of Uxbridge, role: subordinate, rank: 1, weight: 0.05, reports_to: Q131691}
+      - {general: Q335133, role: subordinate, rank: 1, weight: 0.05, reports_to: Q131691}
       - {general: "William, Prince of Orange", role: subordinate, rank: 1, weight: 0.04, reports_to: Q131691}
       - {general: Q121734, role: subordinate, rank: 1, weight: 0.04, reports_to: Q131691}
       - {general: Q336485, role: subordinate, rank: 1, weight: 0.04, reports_to: Q131691}
       - {general: Q67913, role: subordinate, rank: 1, weight: 0.04, reports_to: Q153522}
       - {general: Q165519, role: subordinate, rank: 1, weight: 0.05, reports_to: Q153522}
-      - {general: Friedrich von Bülow, role: subordinate, rank: 1, weight: 0.05, reports_to: Q153522}
+      - {general: Q63023, role: subordinate, rank: 1, weight: 0.05, reports_to: Q153522}
       - {general: Ludwig von Pirch, role: subordinate, rank: 1, weight: 0.04, reports_to: Q153522}
     source: "Wikipedia, 'Battle of Waterloo', infobox (separate commanders and units for Wellington's army and Blücher's army; Blücher's army: I, II and IV Corps under Zieten, Pirch and Bülow) and sections 'Prelude' and 'Armies' (two independent armies; on 18 June Blücher assured Wellington of Prussian support)"
-    note: "The side holds two allied armies, and Blücher commanded the Prussian one in his own right, not as Wellington's subordinate: Wellington could not give him orders. The LLM made him a rank-1 subordinate with no reports_to. He becomes a co-field commander (rank 0) with his weight unchanged at 0.25, and the Prussian corps and staff officers report to him as rank 1. Wellington stays at 0.40, and all other weights are unchanged. The weights still sum to 1.00. The 0.40/0.25 split is the classifier's, not a scholarly measure of relative credit."
+    note: "The side holds two allied armies, and Blücher commanded the Prussian one in his own right, not as Wellington's subordinate: Wellington could not give him orders. The LLM made him a rank-1 subordinate with no reports_to. He becomes a co-field commander (rank 0) with his weight unchanged at 0.25, and the Prussian corps and staff officers report to him as rank 1. Wellington stays at 0.40, and all other weights are unchanged. The weights still sum to 1.00. Uxbridge and Bülow are named by Q-id (Q335133, Q63023) since ov-0116 and ov-0160+ merged their local rows. The 0.40/0.25 split is the classifier's, not a scholarly measure of relative credit."
     reviewed: {by: lee, "on": 2026-10-29}
 
   - id: ov-0103
