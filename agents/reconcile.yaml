@@ -32,6 +32,13 @@ tools:
   - db_update
 
 params:
+  # Battles with battle_type 'campaign' (Battle of France, Barbarossa, ...) report
+  # whole-campaign totals, which are not one engagement's strength and trip the
+  # troop span guard. true drops all their troop and casualty reports from the
+  # model (counted in excluded_campaign, sides logged as unfillable); false
+  # restores the earlier behaviour.
+  exclude_campaigns: true
+
   # ── source-bias model priors ──────────────────────────────────────────────
   bias_prior_sd: 1.0                  # weakly informative
 

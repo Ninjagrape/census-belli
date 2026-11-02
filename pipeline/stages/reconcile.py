@@ -665,6 +665,7 @@ def _run_body(
     counts = ReconcileCounts()
 
     min_plausible_troops = float(params.get("min_plausible_troops", DEFAULT_MIN_PLAUSIBLE_TROOPS))
+    exclude_campaigns = bool(params.get("exclude_campaigns", True))
     reports = load_reports(
         conn,
         ancient_cutoff_year=ancient_cutoff_year,
@@ -672,13 +673,17 @@ def _run_body(
         min_plausible_troops=min_plausible_troops,
         span_warn_log=float(params.get("troop_span_warn_log", SPAN_WARN_LOG_RATIO)),
         span_error_log=float(params.get("troop_span_error_log", SPAN_ERROR_LOG_RATIO)),
+        exclude_campaigns=exclude_campaigns,
     )
 
     # Unfillable sides are a fact about the loaded reports, not about
     # whether a model ever gets fit from them, so this runs regardless of
     # what happens to either quantity's fit below.
     _modellable, unfillable = classify_sides(
-        reports, conn, min_plausible_troops=min_plausible_troops
+        reports,
+        conn,
+        min_plausible_troops=min_plausible_troops,
+        exclude_campaigns=exclude_campaigns,
     )
     write_unfillable(conn, unfillable, counts)
     if owns_connection:

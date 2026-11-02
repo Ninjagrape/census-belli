@@ -491,6 +491,7 @@ def test_the_counts_account_for_every_troop_row_read(conn: Connection) -> None:
         + counts.excluded_component_of_stated_total
         + counts.excluded_population_scope
         + counts.excluded_superseded_by_modern
+        + counts.excluded_campaign
     )
     assert accounted == 4
 

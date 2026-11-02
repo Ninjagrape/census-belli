@@ -106,6 +106,12 @@ _FIELD_NAME_BY_QUANTITY: Final[dict[Quantity, str]] = {
 # clear on a re-run.
 _RECONCILE_NOTE_PREFIX: Final[str] = "reconcile: "
 
+# Campaign- and theatre-scale entries (Battle of France, Barbarossa) carry
+# whole-campaign totals, which are not one engagement's strength and would trip
+# the troop span guard; they stay out of a per-battle source-disagreement model.
+_CAMPAIGN_BATTLE_TYPE: Final[str] = "campaign"
+CAMPAIGN_UNFILLABLE_REASON: Final[str] = "campaign-scale battle excluded from reconcile"
+
 _LOAD_TROOP_REPORTS = text(
     """
     SELECT
@@ -113,7 +119,7 @@ _LOAD_TROOP_REPORTS = text(
         s.source_type, s.url,
         tr.branch, tr.reported_value, tr.scope,
         tr.is_estimate, tr.is_upper_bound, tr.is_lower_bound,
-        tr.extracted_context, b.year_astronomical
+        tr.extracted_context, b.year_astronomical, b.battle_type
     FROM troop_reports tr
     JOIN battle_sides bs ON bs.side_id = tr.side_id
     JOIN battles b       ON b.battle_id = bs.battle_id
@@ -127,7 +133,7 @@ _LOAD_CASUALTY_REPORTS = text(
         cr.report_id, cr.side_id, bs.battle_id, cr.source_id,
         s.source_type, s.url,
         cr.casualty_type, cr.reported_value, cr.is_estimate,
-        cr.extracted_context, b.year_astronomical
+        cr.extracted_context, b.year_astronomical, b.battle_type
     FROM casualty_reports cr
     JOIN battle_sides bs ON bs.side_id = cr.side_id
     JOIN battles b       ON b.battle_id = bs.battle_id
@@ -140,17 +146,19 @@ _LOAD_CASUALTY_REPORTS = text(
 _LOAD_TROOP_SIDE_ROWS = text(
     """
     SELECT tr.side_id, bs.battle_id, tr.branch, tr.reported_value, tr.extracted_context,
-           tr.scope
+           tr.scope, b.battle_type
     FROM troop_reports tr
     JOIN battle_sides bs ON bs.side_id = tr.side_id
+    JOIN battles b       ON b.battle_id = bs.battle_id
     """
 )
 
 _LOAD_CASUALTY_SIDE_ROWS = text(
     """
-    SELECT DISTINCT cr.side_id, bs.battle_id
+    SELECT DISTINCT cr.side_id, bs.battle_id, b.battle_type
     FROM casualty_reports cr
     JOIN battle_sides bs ON bs.side_id = cr.side_id
+    JOIN battles b       ON b.battle_id = bs.battle_id
     """
 )
 
@@ -186,8 +194,9 @@ class UnfillableSide:
             all is always modellable for casualties (see :func:`classify_sides`).
         reason: A short, human-readable explanation, one of
             ``"only non-total branch reports"``, ``"only naval counts"``,
-            ``"only implausible or non-personnel figures"`` or
-            ``"no positive value"``.
+            ``"only implausible or non-personnel figures"``,
+            ``"no positive value"`` or, for either quantity on a campaign-scale
+            battle, :data:`CAMPAIGN_UNFILLABLE_REASON`.
     """
 
     side_id: int
@@ -428,7 +437,11 @@ def _record_span_findings(conn: Any, findings: list[SpanFinding], counts: Reconc
 
 
 def _build_troop_reports(
-    conn: Any, counts: ReconcileCounts, *, min_plausible_troops: float
+    conn: Any,
+    counts: ReconcileCounts,
+    *,
+    min_plausible_troops: float,
+    exclude_campaigns: bool = True,
 ) -> list[Report]:
     """Load, filter and classify every troop report.
 
@@ -437,6 +450,7 @@ def _build_troop_reports(
         counts: Counters to accumulate into.
         min_plausible_troops: Floor below which a value is not an army's
             strength; see :mod:`pipeline.reconcilers.plausibility`.
+        exclude_campaigns: Skip reports of ``battle_type='campaign'`` battles.
 
     Returns:
         Usable troop :class:`Report` instances, with ``claim_regime`` and
@@ -458,9 +472,17 @@ def _build_troop_reports(
         is_lower_bound,
         extracted_context,
         year_astronomical,
+        battle_type,
     ) in conn.execute(_LOAD_TROOP_REPORTS).fetchall():
         counts.reports_read += 1
         value = float(reported_value)
+        # First, before the per-row rules: a campaign row is out whatever its
+        # branch or value, and counting it once here keeps the other counters
+        # describing only per-battle rows. An override on a campaign battle is
+        # skipped too; the side is logged as unfillable by classify_sides.
+        if exclude_campaigns and battle_type == _CAMPAIGN_BATTLE_TYPE:
+            counts.excluded_campaign += 1
+            continue
         if not _classify_troop_report(str(branch), value, scope, counts):
             if str(url).startswith(OVERRIDE_SOURCE_PREFIX):
                 # A curator entered this on purpose; dropping it silently would
@@ -505,7 +527,9 @@ def _build_troop_reports(
     return reports
 
 
-def _build_casualty_reports(conn: Any, counts: ReconcileCounts) -> list[Report]:
+def _build_casualty_reports(
+    conn: Any, counts: ReconcileCounts, *, exclude_campaigns: bool = True
+) -> list[Report]:
     """Load and classify every casualty report.
 
     Every ``casualty_reports`` row is kept: unlike troops, a zero is a
@@ -515,6 +539,8 @@ def _build_casualty_reports(conn: Any, counts: ReconcileCounts) -> list[Report]:
     Args:
         conn: An open database connection.
         counts: Counters to accumulate into.
+        exclude_campaigns: Skip reports of ``battle_type='campaign'`` battles
+            (counted in ``excluded_campaign``).
 
     Returns:
         Every casualty report as a :class:`Report`, with ``claim_regime`` and
@@ -533,9 +559,13 @@ def _build_casualty_reports(conn: Any, counts: ReconcileCounts) -> list[Report]:
         is_estimate,
         extracted_context,
         year_astronomical,
+        battle_type,
     ) in conn.execute(_LOAD_CASUALTY_REPORTS).fetchall():
         counts.reports_read += 1
         value = float(reported_value)
+        if exclude_campaigns and battle_type == _CAMPAIGN_BATTLE_TYPE:
+            counts.excluded_campaign += 1
+            continue
 
         regime = classify_regime(extracted_context, value=value)
         if regime == "unlabelled":
@@ -591,6 +621,7 @@ def load_reports(
     min_plausible_troops: float = DEFAULT_MIN_PLAUSIBLE_TROOPS,
     span_warn_log: float = SPAN_WARN_LOG_RATIO,
     span_error_log: float = SPAN_ERROR_LOG_RATIO,
+    exclude_campaigns: bool = True,
 ) -> list[Report]:
     """Load every usable troop and casualty report as :class:`Report` records.
 
@@ -610,7 +641,7 @@ def load_reports(
             ``troop_reports_used``, ``casualty_reports_used``,
             ``excluded_non_total_branch``, ``excluded_naval``,
             ``excluded_population_scope``, ``excluded_superseded_by_modern``,
-            ``excluded_non_positive``, the four plausibility counters
+            ``excluded_campaign``, ``excluded_non_positive``, the four plausibility counters
             (``excluded_implausible_small``, ``excluded_non_personnel``,
             ``excluded_date_context``, ``excluded_component_of_stated_total``),
             ``regime_unlabelled``, ``lineages`` and the span guard's
@@ -619,6 +650,9 @@ def load_reports(
             army's strength (``params.min_plausible_troops``).
         span_warn_log: Span guard warning bound (``params.troop_span_warn_log``).
         span_error_log: Span guard error bound (``params.troop_span_error_log``).
+        exclude_campaigns: Exclude every troop and casualty report of a battle
+            whose ``battle_type`` is ``campaign`` (``params.exclude_campaigns``).
+            Counted in ``excluded_campaign``.
 
     Returns:
         Every usable report, troops and casualties together, each with
@@ -626,7 +660,12 @@ def load_reports(
     """
     del ancient_cutoff_year  # see docstring
 
-    kept_troops = _build_troop_reports(conn, counts, min_plausible_troops=min_plausible_troops)
+    kept_troops = _build_troop_reports(
+        conn,
+        counts,
+        min_plausible_troops=min_plausible_troops,
+        exclude_campaigns=exclude_campaigns,
+    )
     _record_span_findings(
         conn,
         troop_span_findings(
@@ -635,7 +674,9 @@ def load_reports(
         counts,
     )
     troop_reports = _with_lineages(kept_troops)
-    casualty_reports = _with_lineages(_build_casualty_reports(conn, counts))
+    casualty_reports = _with_lineages(
+        _build_casualty_reports(conn, counts, exclude_campaigns=exclude_campaigns)
+    )
 
     counts.lineages = len({r.lineage_id for r in troop_reports}) + len(
         {r.lineage_id for r in casualty_reports}
@@ -649,6 +690,7 @@ def load_reports(
         excluded_naval=counts.excluded_naval,
         excluded_population_scope=counts.excluded_population_scope,
         excluded_superseded_by_modern=counts.excluded_superseded_by_modern,
+        excluded_campaign=counts.excluded_campaign,
         excluded_non_positive=counts.excluded_non_positive,
         excluded_implausible_small=counts.excluded_implausible_small,
         excluded_non_personnel=counts.excluded_non_personnel,
@@ -700,6 +742,7 @@ def classify_sides(
     conn: Any,
     *,
     min_plausible_troops: float = DEFAULT_MIN_PLAUSIBLE_TROOPS,
+    exclude_campaigns: bool = True,
 ) -> tuple[set[int], list[UnfillableSide]]:
     """Decide which sides can be modelled, and explain the ones that cannot.
 
@@ -723,6 +766,10 @@ def classify_sides(
             ``troop_reports`` rows for sides that produced no usable report.
         min_plausible_troops: The floor the loader applied, so the reason given
             for a side agrees with why its rows were dropped.
+        exclude_campaigns: Whether the loader dropped campaign-scale battles;
+            their sides are then unfillable for both quantities with
+            :data:`CAMPAIGN_UNFILLABLE_REASON`, so the exclusion is logged
+            rather than silent.
 
     Returns:
         A tuple of (side ids modellable for troops, unfillable sides of both
@@ -733,10 +780,13 @@ def classify_sides(
 
     rows_by_side: dict[int, list[tuple[str, float, str, str]]] = defaultdict(list)
     battle_by_side: dict[int, int] = {}
-    for side_id, battle_id, branch, reported_value, context, scope in conn.execute(
+    campaign_sides: set[int] = set()
+    for side_id, battle_id, branch, reported_value, context, scope, battle_type in conn.execute(
         _LOAD_TROOP_SIDE_ROWS
     ).fetchall():
         side_id = int(side_id)
+        if exclude_campaigns and battle_type == _CAMPAIGN_BATTLE_TYPE:
+            campaign_sides.add(side_id)
         battle_by_side[side_id] = int(battle_id)
         rows_by_side[side_id].append(
             (str(branch), float(reported_value), context or "", str(scope))
@@ -751,18 +801,25 @@ def classify_sides(
                 side_id=side_id,
                 battle_id=battle_by_side[side_id],
                 quantity="troops",
-                reason=_unfillable_reason(rows, min_plausible_troops=min_plausible_troops),
+                reason=(
+                    CAMPAIGN_UNFILLABLE_REASON
+                    if side_id in campaign_sides
+                    else _unfillable_reason(rows, min_plausible_troops=min_plausible_troops)
+                ),
             )
         )
 
-    for side_id, battle_id in conn.execute(_LOAD_CASUALTY_SIDE_ROWS).fetchall():
+    for side_id, battle_id, battle_type in conn.execute(_LOAD_CASUALTY_SIDE_ROWS).fetchall():
         if int(side_id) not in casualty_modellable:
+            is_campaign = exclude_campaigns and battle_type == _CAMPAIGN_BATTLE_TYPE
             unfillable.append(
                 UnfillableSide(
                     side_id=int(side_id),
                     battle_id=int(battle_id),
                     quantity="casualties",
-                    reason="no usable casualty report",
+                    reason=(
+                        CAMPAIGN_UNFILLABLE_REASON if is_campaign else "no usable casualty report"
+                    ),
                 )
             )
 

@@ -27,7 +27,10 @@ class _FakeConn:
 
 
 def _row(url: str, *, branch: str = "total", scope: str | None = "army") -> tuple[Any, ...]:
-    return (1, 7, 3, 9, "manual_entry", url, branch, 50_000.0, scope, True, False, False, "", -200)
+    return (
+        1, 7, 3, 9, "manual_entry", url, branch, 50_000.0, scope, True, False, False, "", -200,
+        "field",
+    )  # fmt: skip
 
 
 def test_an_override_the_row_rules_would_drop_raises_naming_url_side_and_reason() -> None:
