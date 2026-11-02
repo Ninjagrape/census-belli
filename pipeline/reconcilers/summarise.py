@@ -222,7 +222,7 @@ def summarise_fit(
         "reports_honoured": reports_honoured(idata, design, ci_mass=ci_mass),
         # Casualties keep s0; troops have the P1 side prior instead (side_prior).
         "s0": _scalar_stats(idata, "s0") if "s0" in idata.posterior.data_vars else None,
-        "side_prior": _side_prior_stats(idata),
+        "side_prior": _side_prior_stats(idata, priors),
         # Read by between_battle_variance_is_plausible: the ablation has no battle
         # effect, so that check is expected to fail under it.
         "side_prior_independent": priors.side_prior_independent,
@@ -574,12 +574,24 @@ def _side_prior_gate_inputs(
     return stats
 
 
-def _side_prior_stats(idata: az.InferenceData) -> dict[str, Any] | None:
-    """Posterior summaries of the P1 side prior's scales, or None for casualties."""
+def _side_prior_stats(
+    idata: az.InferenceData, priors: ModelPriors | None = None
+) -> dict[str, Any] | None:
+    """Posterior summaries of the P1 side prior's scales, or None for casualties.
+
+    Args:
+        idata: The fit's posterior.
+        priors: When given, supplies ``sigma_e`` for the era block.
+
+    Returns:
+        Per-scale stats for ``s_b``, ``s_d`` and (legacy only) ``tau_e``, plus an
+        ``era`` entry: the era-effect mode, ``sigma_e``, the pre-versus-post-1800
+        contrast of ``e`` and ``a_era``.
+    """
     names = set(idata.posterior.data_vars)
-    if not {"s_d", "tau_e"} <= names:
+    if "s_d" not in names:
         return None
-    return {
+    stats: dict[str, Any] = {
         name: {
             **_scalar_stats(idata, name),
             "median": _finite(float(np.median(_pooled(idata, name)))),
@@ -587,6 +599,28 @@ def _side_prior_stats(idata: az.InferenceData) -> dict[str, Any] | None:
         for name in ("s_b", "s_d", "tau_e")
         if name in names
     }
+    stats["era"] = _era_effect_stats(idata, priors)
+    return stats
+
+
+def _era_effect_stats(idata: az.InferenceData, priors: ModelPriors | None) -> dict[str, Any]:
+    """Era-effect mode, scale and the pre-1800 versus modern contrast of ``e``."""
+    names = set(idata.posterior.data_vars)
+    mode = "legacy" if "tau_e" in names else "rotated" if "e" in names else "none"
+    era: dict[str, Any] = {"era_effect": mode}
+    if priors is not None and mode != "none":
+        # Under legacy the scale is the free tau_e; sigma_e is its prior scale.
+        era["sigma_e"] = priors.era_effect_prior_sd
+    if "e" in names:
+        e = _pooled(idata, "e")
+        contrast = e[:, :3].mean(axis=1) - e[:, 3:].mean(axis=1)
+        era["e_contrast_pre_vs_post_1800"] = {
+            "mean": _finite(float(contrast.mean())),
+            "sd": _finite(float(contrast.std(ddof=1))) if contrast.size > 1 else None,
+        }
+    if "a_era" in names:
+        era["a_era"] = _scalar_stats(idata, "a_era")
+    return era
 
 
 def _log_normal_pdf(y: np.ndarray, mu: np.ndarray, sd: np.ndarray) -> np.ndarray:

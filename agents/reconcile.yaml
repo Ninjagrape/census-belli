@@ -107,7 +107,12 @@ params:
   # Casualties keep their Student-t model (casualty_likelihood_family).
   likelihood_family: normal           # 'student_t' or 'contaminated' for ablations
   casualty_likelihood_family: student_t
-  era_effect_prior_sd: 1.0
+  era_effect_prior_sd: 1.0            # sigma_e of e ~ ZeroSumNormal (a constant under rotated)
+  # How the troop period mean e enters. rotated (default): sampled in coordinates the
+  # data identify (u_c), sigma_e fixed; same posterior as legacy at tau_e = sigma_e, with
+  # far better geometry (legacy gave max rhat 2.54 on corpus3). legacy: tau_e ~ HalfNormal
+  # times z_era. none: no period mean, for sensitivity runs only.
+  era_effect: rotated
   battle_effect_prior_sd: 1.0         # s_b ~ HalfNormal
   side_deviation_prior_sd: 0.5        # s_d ~ HalfNormal
   # true drops the shared battle effect: sides are independent given their era,

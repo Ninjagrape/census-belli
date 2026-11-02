@@ -410,7 +410,13 @@ def _fit_neutral_troops(
     Raises:
         Exception: Whatever sampling raises, re-raised after logging.
     """
-    model = build_model(design, priors=priors, inflation=inflation, neutral=True)
+    model = build_model(
+        design,
+        priors=priors,
+        inflation=inflation,
+        neutral=True,
+        ancient_cutoff_year=ancient_cutoff_year,
+    )
     # The neutral fit has its own, tighter era prior and no regime offsets, so the
     # published fit's prior check says nothing about it.
     prior_predictive = _prior_check(model, design, params)
@@ -523,7 +529,9 @@ def _fit_quantity(
         merge_ranges=bool(params.get("merge_ranges", True)),
         noise_cutoff_year=_noise_cutoff_year(params),
     )
-    model = build_model(design, priors=priors, inflation=inflation)
+    model = build_model(
+        design, priors=priors, inflation=inflation, ancient_cutoff_year=ancient_cutoff_year
+    )
     # Before the fit, with its own seed: the prior sampler does not touch the
     # posterior's seed stream.
     prior_predictive = _prior_check(model, design, params)

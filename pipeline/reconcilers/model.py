@@ -26,7 +26,7 @@ Casualties draw ``mu_side = m0 + s0 * z_side`` with a Student-t ``z_side``, as
 before. Troops use a prior built from the battle and its period::
 
     mu_side[s] = m0 + e[era_bin(s)] + b[battle(s)] + s_d * zd[s]
-    e  = tau_e * z_era, z_era ~ ZeroSumNormal(1) over era_bin  tau_e ~ HalfNormal(1)
+    e  ~ ZeroSumNormal(sigma_e) over era_bin, sampled in rotated coordinates (below)
     b  = s_b * zb, zb ~ StudentT(nu=4, 0, 1)  per battle  s_b ~ HalfNormal(1)
     zd ~ Normal(0, 1)                per side         s_d ~ HalfNormal(0.5)
 
@@ -45,11 +45,12 @@ gate. Troops also use a Normal likelihood, ``sigma_type_*`` priors with log-sd 0
 no ``sigma_round`` or ``sigma_estimate`` term at all (they let noise leak around its
 prior, 0.67 under a Normal fit).
 
-``e``, ``b`` and ``zd`` are all non-centred. Both centred forms were tried in the
-2026-10-28 pass and made sampling worse: a centred ``b`` gave 2081 divergences on the
-main recovery corpus, and a centred ``e`` gave convergence failures on ``tau_e``/``e``
-in test_reconcile_recovery and test_reconcile_contamination at target_accept
-0.97-0.99. The non-centred form stays and target_accept stays 0.99.
+``b`` and ``zd`` are non-centred. Both centred forms were tried in the 2026-10-28
+pass and made sampling worse: a centred ``b`` gave 2081 divergences on the main
+recovery corpus, and a centred ``e`` gave convergence failures on ``tau_e``/``e`` in
+test_reconcile_recovery and test_reconcile_contamination at target_accept 0.97-0.99.
+The non-centred ``b`` stays and target_accept stays 0.99. ``e`` is now sampled in
+rotated coordinates instead, see "The period mean and its rotation" below.
 ``side_prior_independent`` drops ``b`` and widens ``s_d`` to
 ``sqrt(battle_effect_prior_sd^2 + side_deviation_prior_sd^2)``, an ablation for
 comparing P1 against independent sides.
@@ -212,16 +213,40 @@ lets the level drift (the recovery ablation measures it). Ranges are merged
 points before this point and are unaffected, and exactly-zero casualty rows
 stay censored in both settings.
 
-## What a period mean would not separate (N3)
+## The period mean and its rotation (N3)
 
-``mu_side`` and ``a_era`` are not separately identified on unlabelled rows: a
-period mean on the side level and the era slope move the same rows, because
-``era_side`` equals ``era_row`` there (a side's rows share its battle's date).
-Nothing in the likelihood tells "armies of this period were smaller" from "this
-period's unmarked figures are deflated". What separates them is ``a_era``'s
-fitted prior (``inflation.era_mu`` and ``era_sd``). Adding a period mean on
-``mu_side`` would hand that job to a prior that was never fitted for it, so
-none is added.
+``e`` is a period mean added to the side level, with a ``ZeroSumNormal(sigma_e)`` prior
+(``sigma_e = era_effect_prior_sd``, a constant). On a dated unlabelled row in bin k the
+likelihood sees only ``u_k = e_k + g_unlabelled * pre_k + a_era * c_k`` (plus ``m0``),
+where ``pre = (1, 1, 1, 0, 0)`` marks the bins before the level anchor and ``c_k`` is
+the value ``design.era`` takes there. Two of ``e``'s four zero-sum directions are
+therefore the same parameters as ``g_unlabelled`` and ``a_era``. Nothing in the
+likelihood separates "armies of this period were smaller" from "this period's unmarked
+figures are deflated"; only the fitted priors on ``g_unlabelled`` and ``a_era`` and the
+labelled and undated rows do. The meaning is unchanged: ``e`` keeps its zero-sum prior,
+``g_unlabelled`` and ``a_era`` keep theirs.
+
+The sampler cannot know that. With ``tau_e`` free (``era_effect: legacy``) the
+duplicated directions are a long ridge plus a ``tau_e`` funnel: on the 1653-battle
+corpus3 the max rhat was 2.54 and ESS about 5, with chains in different modes. So
+``era_effect: rotated`` (the default) samples the identified quantity instead::
+
+    u_c  free zero-sum vector over the five bins, no prior of its own (a flat density on 4
+         coordinates through an orthonormal zero-sum basis; a CustomDist with logp 0 so the
+         prior predictive check can still draw from it)
+    h_k  = g_unlabelled * pre_k + a_era * c_k,   hbar = mean_k(h_k)
+    e    = u_c + hbar - h                         (zero-sum, stored as ``e``)
+    prior: pm.Potential ``e_prior`` = ZeroSumNormal(sigma_e) logp at e
+
+``(u_c, g_unlabelled, a_era) -> (e, g_unlabelled, a_era)`` is a shear with unit
+Jacobian, so the Potential is the whole prior and the posterior is that of the
+legacy model with ``tau_e`` fixed at ``sigma_e``. The rotation is for geometry, not
+meaning. For it to work ``offset_bar`` carries ``hbar`` and no ``g_unlabelled`` weight,
+so ``m0 + hbar = corpus_level - (labelled offsets + delta_level)`` is free of
+``g_unlabelled`` and ``a_era``. At fixed ``corpus_level`` and ``u_c`` every dated
+unlabelled row's ``eta`` is then exactly constant in them (``eta = m0 + hbar + u_k + ...``);
+only labelled and undated rows move. ``era_effect: none`` drops ``e`` altogether, for
+sensitivity runs only.
 
 ## The inflation prior
 
@@ -269,7 +294,12 @@ import numpy as np
 import structlog
 import yaml
 
-from pipeline.reconcilers.design import MODERN_FROM_YEAR, Design
+from pipeline.reconcilers.design import (
+    _ERA_BIN_EDGES,
+    ERA_BIN_LABELS,
+    MODERN_FROM_YEAR,
+    Design,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     import arviz as az
@@ -326,6 +356,7 @@ _NEUTRAL_ERA_SD: Final[float] = 0.25
 
 _TROOPS: Final[str] = "troops"
 _UNLABELLED: Final[str] = "unlabelled"
+_ERA_EFFECT_MODES: Final[tuple[str, ...]] = ("rotated", "legacy", "none")
 
 # Unlabelled troop rows from this astronomical year on are read at face value;
 # see "The level anchor" in the module docstring.
@@ -418,6 +449,7 @@ class ModelPriors:
     noise_ancient_log_sd: float = 0.35
     student_t_nu_floor: float = 3.0
     era_effect_prior_sd: float = 1.0
+    era_effect: str = "rotated"
     battle_effect_prior_sd: float = 1.0
     side_deviation_prior_sd: float = 0.5
     side_prior_independent: bool = False
@@ -487,6 +519,7 @@ class ModelPriors:
                 params.get(f"{prefix}student_t_nu_floor", 3.0 if is_troops else 2.0)
             ),
             era_effect_prior_sd=float(params.get("era_effect_prior_sd", 1.0)),
+            era_effect=_era_effect_name(params.get("era_effect")),
             battle_effect_prior_sd=float(params.get("battle_effect_prior_sd", 1.0)),
             side_deviation_prior_sd=float(params.get("side_deviation_prior_sd", 0.5)),
             side_prior_independent=bool(params.get("side_prior_independent", False)),
@@ -511,6 +544,24 @@ def _noise_prior_name(value: Any) -> str:
         raise ValueError(
             f"observation_noise_prior must be 'informative' or 'inverse_gamma', got {name!r}"
         )
+    return name
+
+
+def _era_effect_name(value: Any) -> str:
+    """Validate the ``era_effect`` spec param.
+
+    Args:
+        value: The raw param, or None for the default.
+
+    Returns:
+        ``"rotated"``, ``"legacy"`` or ``"none"``.
+
+    Raises:
+        ValueError: For any other value, so a typo cannot silently select a mode.
+    """
+    name = "rotated" if value is None else str(value)
+    if name not in _ERA_EFFECT_MODES:
+        raise ValueError(f"era_effect must be one of {_ERA_EFFECT_MODES}, got {name!r}")
     return name
 
 
@@ -605,6 +656,7 @@ def build_model(
     priors: ModelPriors,
     inflation: InflationPrior,
     neutral: bool = False,
+    ancient_cutoff_year: int | None = None,
 ) -> pm.Model:
     """Build the hierarchical source-disagreement model for one quantity.
 
@@ -615,6 +667,9 @@ def build_model(
         inflation: The fitted claim-regime inflation prior.
         neutral: Build the regime-neutral variant used for force ratios; see
             "The neutral fit" in the module docstring. Troops only.
+        ancient_cutoff_year: The stage's era-flag cutoff. Only the rotated troop
+            era effect reads it, to check it equals the first era bin edge; None
+            skips that check (the within-bin constancy check still runs).
 
     Returns:
         An unsampled :class:`pymc.Model`.
@@ -624,7 +679,9 @@ def build_model(
             import time, so the rest of the package stays usable without it.
         ValueError: If the likelihood family is not recognised, the anchor
             regime is not one the design knows about, or ``neutral`` is
-            requested for a quantity other than troops.
+            requested for a quantity other than troops, ``priors.era_effect`` is
+            not a known mode, or the rotated era effect cannot be built (see
+            :func:`_unlabelled_era_levels`).
     """
     import pymc as pm  # noqa: PLC0415 - deliberately deferred; see module docstring
     import pytensor.tensor as pt  # noqa: PLC0415
@@ -662,6 +719,17 @@ def build_model(
     )
     w_level = np.bincount(design.level_index, minlength=len(design.levels)) / design.n_obs
 
+    rotated_era = design.quantity == _TROOPS and _era_effect_name(priors.era_effect) == "rotated"
+    unlabelled_ix = design.regimes.index(_UNLABELLED) if _UNLABELLED in design.regimes else None
+    era_levels = pre_anchor = None
+    if rotated_era:
+        era_levels, pre_anchor = _unlabelled_era_levels(design, ancient_cutoff_year)
+        # Rows of the unlabelled regime take g_unlabelled through u_c, not through
+        # offset_bar: see "The period mean and its rotation" in the module docstring.
+        if unlabelled_ix is not None:
+            w_regime = w_regime.copy()
+            w_regime[unlabelled_ix] = 0.0
+
     with pm.Model(coords=coords) as model:
         # ── claim regime: the inflation term, anchor pinned to zero ──────────
         g_regime = _regime_bias(pm, pt, design, inflation, free_regimes, neutral=neutral)
@@ -672,18 +740,36 @@ def build_model(
             "delta_level", _level_offsets(pm, pt, design, priors), dims="level"
         )
 
+        # ── era fallback, on unlabelled rows only ────────────────────────────
+        # Gated, because an ancient chronicle row already carries g_chronicle,
+        # which was fitted on cases that were themselves mostly pre-modern:
+        # applying the era term to it as well deflates the same rows twice.
+        # The prior is measured from the gold set's own years. The mixture-gap
+        # value used before was a different quantity with the opposite sign.
+        # Declared before the rotation because the rotated era effect needs it.
+        a_era = pm.Normal(
+            "a_era",
+            mu=0.0 if neutral else inflation.era_mu,
+            sigma=_NEUTRAL_ERA_SD if neutral else inflation.era_sd,
+        )
+        era_column = _data(pm, "data_era", design.era * _unlabelled_mask(design) * (1.0 - anchor))
+
         # ── the rotation ─────────────────────────────────────────────────────
         # Sample the corpus-average log level, which the data identify, and
         # derive m0 from it. Without this, a reference level with no rows makes
         # its block's offset the intercept under another name.
-        offset_bar = pm.Deterministic(
-            "offset_bar", pt.dot(w_regime, g_regime) + pt.dot(w_level, delta_level)
-        )
+        offset_bar_expr = pt.dot(w_regime, g_regime) + pt.dot(w_level, delta_level)
+        era_h = None
+        if rotated_era:
+            g_unlabelled = g_regime[unlabelled_ix] if unlabelled_ix is not None else 0.0
+            era_h = g_unlabelled * pre_anchor + a_era * era_levels
+            offset_bar_expr = offset_bar_expr + era_h.mean()
+        offset_bar = pm.Deterministic("offset_bar", offset_bar_expr)
         level = pm.Normal("corpus_level", mu=priors.side_prior_mu, sigma=_LEVEL_PRIOR_SD)
         m0 = pm.Deterministic("m0", level - offset_bar)
 
         if design.quantity == _TROOPS:
-            mu_side = _troop_side_prior(pm, pt, design, priors, m0)
+            mu_side = _troop_side_prior(pm, pt, design, priors, m0, era_h=era_h)
         else:
             s0 = pm.HalfNormal("s0", sigma=priors.side_prior_sd_scale)
             # Heavy-tailed, with nu fixed from the spec. A Normal side prior against
@@ -718,19 +804,6 @@ def build_model(
 
         # A repeated claim counts once because build_design collapses each
         # lineage to one row; there is no lineage term. See collapse_lineages.
-
-        # ── era fallback, on unlabelled rows only ────────────────────────────
-        # Gated, because an ancient chronicle row already carries g_chronicle,
-        # which was fitted on cases that were themselves mostly pre-modern:
-        # applying the era term to it as well deflates the same rows twice.
-        # The prior is measured from the gold set's own years. The mixture-gap
-        # value used before was a different quantity with the opposite sign.
-        a_era = pm.Normal(
-            "a_era",
-            mu=0.0 if neutral else inflation.era_mu,
-            sigma=_NEUTRAL_ERA_SD if neutral else inflation.era_sd,
-        )
-        era_column = _data(pm, "data_era", design.era * _unlabelled_mask(design) * (1.0 - anchor))
 
         # ── observation scale ────────────────────────────────────────────────
         # Troops take an informative LogNormal on the noise sd of each source
@@ -894,14 +967,21 @@ def build_model(
 
 
 def _troop_side_prior(
-    pm_module: Any, pt_module: Any, design: Design, priors: ModelPriors, m0: Any
+    pm_module: Any,
+    pt_module: Any,
+    design: Design,
+    priors: ModelPriors,
+    m0: Any,
+    era_h: Any = None,
 ) -> Any:
     """The P1 side prior: era mean, shared battle effect and side deviation.
 
-    ``mu_side = m0 + e[era_bin] + b[battle] + s_d * zd``, all non-centred: ``e = tau_e * z_era``,
-    ``b = s_b * zb``. Centring either made sampling worse (module docstring). An undated
-    side maps to a sixth, appended zero rather than to a member of the zero-sum vector;
-    see the module docstring.
+    ``mu_side = m0 + e[era_bin] + b[battle] + s_d * zd``, with ``b = s_b * zb`` non-centred;
+    centring it made sampling worse (module docstring). ``e`` depends on
+    ``priors.era_effect``: ``legacy`` is ``tau_e * z_era`` with ``tau_e`` free,
+    ``rotated`` is the sheared parameterisation of :func:`_rotated_era_effect`, and
+    ``none`` drops it. An undated side maps to a sixth, appended zero rather than to a
+    member of the zero-sum vector; see the module docstring.
 
     With ``priors.side_prior_independent`` the battle effect is dropped and the
     side deviation takes the combined scale, so total side variance stays
@@ -913,15 +993,24 @@ def _troop_side_prior(
         design: The design, for the per-side battle and era-bin indices.
         priors: Hierarchy scales.
         m0: The derived corpus level.
+        era_h: ``g_unlabelled * pre + a_era * c`` over the five bins, required for
+            ``rotated`` and ignored otherwise.
 
     Returns:
         The ``mu_side`` deterministic, over the ``side`` dimension.
     """
-    tau_e = pm_module.HalfNormal("tau_e", sigma=priors.era_effect_prior_sd)
-    z_era = pm_module.ZeroSumNormal("z_era", sigma=1.0, dims="era_bin")
-    era_effect = pm_module.Deterministic("e", tau_e * z_era, dims="era_bin")
-    era_with_undated = pt_module.concatenate([era_effect, pt_module.zeros(1)])
+    mode = _era_effect_name(priors.era_effect)
     era_of_side = _data(pm_module, "data_side_era_bin", design.era_bin_of_side)
+    era_term: Any = 0.0
+    if mode != "none":
+        if mode == "legacy":
+            tau_e = pm_module.HalfNormal("tau_e", sigma=priors.era_effect_prior_sd)
+            z_era = pm_module.ZeroSumNormal("z_era", sigma=1.0, dims="era_bin")
+            era_effect = pm_module.Deterministic("e", tau_e * z_era, dims="era_bin")
+        else:
+            era_effect = _rotated_era_effect(pm_module, pt_module, priors, era_h)
+        era_with_undated = pt_module.concatenate([era_effect, pt_module.zeros(1)])
+        era_term = era_with_undated[era_of_side]
 
     deviation_sd = priors.side_deviation_prior_sd
     if priors.side_prior_independent:
@@ -930,7 +1019,7 @@ def _troop_side_prior(
         )
     s_d = pm_module.HalfNormal("s_d", sigma=deviation_sd)
     zd = pm_module.Normal("zd", mu=0.0, sigma=1.0, dims="side")
-    location = m0 + era_with_undated[era_of_side] + s_d * zd
+    location = m0 + era_term + s_d * zd
 
     if not priors.side_prior_independent:
         s_b = pm_module.HalfNormal("s_b", sigma=priors.battle_effect_prior_sd)
@@ -943,6 +1032,143 @@ def _troop_side_prior(
         location = location + battle_effect[battle_of_side]
 
     return pm_module.Deterministic("mu_side", location, dims="side")
+
+
+def _zero_sum_basis(n: int) -> np.ndarray:
+    """Orthonormal basis of the zero-sum subspace of R^n (Helmert), shape ``(n, n - 1)``.
+
+    Orthonormal so the free coordinates keep unit scale for the mass matrix.
+    """
+    basis = np.zeros((n, n - 1))
+    for k in range(1, n):
+        basis[:k, k - 1] = 1.0
+        basis[k, k - 1] = -float(k)
+        basis[:, k - 1] /= np.sqrt(k * (k + 1.0))
+    return basis
+
+
+def _rotated_era_effect(pm_module: Any, pt_module: Any, priors: ModelPriors, era_h: Any) -> Any:
+    """The era effect ``e`` in rotated coordinates; see the module docstring.
+
+    Args:
+        pm_module: The imported pymc module.
+        pt_module: The imported pytensor.tensor module.
+        priors: Supplies ``era_effect_prior_sd``, the constant ``sigma_e``.
+        era_h: ``g_unlabelled * pre + a_era * c`` over the five bins.
+
+    Returns:
+        The ``e`` deterministic (zero-sum over ``era_bin``). Its prior is the
+        ``e_prior`` potential, a ZeroSumNormal logp at ``e``; the shear from
+        ``(u_c, g, a)`` to ``(e, g, a)`` has unit Jacobian, so none is added.
+    """
+    n_bins = len(ERA_BIN_LABELS)
+    basis = _zero_sum_basis(n_bins)
+    sigma_e = float(priors.era_effect_prior_sd)
+
+    def random_u(
+        h: np.ndarray,
+        _carrier: np.ndarray,
+        rng: np.random.Generator | None = None,
+        size: Any = None,
+    ) -> np.ndarray:
+        # Flat has no sampler, which would make the prior predictive check fail. The
+        # prior-implied draw is e ~ ZeroSumNormal(sigma_e) mapped back through
+        # u = e + h - hbar; the density stays flat (the Potential is the prior).
+        generator = rng if rng is not None else np.random.default_rng()
+        batch = np.broadcast_shapes(h.shape[:-1], () if size is None else tuple(size))
+        z = generator.normal(0.0, sigma_e, size=(*batch, n_bins))
+        e = z - z.mean(axis=-1, keepdims=True)
+        u = e + h - h.mean(axis=-1, keepdims=True)
+        return np.asarray(u @ basis)
+
+    u_free = pm_module.CustomDist(
+        "u_c_free",
+        era_h,
+        # Carries the support length: the signature cannot infer m from h alone.
+        pt_module.zeros(n_bins - 1),
+        logp=lambda value, h, _carrier: pt_module.zeros_like(value).sum(axis=-1),
+        random=random_u,
+        support_point=lambda rv, size, h, _carrier: pt_module.zeros((n_bins - 1,)),
+        signature="(n),(m)->(m)",
+        shape=(n_bins - 1,),
+    )
+    u_c = pm_module.Deterministic("u_c", pt_module.dot(basis, u_free), dims="era_bin")
+    era_effect = pm_module.Deterministic("e", u_c + era_h.mean() - era_h, dims="era_bin")
+    pm_module.Potential(
+        "e_prior",
+        pm_module.logp(
+            pm_module.ZeroSumNormal.dist(sigma=priors.era_effect_prior_sd, shape=n_bins),
+            era_effect,
+        ),
+    )
+    return era_effect
+
+
+def _unlabelled_era_levels(
+    design: Design, ancient_cutoff_year: int | None
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per era bin, the value of ``design.era`` on unlabelled rows and the anchor gate.
+
+    On a dated unlabelled row the era column is constant within its era bin, because
+    the flag is ``year < cutoff`` and the cutoff is the first bin edge; the rotated era
+    effect needs that constant, ``c_k``, to cancel ``a_era``'s part of ``u_k``. It is
+    read from the design, never hard-coded. A bin with no such rows takes the value
+    the flag would give, ``flag_k - mean``, with ``mean`` recovered from the bins that
+    do have rows (0 if none, as in ``build_design``). That value only enters
+    ``hbar`` and the labelled-only sides of that bin, i.e. the prior on ``m0``
+    given ``(g, a_era)``, not any unlabelled row's ``eta``, so it is a convention.
+    Anchored bins (1800 on) take 0: the column is zeroed there.
+
+    Args:
+        design: The troop design.
+        ancient_cutoff_year: The stage's cutoff, or None to skip that check.
+
+    Returns:
+        ``(c, pre)``, each shape ``(n_bins,)``; ``pre_k`` is 1 for the bins before
+        the level anchor (where ``g_unlabelled`` is applied), else 0.
+
+    Raises:
+        ValueError: If the cutoff differs from the first bin edge, if the era column
+            is not constant within a bin on those rows, or if it is not the cutoff
+            flag minus one constant across the bins.
+    """
+    first_edge = _ERA_BIN_EDGES[0]
+    if ancient_cutoff_year is not None and ancient_cutoff_year != first_edge:
+        raise ValueError(
+            f"era_effect 'rotated' needs ancient_cutoff_year == the first era bin edge "
+            f"({first_edge}), got {ancient_cutoff_year}; the era flag would not be "
+            "constant within an era bin. Use era_effect: legacy or none."
+        )
+    n_bins = len(ERA_BIN_LABELS)
+    upper = np.array([*_ERA_BIN_EDGES, np.inf])
+    pre = (upper <= MODERN_FROM_YEAR).astype(float)
+    flag = np.zeros(n_bins)
+    flag[0] = 1.0
+    bin_of_row = design.era_bin_of_side[design.side_index]
+    applied = (_unlabelled_mask(design) > 0) & (level_anchor_mask(design) == 0)
+    levels = np.full(n_bins, np.nan)
+    for k in range(n_bins):
+        values = design.era[applied & (bin_of_row == k)]
+        if values.size == 0:
+            continue
+        if pre[k] == 0.0:
+            raise ValueError(
+                f"unlabelled rows in era bin {ERA_BIN_LABELS[k]!r} are not level-anchored, "
+                "so the rotated era effect cannot be built"
+            )
+        if float(np.ptp(values)) > 1e-9:
+            raise ValueError(
+                f"design.era is not constant within era bin {ERA_BIN_LABELS[k]!r} on "
+                "dated unlabelled rows; the rotated era effect needs one value per bin"
+            )
+        levels[k] = float(values[0])
+    seen = ~np.isnan(levels)
+    shifts = flag[seen] - levels[seen]
+    if shifts.size and float(np.ptp(shifts)) > 1e-9:
+        raise ValueError("design.era is not the cutoff flag minus one constant across era bins")
+    mean = float(shifts[0]) if shifts.size else 0.0
+    filled = np.where(pre > 0, flag - mean, 0.0)
+    return np.where(seen, levels, filled), pre
 
 
 def noise_prior_medians(priors: ModelPriors, inflation: InflationPrior) -> tuple[float, float]:

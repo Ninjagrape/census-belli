@@ -1270,7 +1270,8 @@ def test_a_run_records_its_spread_ratio_and_source_effect_counts(
     assert "singleton_slope" in recovery["gates_skipped"]
     assert troops["noise_prior"]["applies"] is True
     assert troops["nu"] is None  # troops use a Normal likelihood since P1
-    assert {"s_b", "s_d", "tau_e"} <= set(troops["side_prior"])
+    assert {"s_b", "s_d", "era"} <= set(troops["side_prior"])
+    assert troops["side_prior"]["era"]["era_effect"] == "rotated"
     assert "recovery" in diagnostics["troops_neutral"]
     honoured = troops["reports_honoured"]
     assert set(honoured) == {"n_checked", "n_violations", "violating_side_ids", "within_side_mad"}

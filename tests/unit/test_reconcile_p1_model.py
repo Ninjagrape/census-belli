@@ -1,9 +1,10 @@
 """P1 troop side prior: structure of the built model, no sampling.
 
-Troops take ``mu_side = m0 + e[era_bin] + b[battle] + s_d * zd[side]`` (``e``, ``b``
-non-centred) with a Normal likelihood, informative noise and no ``sigma_round`` /
-``sigma_estimate`` / ``s0``. Casualties keep their original model exactly. Unlabelled
-rows from 1800 on are read at face value (the level anchor), which the compiled graph must honour.
+Troops take ``mu_side = m0 + e[era_bin] + b[battle] + s_d * zd[side]`` (``b``
+non-centred, ``e`` rotated by default) with a Normal likelihood, informative noise and no
+``sigma_round`` / ``sigma_estimate`` / ``s0``. Casualties keep their original model exactly.
+Unlabelled rows from 1800 on are read at face value (the level anchor), which the compiled graph
+must honour.
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ from pipeline.reconcilers.design import UNDATED_ERA_BIN, Design, build_design
 from pipeline.reconcilers.model import (
     InflationPrior,
     ModelPriors,
+    _unlabelled_era_levels,
+    _zero_sum_basis,
     build_model,
     level_anchor_mask,
 )
@@ -119,7 +122,8 @@ def test_casualties_have_no_anchor_mask() -> None:
 
 def test_a_masked_row_ignores_the_unlabelled_offset_and_the_era_term() -> None:
     design = _anchor_design()
-    model = build_model(design, priors=ModelPriors(), inflation=InflationPrior())
+    legacy = ModelPriors(era_effect="legacy")
+    model = build_model(design, priors=legacy, inflation=InflationPrior())
     base = model.initial_point()
     shifted = {k: v.copy() for k, v in base.items()}
     shifted["g_free"] = shifted["g_free"] + 1.0
@@ -145,7 +149,7 @@ def test_the_rotation_weights_count_only_the_offsets_actually_applied() -> None:
     # offset_bar is the corpus average of the offsets the rows carry; with the
     # anchor, a masked row carries no regime offset, so it must not be averaged in.
     design = _anchor_design()
-    model = build_model(design, priors=ModelPriors(), inflation=InflationPrior())
+    model = build_model(design, priors=ModelPriors(era_effect="legacy"), inflation=InflationPrior())
     point = model.initial_point()
     point["g_free"] = point["g_free"] + 0.7
     g, delta, bar = _eval(
@@ -156,6 +160,27 @@ def test_the_rotation_weights_count_only_the_offsets_actually_applied() -> None:
     applied = np.mean(g[design.regime_index] * keep + delta[design.level_index])
 
     assert float(bar) == pytest.approx(float(applied), abs=1e-10)
+
+
+def test_the_rotated_offset_bar_drops_unlabelled_weight_and_adds_the_era_mean() -> None:
+    # offset_bar = mean(labelled g * keep + delta) + hbar, hbar = mean_k(h_k): the
+    # unlabelled regime's offset enters only through hbar and u_c.
+    design = _anchor_design()
+    model = build_model(design, priors=ModelPriors(), inflation=InflationPrior())
+    point = model.initial_point()
+    point["g_free"] = point["g_free"] + 0.7
+    point["a_era"] = point["a_era"] + 0.3
+    g, delta, bar, a_era = _eval(
+        model, [model["g_regime"], model["delta_level"], model["offset_bar"], model["a_era"]], point
+    )
+    levels, pre = _unlabelled_era_levels(design, 500)
+    unl = design.regimes.index("unlabelled")
+    labelled = np.array([r != unl for r in design.regime_index], dtype=float)
+    keep = 1.0 - level_anchor_mask(design)
+    rows = g[design.regime_index] * keep * labelled + delta[design.level_index]
+    hbar = np.mean(g[unl] * pre + float(a_era) * levels)
+
+    assert float(bar) == pytest.approx(float(rows.mean() + hbar), abs=1e-10)
 
 
 # ─── graph structure ─────────────────────────────────────────────────────────
@@ -181,12 +206,57 @@ def test_troops_use_the_era_battle_deviation_prior_and_drop_the_old_terms() -> N
     model = build_model(_mixed_design("troops"), priors=ModelPriors(), inflation=InflationPrior())
 
     free = _free_names(model)
-    assert {"tau_e", "z_era", "zb", "zd", "s_b", "s_d"} <= free
-    assert "e" not in free
-    assert "z_era" in model.named_vars
+    assert {"u_c_free", "zb", "zd", "s_b", "s_d"} <= free
+    assert not {"tau_e", "z_era", "e"} & free
+    assert "e_prior" in model.named_vars
     assert "b" in model.named_vars
     assert not {"s0", "z_side", "sigma_round", "sigma_estimate"} & set(model.named_vars)
     assert "mu_side" in model.named_vars
+
+
+def test_legacy_era_effect_keeps_todays_free_variables() -> None:
+    model = build_model(
+        _mixed_design("troops"),
+        priors=ModelPriors(era_effect="legacy"),
+        inflation=InflationPrior(),
+    )
+
+    free = _free_names(model)
+    assert {"tau_e", "z_era", "zb", "zd", "s_b", "s_d", "a_era", "corpus_level"} <= free
+    assert not {"u_c_free", "u_c"} & set(model.named_vars)
+    assert "e" not in free
+    assert "e_prior" not in model.named_vars
+
+
+def test_none_era_effect_has_no_period_mean() -> None:
+    design = _mixed_design("troops")
+    model = build_model(design, priors=ModelPriors(era_effect="none"), inflation=InflationPrior())
+
+    assert not {"e", "tau_e", "z_era", "u_c", "u_c_free", "e_prior"} & set(model.named_vars)
+    point = model.initial_point()
+    point["zb"] = np.zeros_like(point["zb"])
+    point["zd"] = np.zeros_like(point["zd"])
+    mu, m0 = _eval(model, [model["mu_side"], model["m0"]], point)
+    assert mu == pytest.approx(np.full(design.n_sides, float(m0)))
+
+
+def test_an_unknown_era_effect_raises() -> None:
+    with pytest.raises(ValueError, match="era_effect"):
+        ModelPriors.from_params({"era_effect": "rotatd"}, quantity="troops")
+    with pytest.raises(ValueError, match="era_effect"):
+        build_model(
+            _mixed_design("troops"),
+            priors=ModelPriors(era_effect="bogus"),
+            inflation=InflationPrior(),
+        )
+
+
+def test_era_effect_defaults_to_rotated_and_reads_from_the_spec() -> None:
+    assert ModelPriors().era_effect == "rotated"
+    params = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))["params"]
+    assert ModelPriors.from_params(params, quantity="troops").era_effect == "rotated"
+    legacy = ModelPriors.from_params({"era_effect": "legacy"}, quantity="troops")
+    assert legacy.era_effect == "legacy"
 
 
 def test_casualties_keep_s0_z_side_and_their_dispersion_terms() -> None:
@@ -198,7 +268,7 @@ def test_casualties_keep_s0_z_side_and_their_dispersion_terms() -> None:
 
     free = _free_names(model)
     assert {"s0", "z_side", "sigma_round", "sigma_estimate"} <= free
-    assert not {"tau_e", "zb", "zd", "s_b", "s_d"} & set(model.named_vars)
+    assert not {"tau_e", "zb", "zd", "s_b", "s_d", "u_c"} & set(model.named_vars)
     assert "e" not in model.named_vars
 
 
@@ -283,8 +353,12 @@ def _logp_of(model: Any, name: str, point: dict[str, Any]) -> float:
     return float(model.compile_logp(vars=[model[name]])(point))
 
 
-def test_the_era_effect_stays_non_centred_because_centring_it_failed_to_converge() -> None:
-    model = build_model(_mixed_design("troops"), priors=ModelPriors(), inflation=InflationPrior())
+def test_the_legacy_era_effect_stays_non_centred_because_centring_it_failed_to_converge() -> None:
+    model = build_model(
+        _mixed_design("troops"),
+        priors=ModelPriors(era_effect="legacy"),
+        inflation=InflationPrior(),
+    )
     point = model.initial_point()
     point["z_era_zerosum__"] = np.array([0.4, -0.2, 0.3, 0.1])
     point["tau_e_log__"] = np.asarray(0.0)
@@ -330,3 +404,211 @@ def test_side_prior_independent_reads_from_the_spec_and_defaults_off() -> None:
     assert ModelPriors().side_prior_independent is False
     on = ModelPriors.from_params({"side_prior_independent": True}, quantity="troops")
     assert on.side_prior_independent is True
+
+
+# ─── the rotated era effect ──────────────────────────────────────────────────
+
+
+def _rotation_design(years: list[int | None], regimes: list[str], *, cutoff: int = 500) -> Design:
+    types = ("wikipedia_infobox", "wikidata")
+    reports = [
+        _report(i + 1, side_id=i + 1, year=year, regime=regime, source_type=types[i % 2])
+        for i, (year, regime) in enumerate(zip(years, regimes, strict=True))
+    ]
+    return build_design(reports, quantity="troops", ancient_cutoff_year=cutoff)
+
+
+# Bins 0 to 4 all have unlabelled rows, plus an undated unlabelled row, labelled rows in
+# pre-1800 bins and an anchor-regime row.
+_ROT_YEARS: list[int | None] = [-400, 1200, 1700, 1815, 1950, None, -300, 1200, 1850, 1700]
+_ROT_REGIMES = [
+    "unlabelled",
+    "unlabelled",
+    "unlabelled",
+    "unlabelled",
+    "unlabelled",
+    "unlabelled",
+    "chronicle",
+    "chronicle",
+    "modern_scholarly",
+    "unlabelled",
+]
+
+
+def _rot_point(model: Any, design: Design, *, dg: float, da: float) -> dict[str, np.ndarray]:
+    rng = np.random.default_rng(11)
+    point = {
+        k: v + rng.normal(0.0, 0.5, size=np.shape(v)) for k, v in model.initial_point().items()
+    }
+    free = [r for r in design.regimes if r != "modern_scholarly"]
+    point["g_free"] = point["g_free"].copy()
+    point["g_free"][free.index("unlabelled")] += dg
+    point["a_era"] = point["a_era"] + da
+    return point
+
+
+def _unlabelled_dated_rows(design: Design) -> list[int]:
+    return [
+        i
+        for i in range(design.n_obs)
+        if design.regimes[design.regime_index[i]] == "unlabelled"
+        and not np.isnan(design.year_of_row[i])
+    ]
+
+
+def test_dated_unlabelled_rows_do_not_move_with_g_unlabelled_or_a_era_at_fixed_coordinates() -> (
+    None
+):
+    design = _rotation_design(_ROT_YEARS, _ROT_REGIMES)
+    model = build_model(design, priors=ModelPriors(), inflation=InflationPrior())
+
+    eta_a = _eval(model, [model.row_eta], _rot_point(model, design, dg=0.0, da=0.0))[0]
+    eta_b = _eval(model, [model.row_eta], _rot_point(model, design, dg=0.9, da=0.7))[0]
+    diff = eta_b - eta_a
+    by_side = {s: diff[i] for s, i in _row_order(design).items()}
+
+    dated = _unlabelled_dated_rows(design)
+    assert len(dated) == 6
+    assert diff[dated] == pytest.approx(np.zeros(len(dated)), abs=1e-10)
+    assert abs(by_side[6]) > 1e-3  # undated unlabelled
+    assert abs(by_side[7]) > 1e-3  # chronicle in bin 0
+    assert abs(by_side[8]) > 1e-3  # chronicle in bin 1
+
+
+def test_the_same_invariance_holds_when_no_row_is_undated() -> None:
+    keep = [i for i, y in enumerate(_ROT_YEARS) if y is not None]
+    design = _rotation_design([_ROT_YEARS[i] for i in keep], [_ROT_REGIMES[i] for i in keep])
+    model = build_model(design, priors=ModelPriors(), inflation=InflationPrior())
+
+    eta_a = _eval(model, [model.row_eta], _rot_point(model, design, dg=0.0, da=0.0))[0]
+    eta_b = _eval(model, [model.row_eta], _rot_point(model, design, dg=-1.3, da=0.4))[0]
+    dated = _unlabelled_dated_rows(design)
+
+    assert dated
+    assert (eta_b - eta_a)[dated] == pytest.approx(np.zeros(len(dated)), abs=1e-10)
+
+
+def test_the_e_prior_potential_is_the_zero_sum_normal_logp_of_e() -> None:
+    import pymc as pm
+
+    sigma = 0.7
+    design = _rotation_design(_ROT_YEARS, _ROT_REGIMES)
+    model = build_model(
+        design, priors=ModelPriors(era_effect_prior_sd=sigma), inflation=InflationPrior()
+    )
+    point = _rot_point(model, design, dg=0.3, da=-0.2)
+
+    e, potential = _eval(model, [model["e"], model["e_prior"]], point)
+    direct = float(pm.logp(pm.ZeroSumNormal.dist(sigma=sigma, shape=5), e).eval())
+    closed = float(-0.5 * np.sum(e**2) / sigma**2 - 4.0 * (np.log(sigma) + 0.5 * np.log(2 * np.pi)))
+
+    assert float(e.sum()) == pytest.approx(0.0, abs=1e-10)
+    assert float(potential) == pytest.approx(direct, abs=1e-9)
+    assert float(potential) == pytest.approx(closed, abs=1e-9)
+
+
+def test_the_zero_sum_basis_is_orthonormal_and_sums_to_zero() -> None:
+    basis = _zero_sum_basis(5)
+
+    assert basis.shape == (5, 4)
+    assert basis.T @ basis == pytest.approx(np.eye(4), abs=1e-12)
+    assert basis.sum(axis=0) == pytest.approx(np.zeros(4), abs=1e-12)
+
+
+def test_the_neutral_fit_builds_with_the_rotated_era_effect() -> None:
+    design = _rotation_design(_ROT_YEARS, _ROT_REGIMES)
+    model = build_model(design, priors=ModelPriors(), inflation=InflationPrior(), neutral=True)
+
+    assert {"u_c_free", "a_era", "g_free"} <= _free_names(model)
+    assert "e_prior" in model.named_vars
+    eta_a = _eval(model, [model.row_eta], _rot_point(model, design, dg=0.0, da=0.0))[0]
+    eta_b = _eval(model, [model.row_eta], _rot_point(model, design, dg=0.9, da=0.7))[0]
+    dated = _unlabelled_dated_rows(design)
+    assert (eta_b - eta_a)[dated] == pytest.approx(np.zeros(len(dated)), abs=1e-10)
+
+
+def test_era_levels_come_from_the_design_and_empty_pre_anchor_bins_take_the_flag() -> None:
+    # Unlabelled rows only in bins 0 and 2: the ancient share is 1/2, so c = (0.5, ?, -0.5)
+    # and the empty bin 1 takes flag 0 minus that mean.
+    design = _rotation_design([-400, 1700, 1850], ["unlabelled"] * 3)
+
+    levels, pre = _unlabelled_era_levels(design, 500)
+
+    assert pre.tolist() == [1.0, 1.0, 1.0, 0.0, 0.0]
+    assert levels.tolist() == pytest.approx([0.5, -0.5, -0.5, 0.0, 0.0])
+
+
+def test_era_levels_default_to_the_bare_flag_when_no_unlabelled_row_applies() -> None:
+    design = _rotation_design([-400, 1850], ["chronicle", "unlabelled"])
+
+    levels, _ = _unlabelled_era_levels(design, 500)
+
+    assert levels.tolist() == pytest.approx([1.0, 0.0, 0.0, 0.0, 0.0])
+
+
+def test_a_cutoff_that_differs_from_the_first_era_edge_raises() -> None:
+    design = _rotation_design(_ROT_YEARS, _ROT_REGIMES)
+
+    with pytest.raises(ValueError, match="ancient_cutoff_year"):
+        build_model(
+            design, priors=ModelPriors(), inflation=InflationPrior(), ancient_cutoff_year=1000
+        )
+    for mode in ("legacy", "none"):
+        build_model(
+            design,
+            priors=ModelPriors(era_effect=mode),
+            inflation=InflationPrior(),
+            ancient_cutoff_year=1000,
+        )
+
+
+def test_an_era_flag_that_varies_within_a_bin_raises() -> None:
+    # Cutoff 1000 splits the 500-1499 bin: 600 flags 1, 1200 flags 0.
+    design = _rotation_design([600, 1200, 1700], ["unlabelled"] * 3, cutoff=1000)
+
+    with pytest.raises(ValueError, match="not constant within era bin"):
+        build_model(design, priors=ModelPriors(), inflation=InflationPrior())
+
+
+def test_the_side_prior_diagnostics_record_the_era_effect_mode() -> None:
+    az = pytest.importorskip("arviz")
+    from pipeline.reconcilers.summarise import _side_prior_stats
+
+    rng = np.random.default_rng(5)
+    e = rng.normal(size=(2, 50, 5))
+    e -= e.mean(axis=-1, keepdims=True)
+    posterior = {
+        "s_d": np.abs(rng.normal(size=(2, 50))),
+        "s_b": np.abs(rng.normal(size=(2, 50))),
+        "e": e,
+        "a_era": rng.normal(size=(2, 50)),
+    }
+    stats = _side_prior_stats(az.from_dict(posterior=posterior), ModelPriors())
+    assert stats is not None
+    era = stats["era"]
+
+    assert era["era_effect"] == "rotated"
+    assert era["sigma_e"] == 1.0
+    assert "tau_e" not in stats
+    contrast = e[..., :3].mean(-1) - e[..., 3:].mean(-1)
+    assert era["e_contrast_pre_vs_post_1800"]["mean"] == pytest.approx(float(contrast.mean()))
+    assert "a_era" in era
+
+    legacy = {**posterior, "tau_e": np.abs(rng.normal(size=(2, 50)))}
+    legacy_stats = _side_prior_stats(az.from_dict(posterior=legacy))
+    assert legacy_stats is not None
+    assert "tau_e" in legacy_stats
+    assert legacy_stats["era"]["era_effect"] == "legacy"
+
+
+def test_u_c_has_a_flat_density_and_a_gradient_that_compiles() -> None:
+    design = _rotation_design(_ROT_YEARS, _ROT_REGIMES)
+    model = build_model(design, priors=ModelPriors(), inflation=InflationPrior())
+    point = _rot_point(model, design, dg=0.0, da=0.0)
+    shifted = {**point, "u_c_free": point["u_c_free"] + 0.5}
+
+    own = model.compile_logp(vars=[model["u_c_free"]])
+    assert own(point) == pytest.approx(0.0)
+    assert own(shifted) == pytest.approx(0.0)
+    grad = model.compile_dlogp()(point)
+    assert np.all(np.isfinite(grad))
