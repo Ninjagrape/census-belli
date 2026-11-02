@@ -33,7 +33,8 @@ alone is not enough to trust an estimate on this model, though: see
 ``pipeline/reconcilers/model.py``'s module docstring and ``docs/handover-log.md`` §19.9
 for why a perfectly converged run can still be reporting an entirely-prior
 number when a corpus carries no observations of the anchor regime.
-``identified_level`` (``m0 + offset_bar``) and the prior-to-posterior
+``identified_level`` (``m0 + offset_bar``, or its row-weighted form under the rotated era
+effect) and the prior-to-posterior
 ``contraction`` map exist so that failure mode is visible from a run log
 without re-deriving it by hand each time.
 
@@ -268,7 +269,7 @@ def summarise_fit(
         "offset_bar": _scalar_stats(idata, "offset_bar"),
         "m0": _scalar_stats(idata, "m0"),
         "corpus_level": _scalar_stats(idata, "corpus_level"),
-        "identified_level": _identified_level_stats(idata),
+        "identified_level": _identified_level_stats(idata, design),
         "n_identifying_sides": n_identifying_sides(design, inflation.anchor_regime),
         "identified_width": identified_width_stats(idata, design, side_estimates, ci_mass),
         "contraction": _contraction(idata, design, priors, inflation),
@@ -1299,20 +1300,42 @@ def _scalar_stats(idata: az.InferenceData, name: str) -> dict[str, float | None]
     return {"mean": _finite(float(np.mean(samples))), "sd": _finite(float(np.std(samples)))}
 
 
-def _identified_level_stats(idata: az.InferenceData) -> dict[str, float | None]:
-    """Posterior mean and sd of ``m0 + offset_bar``, the quantity the data identify.
+def _identified_level_stats(
+    idata: az.InferenceData, design: Design | None = None
+) -> dict[str, float | None]:
+    """Posterior mean and sd of the level the data identify.
 
     ``m0`` alone is not identified on an all-unlabelled corpus (see
     ``model.py``'s module docstring and ``docs/handover-log.md`` §19.9); this is the
     corresponding rotated quantity that is.
 
+    Without a rotated era effect this is ``m0 + offset_bar``. Under it
+    ``m0 + offset_bar`` is ``corpus_level``, whose ``hbar`` is an unweighted mean over
+    all five era bins, so it includes ``u_c`` of bins with no rows, which only the ``e``
+    prior sets. The data identify the row-weighted mean instead: the mean over rows of
+    ``m0 + e[bin] + g[regime] * keep + a_era * era + delta[level]``, every term of a
+    row's linear predictor except the side, battle and source terms. That is what is
+    returned when ``u_c`` is in the posterior and the design is given.
+
     Args:
         idata: The fit's posterior.
+        design: The design, for the per-row bins, regimes and levels.
 
     Returns:
         ``{"mean": ..., "sd": ...}``.
     """
-    combined = _pooled(idata, "m0") + _pooled(idata, "offset_bar")
+    if design is not None and "u_c" in idata.posterior:
+        e = _pooled(idata, "e")
+        bin_of_row = design.era_bin_of_side[design.side_index]
+        # Undated sides map to a sixth, appended zero, as in the model.
+        e_row = np.concatenate([e, np.zeros((e.shape[0], 1))], axis=1)[:, bin_of_row]
+        keep = 1.0 - level_anchor_mask(design)
+        g_row = _pooled(idata, "g_regime")[:, design.regime_index] * keep
+        delta_row = _pooled(idata, "delta_level")[:, design.level_index]
+        era_row = _pooled(idata, "a_era")[:, None] * (design.era * _unlabelled_mask(design) * keep)
+        combined = _pooled(idata, "m0") + (e_row + g_row + delta_row + era_row).mean(axis=1)
+    else:
+        combined = _pooled(idata, "m0") + _pooled(idata, "offset_bar")
     return {"mean": _finite(float(np.mean(combined))), "sd": _finite(float(np.std(combined)))}
 
 

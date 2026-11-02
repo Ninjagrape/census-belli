@@ -257,17 +257,40 @@ def test_the_battle_effect_scale_is_recovered(fit: Fit) -> None:
     assert lo <= TRUE_S_B <= hi, (lo, hi)
 
 
-def test_era_contrasts_between_unanchored_bins_are_recovered(fit: Fit) -> None:
+def _realised_era_contrasts(
+    reports: list[Report], true_level: dict[int, float]
+) -> dict[tuple[int, int], float]:
+    """Difference of the true side-level means between era bins, for the drawn corpus."""
+    bin_of_side = {r.side_id: YEARS.index(r.year_astronomical) for r in reports}
+    bins = np.array([bin_of_side[side] for side in true_level])
+    levels = np.array(list(true_level.values()))
+    mean = {k: float(levels[bins == k].mean()) for k in range(len(YEARS))}
+    return {(high, low): mean[high] - mean[low] for high, low in ((4, 3), (2, 1))}
+
+
+def test_era_contrasts_between_unanchored_bins_are_recovered(
+    fit: Fit, reports: list[Report], true_level: dict[int, float]
+) -> None:
     # Bins 3 and 4 (1800 on) carry no regime or era offset (the level anchor), and
     # bins 1 and 2 share the same offsets (neither is ancient), so each pair's
     # difference is identified. The level of the pre-1800 bins against the anchored
     # ones is traded against g_unlabelled and a_era by design, so e itself is not.
+    #
+    # The target is the contrast of the drawn sides' true levels, not TRUE_E's
+    # difference. With ~30 battles per bin and a heavy-tailed battle effect of scale
+    # 0.8, the realised bin means move by about 0.3 in a contrast (seed 20261023:
+    # 0.73 against TRUE_E's 0.30 for bins 4 and 3), and that realised gap is what the
+    # data identify. The old free tau_e shrank contrasts toward 0 and happened to
+    # straddle TRUE_E; the fixed-scale rotated prior does not shrink as much.
+    realised = _realised_era_contrasts(reports, true_level)
     e = np.asarray(fit.idata.posterior["e"].values).reshape(-1, 5)
-    for high, low in ((4, 3), (2, 1)):
+    for (high, low), truth in realised.items():
         lo, hi = _interval(e[:, high] - e[:, low], 0.95)
-        truth = TRUE_E[high] - TRUE_E[low]
-        print(f"e[{high}]-e[{low}] true={truth:.2f} mean={np.mean(e[:, high] - e[:, low]):.3f}")
-        assert lo <= truth <= hi, (high, low, lo, hi)
+        print(
+            f"e[{high}]-e[{low}] realised={truth:.2f} generating={TRUE_E[high] - TRUE_E[low]:.2f} "
+            f"mean={np.mean(e[:, high] - e[:, low]):.3f}"
+        )
+        assert lo <= truth <= hi, (high, low, lo, hi, truth)
 
 
 def test_the_side_intervals_cover_the_true_side_sizes_at_ninety_percent(
