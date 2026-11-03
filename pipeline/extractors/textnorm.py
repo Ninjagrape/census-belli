@@ -33,6 +33,8 @@ __all__ = [
     "Quantity",
     "classify_figure",
     "is_equipment_count",
+    "is_personnel_count",
+    "is_support_arm",
     "infer_branch",
     "infer_casualty_type",
     "infer_scope",
@@ -1007,9 +1009,26 @@ _EQUIPMENT_NOUN_RE: Final = re.compile(
     r"^(?:guns?|cannons?|pieces|howitzers?|mortars?|ships?|vessels?|galleys?|warships?|triremes?"
     r"|frigates?|destroyers?|battleships?|cruisers?|submarines?|corvettes?|carriers?"
     r"|aircraft|planes?|aeroplanes?|bombers?|tanks?|vehicles?|gunboats?|junks?"
-    r"|boats?|barges?|elephants?|oxen|camels?|chariots?|wagons?|supply)\b",
+    r"|boats?|barges?|elephants?|oxen|camels?|chariots?|wagons?|supply"
+    r"|kamikazes?|helicopters?|gliders?|seaplanes?|airships?|balloons?|sorties|horses|mules?"
+    r"|ponies|pony|carts?|apcs?|cars|machine-guns?|rockets?|missiles?|craft|sloops?"
+    r"|schooners?|brigs?|dhows?|transports?|batteries)\b",
     re.IGNORECASE,
 )
+# Words that show a figure counts people. The scan in is_equipment_count stops
+# at the first one, so "3,000 men and guns" is a headcount.
+_PERSONNEL_NOUN_RE: Final = re.compile(
+    r"^(?:men|soldiers?|troops?|personnel|crews?|crewmen|sailors?|seamen|marines?|pilots?"
+    r"|airmen|aircrews?|gunners?|artillerymen|infantrymen|cavalrymen|engineers?|sappers?"
+    r"|pioneers?|miners?|pontoniers?|pontonniers?|signallers?|signalers?|militiamen|warriors?"
+    r"|conscripts?|volunteers?|regulars?|guerrill(?:a|as))\b",
+    re.IGNORECASE,
+)
+_SUPPORT_ARM_NOUN_RE: Final = re.compile(
+    r"^(?:engineers?|sappers?|pioneers?|miners?|pontoniers?|pontonniers?|signallers?|signalers?)\b",
+    re.IGNORECASE,
+)
+_NOUN_WORD_STRIP: Final = "()[]\"'\u2018\u2019\u201c\u201d.,;:"
 
 
 def _surround(segment: str, start: int, end: int) -> tuple[str, str]:
@@ -1036,21 +1055,61 @@ def _surround(segment: str, start: int, end: int) -> tuple[str, str]:
     return lead, noun
 
 
+def _noun_words(quantity: Quantity) -> list[str]:
+    return [w for w in (raw.strip(_NOUN_WORD_STRIP) for raw in quantity.noun.split()) if w]
+
+
 def is_equipment_count(quantity: Quantity) -> bool:
-    """Whether a figure counts guns, ships, aircraft or vehicles rather than men.
+    """Whether a figure counts guns, ships, aircraft, animals or vehicles rather than men.
 
     Args:
         quantity: A parsed figure.
 
     Returns:
-        True when the words right after the number name equipment. Such a
-        count must never be summed with, or mistaken for, a headcount.
+        True when an equipment word appears in the noun phrase before any
+        personnel word. Such a count must never be summed with, or mistaken
+        for, a headcount.
     """
-    if any(_EQUIPMENT_NOUN_RE.match(w) for w in quantity.noun.split()[:3]):
-        return True
+    for word in _noun_words(quantity):
+        if _PERSONNEL_NOUN_RE.match(word):
+            return False
+        if _EQUIPMENT_NOUN_RE.match(word):
+            return True
     # "300 fighters" in an air field counts aircraft; "17,000 picked fighters"
     # elsewhere counts men, and the branch parser has already told them apart.
     return quantity.branch == "air" and bool(_BARE_FIGHTERS_RE.search(quantity.noun))
+
+
+def is_personnel_count(quantity: Quantity) -> bool:
+    """Whether a figure's own words show it counts people.
+
+    Args:
+        quantity: A parsed figure.
+
+    Returns:
+        True when the noun phrase has a personnel word (or a support arm) before
+        any equipment word, or the figure's branch is infantry, cavalry or
+        irregular. A small count that passes is a real detachment, not a
+        number of guns or animals.
+    """
+    if is_equipment_count(quantity):
+        return False
+    if quantity.branch in ("infantry", "cavalry", "irregular"):
+        return True
+    return any(_PERSONNEL_NOUN_RE.match(w) for w in _noun_words(quantity))
+
+
+def is_support_arm(quantity: Quantity) -> bool:
+    """Whether a figure counts engineers, sappers, pioneers, miners or signallers.
+
+    Args:
+        quantity: A parsed figure.
+
+    Returns:
+        True when the noun phrase names a support arm. These are arms of
+        service, but the branch parser has no pattern for them.
+    """
+    return any(_SUPPORT_ARM_NOUN_RE.match(w) for w in _noun_words(quantity))
 
 
 def is_labelled_figure(quantity: Quantity) -> bool:

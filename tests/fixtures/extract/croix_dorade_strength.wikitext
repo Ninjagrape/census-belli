@@ -1,0 +1,21 @@
+<!-- Minimal fixture written from the corpus3 audit (handover-log 36/37); not fetched from Wikipedia. -->
+{{Infobox military conflict
+| conflict         = Combat of Croix d'Orade
+| partof           = the [[Peninsular War]]
+| date             = 1814
+| place            = [[Toulouse]], France
+| result           = Allied victory
+| combatant1       = {{flagcountry|United Kingdom}}
+| combatant2       = {{flagcountry|First French Empire}}
+| commander1       = [[Henry Hussey Vivian]]
+| commander2       = [[Pierre Soult]]
+| strength1        = 400 cavalry<br>400 to 900 infantry<br>150 to 200 sappers and engineers
+| strength2        = 200 to 300 infantry<br>30 to 50 engineers<br>1,600 to 2,000 cavalry reserves
+}}
+
+'''Combat of Croix d'Orade''' was an engagement of the period.
+
+== Background ==
+The armies had been manoeuvring for several days before the engagement, and each commander expected the other to give battle on the ground he had chosen.
+
+The opening moves were cautious. Both sides probed the flanks and sent forward skirmishers, and the main bodies did not come into contact until the afternoon.

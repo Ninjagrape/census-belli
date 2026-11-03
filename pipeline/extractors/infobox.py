@@ -56,6 +56,8 @@ from pipeline.extractors.textnorm import (
     is_equipment_count,
     is_labelled_figure,
     is_orphan_figure,
+    is_personnel_count,
+    is_support_arm,
     parse_quantities,
     split_list_items,
     strip_markup,
@@ -452,7 +454,11 @@ def _classified_branch(
 
 
 def _derived_total(
-    reports: list[TroopReport], unsafe: set[int], side_label: str, provenance: Provenance
+    reports: list[TroopReport],
+    unsafe: set[int],
+    support: set[int],
+    side_label: str,
+    provenance: Provenance,
 ) -> TroopReport | None:
     """Sum a side's components into one lower-bound total when it has none.
 
@@ -463,11 +469,20 @@ def _derived_total(
     partition only the largest figure per arm is used, because "8,050 gunners
     and engineers" and a nested "7,232 gunners" describe overlapping men.
 
+    Only figures that count people are summed. Equipment, animals and
+    aircraft are excluded, and a figure under the headcount floor is summed
+    only when its own words name personnel ("50 cavalry", "30 engineers").
+    Engineers, sappers, pioneers, miners and signallers are an arm of service
+    even though their stored branch is ``other``, so they join the arms
+    partition under one key.
+
     Args:
         reports: The side's reports, none of which is a total.
         unsafe: Indexes into ``reports`` that must not be summed: equipment
             counts, figures behind a label that may name a phase or date, and
             numbers too small to be a headcount.
+        support: Indexes into ``reports`` of support-arm figures (engineers,
+            sappers, ...) stored as ``other``, which count as an arm here.
         side_label: The side the sum describes.
         provenance: Where the figures came from.
 
@@ -479,12 +494,13 @@ def _derived_total(
     for index, report in enumerate(reports):
         if index in unsafe or report.is_upper_bound:
             continue
-        if report.branch == "other":
+        arm = "engineers" if index in support and report.branch == "other" else report.branch
+        if arm == "other":
             contingents.append(report)
-        elif report.branch != "total":
-            held = arms.get(report.branch)
+        elif arm != "total":
+            held = arms.get(arm)
             if held is None or report.reported_value > held.reported_value:
-                arms[report.branch] = report
+                arms[arm] = report
 
     partitions = [contingents, list(arms.values())]
     best = max(partitions, key=lambda part: sum(r.reported_value for r in part))
@@ -532,6 +548,7 @@ def _side_troop_reports(
     reports: list[TroopReport] = []
     equipment: set[int] = set()
     unsafe: set[int] = set()
+    support: set[int] = set()
     phases: dict[int, tuple[str, str]] = {}
     explicit_totals: set[str] = set()
     has_orphan = False
@@ -558,13 +575,16 @@ def _side_troop_reports(
                     explicit_totals.add(field_name)
             if is_equipment:
                 equipment.add(len(reports))
+            if is_support_arm(quantity):
+                support.add(len(reports))
             # A label before the number may name a phase or a date ("Skirmish:
             # 20,000", "Battle: 40,000"), and a tiny count is more likely guns
-            # or animals than men; neither is safe to add into a total.
+            # or animals than men; neither is safe to add into a total. A tiny
+            # count whose own words name people is a small detachment.
             if (
                 is_equipment
                 or is_labelled_figure(quantity)
-                or quantity.value < _MIN_SUMMED_HEADCOUNT
+                or (quantity.value < _MIN_SUMMED_HEADCOUNT and not is_personnel_count(quantity))
             ):
                 unsafe.add(len(reports))
             has_orphan = has_orphan or is_orphan_figure(quantity)
@@ -587,7 +607,13 @@ def _side_troop_reports(
 
     if reports and not any(r.branch == "total" for r in reports):
         _complete_total(
-            reports, equipment, unsafe, side_label, provenance, may_derive=not has_orphan
+            reports,
+            equipment,
+            unsafe,
+            support,
+            side_label,
+            provenance,
+            may_derive=not has_orphan,
         )
 
     return reports
@@ -655,6 +681,7 @@ def _complete_total(
     reports: list[TroopReport],
     equipment: set[int],
     unsafe: set[int],
+    support: set[int],
     side_label: str,
     provenance: Provenance,
     *,
@@ -666,6 +693,7 @@ def _complete_total(
         reports: The side's reports, modified in place.
         equipment: Indexes of reports that count equipment, not men.
         unsafe: Indexes of reports that must not be summed.
+        support: Indexes of support-arm reports (engineers, sappers, ...).
         side_label: The side the reports describe.
         provenance: Where the figures came from.
         may_derive: False when the field holds bare figures under headings
@@ -688,7 +716,7 @@ def _complete_total(
 
     if not may_derive:
         return
-    derived = _derived_total(reports, unsafe, side_label, provenance)
+    derived = _derived_total(reports, unsafe, support, side_label, provenance)
     if derived is not None:
         reports.append(derived)
 
