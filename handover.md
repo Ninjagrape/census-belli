@@ -11,7 +11,196 @@ would otherwise get it wrong. Session narratives go in
 Code comments cite "handover §9.3" (a file in `docs/handover/`) and
 "handover-log §16" (a file in `docs/handover-log/`).
 
-Last updated: 2026-10-29 (P1 merged; corpus2 refit running).
+Last updated: 2026-11-03 evening (contamination fixes approved and built, not applied; see §000 "2026-11-03 evening").
+
+## 000. 2026-10-29/30: corpus3 seed, overrides ov-0101..0104, crawl
+
+- **2026-11-03 evening (resume here; handover-log §37).** Step 1 is done. Its
+  fixes are approved but not applied, and no DB writes were made.
+  - **48 overrides approved by the user:** ov-0500..0524 campaign retypes
+    (Kursk and Berlin stay battles, because campaign removes a battle from the
+    WAR model), ov-0530..0549 troop scope and polity, ov-0550 Seelow
+    `theatre_strength`, ov-0551/0552 Okinawa amphibious and dated. They are in
+    `docs/handover-log/37-corpus3-contamination-overrides-approved-2026-11-03.yaml`,
+    validated (467 entries load, every target matches exactly once). Not yet
+    in `config/overrides.yaml`.
+  - **Extract fix**, branch `wip/extract-endash` (worktree `w-endash`, from
+    288eee5), uncommitted. It fixes the `{{endash}}` range glue (infobox path
+    only), "with <Name>" as a detachment, and Tournai's flag `size=20px`.
+    Unit 2424 passed and ruff is clean. Passage text is byte-identical across
+    3304 articles, so the LLM cache stays valid. Only the 8 expected battles
+    change.
+  - **mypy fails on wip/corpus3-seed** at `pipeline/reconcilers/model.py:765`
+    (float * None), from the era-fix commits. Fix it before the merge.
+  - **Next, in order:**
+    1. The user commits w-endash (message in §37) and merges it into
+       wip/corpus3-seed; fix the mypy error.
+    2. Paste the 48 entries into w-c3seed `config/overrides.yaml` and load-check
+       them.
+    3. Run the integration suite `-k "reconcile or prior_check"` (plus the
+       extract tests) on a scratch DB.
+    4. Back up corpus3, then re-run extract onward with `--set
+       seed_path=config/sources_seed_corpus3.yaml` and
+       `--continue-past-deferred`. LLM answers should all come from the cache,
+       and Tournai's sides change, so classify may re-request its roles.
+    5. Reconcile; all gates must pass. Then bayesian-model-reviewer (as a
+       general-purpose Opus agent with the spec file) and an `era_effect:
+       none` sensitivity run.
+    6. Then §36 step 4 (missingness requests: ask the user's usage % first).
+  - Cloud sessions need the branch pushed. The user pushes from GitHub Desktop,
+    with the worktree added as a repository; the CLI credential manager does
+    not work here.
+
+Branch `wip/corpus3-seed` (worktree `.claude/worktrees/w-c3seed`, created
+this session), 9f9862f: `scripts/campaign_seed.py` (+11 unit tests),
+`config/sources_seed_corpus3.yaml`, ov-0101..0104 (96 entries load), crawl UA
+now names the repo. Not merged.
+- **User decisions 2026-10-29:** the literal P361 rule (1782 new, mostly whole
+  wars: ACW 485, WWII 251) is too broad, but keep WWII, Peninsular and
+  Napoleonic. Rule approved: **shared commander** (keep a candidate whose
+  infobox names a wikilinked commander who is in 2+ kept battles; corpus2
+  always kept). Result: 1441 new + 211 corpus2 URLs (237 battles) = 1652
+  URLs. Drops: 36 no infobox, 71 no linked commander, 234 no shared
+  commander. 706 of 1441 kept have no commander in corpus2. Infobox counts
+  corpus2 -> corpus3: Montgomery 4->12, Zhukov 10->18, Rommel 9->13,
+  Wellington 1->33, Napoleon 43->77, Khalid 14->34, Pyrrhus 3->7; commanders
+  with 3+ battles 115->621. Regenerate with the script (`--pool` re-runs only
+  the filter).
+- **Overrides approved (user, 2026-10-29):** ov-0101 Beneventum Roman victory,
+  ov-0102 Waterloo Blücher co-field (weight 0.25 kept), ov-0103 Kalka Rus'
+  10k-30k, ov-0104 Torch Vichy 105,000. Yamama declined (no modern estimate).
+  Twin check clean. For corpus3's first run only; corpus2 is not refitted.
+  corpus2 has a sideless Beneventum shell row (battle_id 32).
+- **Crawl: citations on** (user). Corpus3 runs in the w-c3seed worktree with
+  its own `data/` (a real copy of `data/raw`: extract reads every file under
+  the raw dir), DB `general_war_corpus3` (schema + alembic_version + llm_calls
+  copied from corpus2, so corpus2's answers are cached). Log
+  `data/logs/corpus3_crawl_20261030.log` (started 2026-10-30 00:20, PID
+  55884; corpus2's llm_calls loaded with battle_id NULL, which is only
+  metadata: 919 rows, input_hash sets equal). If it died, re-run the same
+  command from the worktree; crawl_state.json resumes it. Backup
+  `data/backups/general_war_corpus3_20261030_empty_with_cache.dump`.
+- **Done 2026-10-30:** crawl 1652/1652 (gates pass; Vimeiro and Zornoza
+  failed on wake from hibernation and came in on a re-run). Extract and
+  resolve done, all LLM answers in the cache (outcome 260+58 Sonnet,
+  resolve 401+92 Haiku; 45,250 passages deferred as agreed). Backups
+  `..._post_crawl.dump` (before extract) and `..._post_resolve.dump`.
+- **Two bugs found and fixed on the branch** (not merged):
+  25d72ad extract joined Wikidata sitelinks to articles by hashing the raw
+  URL, so every percent-encoded or http seed URL got a sideless Wikidata-only
+  shell battle and the real row lost its Q-id (327 shells on corpus3, ~26 on
+  corpus2, e.g. the Beneventum shell 32). Model never double-counted (shells
+  have no sides). Fix restored the DB to post_crawl and re-ran: 1653 battles,
+  1652 joined, duplicate pairs 393 -> 33. b20fb6f resolve logged unresolved
+  mentions by battle name only, so battles sharing a name (Akroinon 732/740,
+  Beneventum 212/214/275 BC) lost them from missing_data_log (46 mentions);
+  commander links were always slug-first. Same commit: ov-0105..0108
+  (user-approved) unlink "Ming"/"Ming:" (the dynasty) from four Imjin sieges.
+- **Review overrides (user-approved 2026-10-30), 888c8be:** ov-0109..0141
+  (historiography review: merges, namesake splits, Perryville/Polotsk/
+  Rhegium/Dunkirk 1944-45 indecisive, Ammunition Hill), ov-0160..0270 (111
+  more split merges), ov-0300..0474 (175 wrong Wikidata links, e.g. G. H.
+  Thomas on an engraver). 419 entries; extract 46/46 and resolve 366/366
+  applied. Resolve after: resolution 0.984, link rate 0.758,
+  probable_duplicate_generals 8 (was 36). Backup `..._post_resolve2.dump`.
+  **Follow-up (code):** 242 of ~5,700 linked rows disagreed with the
+  infobox's own wikilink; resolve should use that wikilink as the identity
+  signal so future corpora do not need these overrides.
+- **2026-11-03 state (resume here; record in handover-log §36).** Branch
+  `wip/corpus3-seed` (w-c3seed) is now 288eee5: 8f86dad ov-0102 Q-ids,
+  6eb2e10 **rotated era effect** (`era_effect: rotated|legacy|none`, fixed
+  sigma_e, per-bin unlabelled levels sampled as coordinates; user chose it over
+  dropping e, which the model review rejected because it would shift pre-1800
+  sizes toward modern levels), 8ae2b27 **campaign exclusion** (`exclude_campaigns`,
+  campaign sides logged to missing_data_log), 288eee5 identified-level and
+  test fixes. Not merged, not pushed. Verified: unit 2393; integration
+  `-k "reconcile or prior_check"` 82 passed (at 6eb2e10, not yet re-run with
+  8ae2b27); reconcile model files pass after 288eee5. **corpus2 copy**
+  (`general_war_c2_erarot`, run 133): rhat 1.008, 0 div, wb gap 0.045,
+  Spearman 1.000 and median |dlog| 0.002 vs run 132's reconcile, so the fix
+  changes nothing on corpus2. **corpus3 reconcile run 2 FAILED** (log
+  `data/logs/corpus3_reconcile2_20261102.log`, backup
+  `..._20261102_pre_reconcile2.dump`, no troop estimates written; casualties
+  converged): era block now fine, but the noise leaks (modern infobox sigma
+  0.72 vs prior 0.22, noise ratio 3.3, s_d 0.24, within-battle slope 0.10).
+  Cause, from a read-only audit (scratchpad `c3audit/audit_out.txt`): only
+  66 of 2136 sides have 2+ rows and the noise is learned from them; the worst
+  are contaminated: (1) WWII strategic operations not typed campaign (Battle
+  of France 150k vs 3.3M, Dnieper, Caucasus, Odessa Offensive, Dukla Pass,
+  Debrecen, Nikopol, Rzhev, Belgorod-Kharkov, Donbass, Smolensk op, Voronezh,
+  Vyazemsky op, Oder-Neisse); (2) an extract bug that glues ranges ("c. 450500"
+  Roan's Tan Yard, "550800" Glasgow; a template dash is dropped; ~82
+  candidate rows); (3) sub-detachment or mixed-scope totals (Corbach "400 to 500
+  with Luckner", Fort Frontenac 2635/135, First Siege of Chaves two sieges,
+  Tournai "20px" side); (4) broken side labels (Croix d'Orade, Ammunition Hill).
+  **User decision 2026-11-02: fix the data first, no model change yet.**
+  Classify roles done (573 imported; 2 lines had corrupted hashes and re-defer).
+  The older diagnosis follows.
+- **2026-10-31 state.** Reconcile on corpus3 FAILED to converge
+  (run 1: max_rhat 2.54, min ESS 4.8, 0 divergences, 2107 sides fail MCSE;
+  log `data/logs/corpus3_reconcile1_20261030.log`), wrote no estimates. Trace
+  (scratch `recon_diag/a1.log` in the session scratchpad): chains stuck in
+  different modes (tau_e per-chain 0.97/0.74/0.87/1.75, m0 chain 4 at 9.26),
+  i.e. multimodality, not slow mixing. Nine troop_span_guard sides are
+  campaign-scale entries (Battle of France, Caucasus, Dnieper, Debrecen,
+  Okinawa). A Sonnet diagnosis worker runs on scratch DB
+  `general_war_corpus3_recon` (copy of corpus3 after resolve, created
+  2026-10-31; drop when done) testing longer tuning / excluding campaigns.
+  User chose: diagnose first, no code change before its report.
+  **Diagnosis done (troops fit, scratch `recon_diag/fit.py`, logs a1-d1):**
+  baseline rhat 2.54; campaigns excluded 2.14; tune 4000 2.03; campaigns
+  excluded + era_effect_prior_sd 0.3 1.75 (one chain frozen); 0 divergences
+  throughout. Only the global era block fails (e[era_bin], z_era, tau_e,
+  a_era, g_unlabelled, g_regime, offset_bar, m0, corpus_level). **Cause:**
+  the P1 side prior `_troop_side_prior` (model.py ~918) adds `e = tau_e *
+  z_era`, which on unlabelled rows (96%) is not separable from `a_era*era`
+  + g_unlabelled, exactly what the module docstring N3 (~line 215) says must
+  not be added. Corpus2 was too small to expose it. **Proposed fix
+  (untested, needs bayesian-model-reviewer):** keep one era channel, drop
+  e[era] for troops when a_era is fitted (or fix a_era at 0 and keep e).
+  Validate on corpus2 (rhat 1.004 baseline), then corpus3 with campaigns
+  excluded (battle_type=campaign filter in load_reports, secondary).
+- **Classify (partial).** `classify --continue-past-deferred` on corpus3
+  wrote 3,840 requests (`data/llm_requests/classify_20261030T132012Z.jsonl`):
+  1,355 command-role (do not depend on reconcile) and 2,485 missingness
+  (their prompt includes whether reconcile gave the side a troop estimate,
+  so answer them only AFTER reconcile converges and classify is re-run).
+  Role-only file `classify_roles_20261030T132012Z.jsonl`, 91 chunks under
+  `data/llm_requests/chunks/classify_roles_20261030T132012Z/`; responses in
+  `data/llm_responses/classify_roles_20261030T132012Z/`: chunks 1-52 done,
+  validated and imported (780 answers, 0 errors); 575 requests left
+  (chunks 53-91, ~39 Sonnet chunks). Resume with `split --skip-answered` on
+  the roles file, answer, validate, import. Many answers are needs_review (thin excerpts,
+  equal-split "unknown" defaults); classify reviewer should check Chaeronea
+  (Philip/Alexander got equal "unknown"), Napoleon-credited battles, Khalid.
+  ov-0102 (Waterloo) now names Uxbridge and Bülow by Q-id (Q335133, Q63023)
+  because the merges changed their linked names; uncommitted on the branch.
+- Dropped 2026-10-30 (user: "drop if not needed"), dumps kept in
+  `data/backups/*_20261030_before_drop.dump`: `general_war_corpus` (pilot),
+  `general_war_wt_p1_corpus`, `general_war_wt_exp_corpus`.
+- **Next (2026-11-03):** (a) draft fixes for the contamination above and show
+  the user before building any: retype the strategic operations as campaign
+  (battle_type override), a Sonnet fix for the extract dash-glue bug (then
+  re-run extract onward, so ask first), troop-scope overrides for the
+  mixed-scope sides; twin-check overrides. (b) integration suite on 8ae2b27.
+  (c) re-run reconcile on corpus3 (backup first), then bayesian-model-reviewer
+  (the agent type was not registered this session: run general-purpose Opus
+  with `.claude/agents/bayesian-model-reviewer.md`), plus one `era_effect:
+  none` sensitivity run. (d) classify `--continue-past-deferred`, answer the
+  ~2,485 missingness requests (ask usage %), re-run classify,
+  historiography-reviewer (leads in handover-log §36), then impute onward.
+  Scratch DBs created this session: `general_war_c2_erarot`,
+  `general_war_erarot_it`; worktrees `w-erarot`, `w-campx` (branches
+  merged into wip/corpus3-seed by cherry-pick/ff); `general_war_corpus3_recon`
+  from last session. Ask before dropping any.
+- Earlier next list: historiography review of extract+resolve (running; leads: placeholder
+  side labels "side 1"/"side 2", Jean Moreau/David Baird/Jan de Winter
+  unlinked, Blücher on an Austria side, Perryville strategic coding, Rhegium,
+  non-battles like Clydebank Blitz) -> user approves overrides -> re-run
+  resolve if any -> reconcile -> classify (~190 Sonnet chunks: **ask the
+  user's usage % first**) -> impute -> model -> evaluate -> report -> both
+  reviewers -> compare with run 132 (top 20, Montgomery, Khalid, Pyrrhus,
+  largest component, compression).
 
 ## 00. 2026-10-29: P1 fixes done, merged to main 490a5d1, corpus2 refit
 

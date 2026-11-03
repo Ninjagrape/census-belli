@@ -16,6 +16,8 @@ Two rules that override the momentum to just keep building:
 
 Before you finish a session, update `handover.md` so the next one starts where you stopped.
 
+**Every handover update is a checkpoint.** Once the step is done, end the reply with a ready-to-paste prompt for a fresh session in one code block (the §7 step, the one `docs/handover/` file it needs, anything still running) and tell the user to `/clear` and paste it. Long sessions re-send their whole context every turn, so starting fresh at checkpoints is the cheapest habit this project has. A PostToolUse hook (`.claude/hooks/checkpoint_prompt.py`, wired in `.claude/settings.local.json`) reminds you when `handover.md` is written.
+
 ## How to work: Opus leads, subagents build
 
 Every session works in an agentic coding style. This is a standing instruction to use subagents, so do not wait to be asked.
