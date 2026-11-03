@@ -3118,3 +3118,212 @@ entries:
     source: "Wikidata Q2253 (Scipio Africanus, Roman general and politician (236/235–183 BC), 235 BC-183 BC); Wikidata Q1241388 (Publius Cornelius Scipio, Eldest son of Scipio Africanus (died 170 BC)); Wikipedia, 'Battle of Utica (203 BC)' infobox and linked commander article"
     note: "Wrong Q-id on a linked row. Linked row 3392 (1 battle: Battle of Utica (203 BC)) carries Q1241388, Eldest son of Scipio Africanus (died 170 BC). The infobox mention 'Publius Cornelius Scipio' links Scipio Africanus (Q2253)."
     reviewed: {by: historiography-reviewer, "on": 2026-10-30}
+  # === corpus3 contamination fixes, drafted 2026-11-03, for user review ===
+  # --- battle_type: strategic operations typed field/aerial/siege -> campaign (user: A + C, Kursk and Berlin stay battles) ---
+  - {id: ov-0500, kind: battle_type, target: {battle: Battle_of_France-7da5768cd4}, value: campaign, source: "Wikipedia, 'Battle of France' (10 May - 25 June 1940; German invasion of the Low Countries and France, also 'Western Campaign')", note: "Whole-theatre invasion, six weeks, three army groups. Troop figures (3.6M German, 3.45M French) are theatre strengths. Typed field by classify.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0501, kind: battle_type, target: {battle: Battle_of_the_Dnieper-d8ab138a39}, value: campaign, source: "Wikipedia, 'Battle of the Dnieper' (26 Aug - 23 Dec 1943; lead calls it 'a military campaign', ~4M troops)", note: "Four-month multi-front campaign; 2.63M Soviet figure is the strategic force.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0502, kind: battle_type, target: {battle: Battle_of_the_Caucasus-045ccd1b64}, value: campaign, source: "Wikipedia, 'Battle of the Caucasus' (lead: 'a series of Axis and Soviet operations in the Caucasus', July 1942 to 1943)", note: "Series of operations over months; strengths are July 1942 and Jan 1943 snapshots (1,000,000+ Soviet).", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0503, kind: battle_type, target: {battle: Odessa_Offensive-cbfaf1fac3}, value: campaign, source: "Wikipedia, 'Odesa offensive' ('Odessa Offensive Operation', offensive phase 26 Mar - 14 Apr 1944)", note: "Front-level Soviet operation (3rd Ukrainian Front), 470k Soviet figure. The separate 1941 Siege of Odesa is a different event.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0504, kind: battle_type, target: {battle: Battle_of_the_Dukla_Pass-2605540982}, value: campaign, source: "Wikipedia, 'Battle of the Dukla Pass' (8 Sep - 28 Oct 1944; also 'Dukla-Presov offensive', East Carpathian operation)", note: "Seven-week front-level operation; 378k Soviet vs 100k German are operation strengths.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0505, kind: battle_type, target: {battle: Battle_of_Debrecen-6ef2a2b5b0}, value: campaign, source: "Wikipedia, 'Battle of Debrecen' (6-29 Oct 1944; Red Army 'Debrecen Offensive Operation')", note: "Army-group scale operation over three weeks; 698k Soviet figure.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0506, kind: battle_type, target: {battle: Nikopol_Krivoi_Rog_offensive-2df4a86de0}, value: campaign, source: "Wikipedia, 'Nikopol-Krivoi Rog offensive' (3rd/4th Ukrainian Front offensive, winter 1944)", note: "Front-level offensive operation; 705k Soviet figure.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0507, kind: battle_type, target: {battle: Battles_of_Rzhev-e29972bd0e}, value: campaign, source: "Wikipedia, 'Battles of Rzhev' (lead: 'a series of Red Army offensives', 8 Jan 1942 - 31 Mar 1943)", note: "Fifteen-month series of four operations; 3.68M Soviet total sums them (Glantz 1998 footnote in the infobox).", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0508, kind: battle_type, target: {battle: Belgorod_Kharkov_offensive_operation-86d47f8ec9}, value: campaign, source: "Wikipedia, 'Belgorod-Kharkov offensive operation' (3-23 Aug 1943; 'Soviet strategic summer offensive')", note: "Self-described strategic operation, 1.14M Soviet. Overlaps the Battle of Kursk, which stays a battle (user, 2026-11-03).", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0509, kind: battle_type, target: {battle: Donbas_strategic_offensive_July_1943-8ae2e451fd}, value: campaign, source: "Wikipedia, 'Mius-Donets offensive' / 'First Donbas strategic offensive' (17 Jul - 2 Aug 1943; lead: 'a military campaign')", note: "Two-front strategic offensive, 1.0M Soviet.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0510, kind: battle_type, target: {battle: Smolensk_operation-f58ba5c80a}, value: campaign, source: "Wikipedia, 'Second Battle of Smolensk' / 'Smolensk operation' (7 Aug - 2 Oct 1943)", note: "Eight-week multi-front operation, 1.25M Soviet. Not the 1812 Battle of Smolensk.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0511, kind: battle_type, target: {battle: Battle_of_Voronezh_1942-0c6adc983f}, value: campaign, source: "Wikipedia, 'Battle of Voronezh (1942)' (28 Jun - 24 Jul 1942; Voronezh-Voroshilovgrad strategic defensive operation)", note: "Four-week army-group-scale operation, 1.31M Soviet vs 975k Axis.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0512, kind: battle_type, target: {battle: Battle_of_Vyazma_Bryansk-f12d475b2c}, value: campaign, source: "Wikipedia, 'Battle of Vyazma-Bryansk' (Vyazemsky operation, 30 Sep - 30 Oct 1941; Operation Typhoon first phase)", note: "Month-long double encirclement; 1.93M German is the whole Typhoon force.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0513, kind: battle_type, target: {battle: Battle_of_the_Oder_Neisse-73d3c1e08b}, value: campaign, source: "Wikipedia, 'Battle of the Oder-Neisse' (16-19 Apr 1945; 'initial (operational) phase of one of the last two strategic offensives')", note: "Figures are the 1st Belorussian plus 1st Ukrainian Front strategic force (2.5M vs 300k). Berlin stays a battle (user, 2026-11-03).", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0514, kind: battle_type, target: {battle: Battle_of_Bia_ystok_Minsk-1072bea7b0}, value: campaign, source: "Wikipedia, 'Battle of Bialystok-Minsk' (22 Jun - 9 Jul 1941; 'a German strategic operation' by Army Group Centre)", note: "Self-described strategic operation, 750k German.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0515, kind: battle_type, target: {battle: Baltic_operation-1029a3ca1d}, value: campaign, source: "Wikipedia, 'Baltic strategic defensive operation' (22 Jun - 9 Jul 1941)", note: "Strategic defensive operation over three states, 786k Soviet.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0516, kind: battle_type, target: {battle: Battle_of_Kiev_1943-335d687b0f}, value: campaign, source: "Wikipedia, 'Second Battle of Kiev' (3 Nov - Dec 1943; part of the Battle of the Dnieper)", note: "Operation-level, 730k Soviet, sub-phase of ov-0501.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0517, kind: battle_type, target: {battle: Voronezh_Kastornoye_offensive-67b1d4deb3}, value: campaign, source: "Wikipedia, 'Voronezh-Kastornoye offensive' (24 Jan - 17 Feb 1943; 'offensive operation')", note: "Front-level offensive, 987k Soviet vs 328k.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0518, kind: battle_type, target: {battle: Bereznegovatoye_Snigirevka_offensive-4c52fe20ff}, value: campaign, source: "Wikipedia, 'Bereznegovatoye-Snigirevka offensive operation' (6-18 Mar 1944 offensive phase)", note: "Front-level Soviet operation, 560k.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0519, kind: battle_type, target: {battle: Crimean_offensive-2df737b6dd}, value: campaign, source: "Wikipedia, 'Crimean offensive' (8 Apr - 12 May 1944; lead: 'a series of offensives')", note: "Five weeks, 462k Soviet.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0520, kind: battle_type, target: {battle: Kamenets_Podolsky_pocket-7eab453e96}, value: campaign, source: "Wikipedia, 'Kamenets-Podolsky pocket' (4 Mar - 17 Apr 1944; 'part of the Proskurov-Chernovtsy Operation')", note: "Front-level operation, 861k Soviet; 21 troop rows.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0521, kind: battle_type, target: {battle: Leningrad_Novgorod_offensive-fb633b7e43}, value: campaign, source: "Wikipedia, 'Leningrad-Novgorod offensive' (14 Jan - 1 Mar 1944; 'a strategic offensive')", note: "Typed siege_offensive; it is a multi-front strategic offensive (822k Soviet).", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0522, kind: battle_type, target: {battle: East_Pomeranian_offensive-068cd2efd1}, value: campaign, source: "Wikipedia, 'East Pomeranian offensive' ('strategic offensive operation', 10 Feb - 4 Apr 1945)", note: "Typed aerial, which is wrong; 996k Soviet strategic force.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0523, kind: battle_type, target: {battle: Battle_of_Romania-09ab9434a8}, value: campaign, source: "Wikipedia, 'Battle of Romania' (5 Mar - 24 Sep 1944; 'comprised several operations')", note: "Typed aerial, which is wrong; six-month multi-operation, 1M per side.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+  - {id: ov-0524, kind: battle_type, target: {battle: Battle_of_the_Scheldt-97863ad74e}, value: campaign, source: "Wikipedia, 'Battle of the Scheldt' (2 Oct - 8 Nov 1944; lead: 'a series of military operations')", note: "Series of operations, 450k Canadian army figure.", reviewed: {by: historiography-reviewer, "on": 2026-11-03}}
+
+  # --- troop_strength / side_polity: mixed-scope sides (user: all except Ammunition Hill) ---
+  - id: ov-0530
+    kind: troop_strength
+    target: {battle: Battle_of_Fort_Frontenac-1dbdea4e34, side: Kingdom of Great Britain}
+    value: {point: 2635}
+    scope: deployed
+    source: "Wikipedia, 'Battle of Fort Frontenac', infobox strength1 '2,635' (sub-bullets '2,500 militia and Indians' and '135 regulars')"
+    note: "The rows were 2,635 (the total), 2,500 (militia and Indians) and 135 (regulars), the last two components of the first read as rival totals. France is '110 regulars' plus 2 armed vessels. The article's 'over 3,000' is the pre-desertion figure; the infobox total is the like-for-like one."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0531
+    kind: troop_strength
+    target: {battle: Siege_of_Chaves-06cc600e39, side: Portugal}
+    value: {point: 3500}
+    scope: deployed
+    source: "Wikipedia, 'Siege of Chaves', infobox strength1 'First siege: 3,500 men' (Napier 1828b p. 181)"
+    note: "The infobox covers two sieges. This row is the first siege (10 to 12 March 1809, French victory); the second siege's 6,000 was read as a rival total. The second siege has no battle row of its own. Pair of ov-0532."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0532
+    kind: troop_strength
+    target: {battle: Siege_of_Chaves-06cc600e39, side: French Empire}
+    value: {point: 23000}
+    scope: deployed
+    source: "Wikipedia, 'Siege of Chaves', infobox strength2 'First siege: 23,000 men' (Southey 1828b p. 175)"
+    note: "The rows were 23,000 (first siege, Soult's corps) and 1,800 (second siege garrison). The first-siege figure matches ov-0531. Pair of ov-0531."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0533
+    kind: troop_strength
+    target: {battle: Battle_of_Ticonderoga_1759-ac1077914e, side: Kingdom of France}
+    value: {low: 400, high: 2300}
+    scope: deployed
+    source: "Wikipedia, 'Battle of Ticonderoga (1759)', infobox strength1 '400 at Ticonderoga; 1,900 at Crown Point' (McLynn 2004 p. 154); article: about 2,300 of Bourlamaque's 3,000 at Fort Carillon (Parkman 1898 vol. 2 p. 248; Reid 2003 pp. 22, 44)"
+    note: "The rows were 400 (the rearguard left to hold the fort) and 1,900 (the remainder at Crown Point), components of Bourlamaque's 2,300 read as rival totals. The British side is Amherst's whole army (11,376)."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0534
+    kind: troop_strength
+    target: {battle: Battle_of_Okinawa-3f7a438b53, side: "Ground forces:"}
+    value: {low: 183000, high: 250000}
+    scope: deployed
+    source: "Wikipedia, 'Battle of Okinawa', infobox strength1 '~183,000 combat troops (Sloan 2007 p. 18) rising to ~250,000 (Keegan 2005 p. 567)'"
+    note: "The label is the infobox heading for the US side. The rows were ~541,000 (the whole Tenth Army, including non-combat personnel), 183,000 and 250,000. Japan's ground force is 116,000 (ov-0535), so US combat troops are the like-for-like figure. Polity is ov-0536."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0535
+    kind: troop_strength
+    target: {battle: Battle_of_Okinawa-3f7a438b53, side: Japan}
+    value: {point: 116000}
+    scope: deployed
+    source: "Wikipedia, 'Battle of Okinawa', infobox strength2 '~76,000+ Japanese soldiers; ~40,000+ Okinawan conscripts and boeitai' (Hastings 2008 p. 370)"
+    note: "The derived total of 116,850 added 850 kamikaze aircraft to the personnel. Other estimates put peak Japanese combat strength at 95,000 to 105,000, so this is the upper reading. Pair of ov-0534."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0536
+    kind: side_polity
+    target: {battle: Battle_of_Okinawa-3f7a438b53, side: "Ground forces:"}
+    value: United States
+    source: "Wikipedia, 'Battle of Okinawa', infobox combatant1 ('Ground forces: United States')"
+    note: "The infobox heading was read as the side label and the polity."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0537
+    kind: troop_strength
+    target: {battle: Combat_of_Croix_d_Orade-abb48ac178, side: side 1}
+    value: {low: 950, high: 1500}
+    scope: deployed
+    source: "Wikipedia, 'Combat of Croix d'Orade', infobox strength1 (400 cavalry; 400 to 900 infantry; 150 to 200 sappers and engineers)"
+    note: "The derived total of 800 summed only two of the three components. Pair of ov-0538; polity is ov-0539."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0538
+    kind: troop_strength
+    target: {battle: Combat_of_Croix_d_Orade-abb48ac178, side: side 2}
+    value: {low: 1830, high: 2350}
+    scope: deployed
+    source: "Wikipedia, 'Combat of Croix d'Orade', infobox strength2 (200 to 300 infantry; 30 to 50 engineers; 1,600 to 2,000 cavalry reserves)"
+    note: "The derived total of 1,800 summed only the infantry and the reserve cavalry. Berton's reserve cavalry may not all have been engaged; counted to match the British side's listed components. Pair of ov-0537; polity is ov-0540."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0539
+    kind: side_polity
+    target: {battle: Combat_of_Croix_d_Orade-abb48ac178, side: side 1}
+    value: United Kingdom
+    source: "Wikipedia, 'Combat of Croix d'Orade', infobox combatant1"
+    note: "The placeholder label left the polity empty. Side 2 is ov-0540."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0540
+    kind: side_polity
+    target: {battle: Combat_of_Croix_d_Orade-abb48ac178, side: side 2}
+    value: French Empire
+    source: "Wikipedia, 'Combat of Croix d'Orade', infobox combatant2"
+    note: "The placeholder label left the polity empty. Pair of ov-0539."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0541
+    kind: troop_strength
+    target: {battle: Battle_of_Corbach-d5afc0042a, side: Hanover}
+    value: {low: 15000, high: 20000}
+    scope: deployed
+    source: "Wikipedia, 'Battle of Corbach', infobox strength1 '15,000 to 20,000' (Manners 1899 p. 131 n. 5; Savory: 24 battalions, 19 squadrons, 21 guns)"
+    note: "'400 to 500 with Luckner' was read as a second side total (reconcile saw 17,321 and 447). It is the previous day's detachment, not part of the allied army. The component rows sum to roughly 16,000 to 17,000, consistent with the range."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0542
+    kind: troop_strength
+    target: {battle: Battle_of_Vyazma-8d77b1bd09, side: French Empire}
+    value: {point: 37500}
+    scope: deployed
+    source: "Wikipedia, 'Battle of Vyazma', infobox strength2 '37,500 (13,000 from Davout's corps; 25,000 engaged)' (Bogdanovich 1860 pp. 428-430)"
+    note: "One sentence was split into three rival totals. The Russian side is 27,000 (Bodart 1908 p. 442), so the full French force is the like-for-like figure."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0543
+    kind: troop_strength
+    target: {battle: Siege_of_Genoa_1747-fe3cf32998, side: Habsburg Monarchy}
+    value: {point: 30000}
+    scope: deployed
+    source: "Wikipedia, 'Siege of Genoa (1747)', infobox strength1 (Habsburg Monarchy 24,000 men; Kingdom of Sardinia 6,000 men)"
+    note: "Two allied contingents on one side read as rival totals. Genoa's derived 16,000 is fine."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0544
+    kind: troop_strength
+    target: {battle: Siege_of_Budapest-757089a922, side: Nazi Germany}
+    value: {point: 79000}
+    scope: deployed
+    source: "Wikipedia, 'Siege of Budapest', infobox strength1 'In the city: 79,000 men (41,000 German and 38,000 Hungarian, ration strength)' (Frieser et al. 2007 p. 897)"
+    note: "The components were read as rival totals. The Soviet side is 177,000 in the city."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0545
+    kind: troop_strength
+    target: {battle: Siege_of_Namwon-a121a0a4cb, side: Korean Garrison}
+    value: {low: 3700, high: 4000}
+    scope: deployed
+    source: "Wikipedia, 'Siege of Namwon', infobox strength2 (Korea 700 to 1,000; Ming 3,000), Hawley 2005 pp. 452, 455"
+    note: "Korean and Ming contingents on one side read as rival totals. The Japanese Left Army was 50,000 to 68,000."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0546
+    kind: troop_strength
+    target: {battle: Battle_of_the_Plains_of_Abraham-25dcb9ed91, side: Kingdom of France}
+    value: {point: 3400}
+    scope: deployed
+    source: "Wikipedia, 'Battle of the Plains of Abraham', infobox strength2 '3,400 men (1,900 regulars; 1,500 colonial militia and natives)'"
+    note: "The 1,900 regulars, a component, were read as a rival total. The British side is 4,400."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0547
+    kind: troop_strength
+    target: {battle: Battle_of_Heilsberg-63c821ed29, side: French Empire}
+    value: {point: 30000}
+    scope: deployed
+    source: "Wikipedia, 'Battle of Heilsberg', infobox strength1 '~30,000 engaged' (Bodart 2010 p. 383)"
+    note: "The side held the 50,000 to 64,500 'overall around Heilsberg' range and 49,000 'came into battle', both labelled engaged. Pair of ov-0548."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0548
+    kind: troop_strength
+    target: {battle: Battle_of_Heilsberg-63c821ed29, side: Russian Empire}
+    value: {point: 53000}
+    scope: deployed
+    source: "Wikipedia, 'Battle of Heilsberg', infobox strength2 '~53,000 engaged' (Bodart 2010 p. 383)"
+    note: "The side held the 90,000 to 95,000 'overall around Heilsberg' range, labelled engaged. Pair of ov-0547."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0549
+    kind: troop_strength
+    target: {battle: Battle_of_New_Carthage-ce22844355, side: Carthage}
+    value: {point: 3000}
+    scope: deployed
+    source: "Wikipedia, 'Battle of New Carthage', infobox strength2 'More than 3,000 (1,000 soldiers; 2,000 civilian levies)'"
+    note: "The 1,000 soldiers, a component, were read as a rival total. 3,000 is a floor. Roman strength is 27,500."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+
+  - id: ov-0550
+    kind: troop_strength
+    target: {battle: Battle_of_the_Seelow_Heights-95c85baa0a, side: Soviet Union}
+    value: {point: 1000000}
+    scope: theatre_strength
+    source: "Wikipedia, 'Battle of the Seelow Heights', lead ('Close to 1,000,000 Soviet soldiers of the 1st Belorussian Front (including 78,556 soldiers of the Polish 1st Army)') and section 'Battle' ('only two of the five armies of the 1st Belorussian Front attacked the Seelow Heights themselves', citing Isaev 2006 pp. 377-389 and Isaev 2007 pp. 421, 690); German side 'about 110,000 soldiers of the German 9th Army' (Le Tissier 1996 p. 273), infobox 112,143 (Isaev 2007 pp. 293-295 for the tanks and guns)"
+    note: "The 1,000,000 row is the whole 1st Belorussian Front, read as engaged. Neither the article nor its cited sources give a Seelow-only Soviet figure: the front's 11 armies held the line from Schwedt to Guben and about two attacked the heights. The German 112,143 is the whole 9th Army, which held Finow Canal to Guben, so both sides are formation-level figures. The value keeps the front's number and corrects the scope to theatre_strength so reconcile does not treat it as a field force. Open for the user: a Seelow-only figure needs Isaev or Glantz army-level strengths, which this draft could not verify."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0551
+    kind: battle_type
+    target: {battle: Battle_of_Okinawa-3f7a438b53}
+    value: amphibious
+    source: "Wikipedia, 'Battle of Okinawa' (1 April - 22 June 1945; 10th Army ground campaign against the Japanese 32nd Army on Okinawa), infobox strength1 '~541,000 in Tenth Army'"
+    note: "Typed naval (battle_type_source classify), apparently because the infobox lists the fleets and the kamikaze campaign. It was an 82-day land battle for the island, with the amphibious landing as its first day only. Opposed landing followed by a land campaign, so amphibious (user, 2026-11-03)."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  - id: ov-0552
+    kind: battle_date
+    target: {battle: Battle_of_Okinawa-3f7a438b53}
+    value: {start: "1945-04-01", end: "1945-06-22", precision: day}
+    source: "Wikipedia, 'Battle of Okinawa', infobox (Date: 1 April - 22 June 1945, citing US Army Center of Military History, 'Ryukyus')"
+    note: "Stored as 1945-01-01 to 1945-06-23 at year precision, a default rather than a date. The battle ran 1 April to 22 June 1945."
+    reviewed: {by: historiography-reviewer, "on": 2026-11-03}
