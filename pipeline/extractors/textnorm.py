@@ -121,6 +121,23 @@ _LITERAL_TEMPLATES: Final[dict[str, str]] = {
     "!": "|",
 }
 
+# Dash templates that stand between the bounds of a range. strip_code drops
+# them, fusing "550{{endash}}800" into 550800, so the infobox path maps them.
+# The passage path leaves them alone: its output feeds the llm_calls cache
+# hash, and changing it would orphan every cached answer.
+_RANGE_DASH_TEMPLATES: Final[dict[str, str]] = {
+    "endash": "–",
+    "en dash": "–",
+    "nd": "–",
+    "spnd": " – ",
+    "spaced ndash": " – ",
+    "spaced en dash": " – ",
+}
+
+# Named parameters of flag templates ("size=20px") and bare pixel widths are
+# image options, never the country's name.
+_PIXEL_SIZE_RE: Final = re.compile(r"^\s*\d+(?:x\d+)?\s*px\s*$", re.IGNORECASE)
+
 # Interlanguage-link wrappers: the displayed text is a named positional.
 _TEXT_PARAM_TEMPLATES: Final[dict[str, int]] = {"ill": 0, "lang": 1}
 
@@ -150,11 +167,31 @@ _CIRCA_TEMPLATES: Final[frozenset[str]] = frozenset(
 )
 
 
-def _expand_templates(raw: str) -> str:
+def _flag_country_name(template: mwparserfromhell.nodes.Template) -> str:
+    """Return the country text of a flag template, skipping image options.
+
+    Args:
+        template: A ``flag``-family template.
+
+    Returns:
+        The first positional parameter that is not a pixel size, or an empty
+        string when there is none.
+    """
+    for param in template.params:
+        if param.showkey or _PIXEL_SIZE_RE.match(str(param.value)):
+            continue
+        return str(param.value)
+    return ""
+
+
+def _expand_templates(raw: str, *, infobox: bool = False) -> str:
     """Rewrite the templates that carry content into plain text.
 
     Args:
         raw: A wikitext fragment, typically one infobox field value.
+        infobox: Apply the infobox-only rules (range dashes, flag image
+            options). Off by default so article passage text, and with it the
+            LLM request hashes, stays byte-identical.
 
     Returns:
         The fragment with list, passthrough, marker and circa templates
@@ -180,7 +217,12 @@ def _expand_templates(raw: str) -> str:
             rest = str(template.params[0].value) if template.params else ""
             code.replace(template, f"c. {rest}")
         elif name in _FLAG_NAME_TEMPLATES and template.params:
-            code.replace(template, str(template.params[0].value))
+            if infobox:
+                code.replace(template, _flag_country_name(template))
+            else:
+                code.replace(template, str(template.params[0].value))
+        elif infobox and name in _RANGE_DASH_TEMPLATES:
+            code.replace(template, _RANGE_DASH_TEMPLATES[name])
         elif name in _TEXT_PARAM_TEMPLATES:
             positional = [p for p in template.params if not p.showkey]
             index = _TEXT_PARAM_TEMPLATES[name]
@@ -217,11 +259,13 @@ def _drop_media_links(text: str) -> str:
     return str(code)
 
 
-def strip_markup(raw: str) -> str:
+def strip_markup(raw: str, *, infobox: bool = False) -> str:
     """Reduce a wikitext fragment to plain text, preserving line structure.
 
     Args:
         raw: A wikitext fragment.
+        infobox: Apply the infobox-only template rules; see
+            :func:`_expand_templates`. Leave False for article prose.
 
     Returns:
         Plain text. Line breaks that separated list items in the source are
@@ -234,7 +278,7 @@ def strip_markup(raw: str) -> str:
     text = _COMMENT_RE.sub("", raw)
     text = _REF_RE.sub("", text)
     text = _BREAK_RE.sub("\n", text)
-    text = _expand_templates(text)
+    text = _expand_templates(text, infobox=infobox)
 
     try:
         text = mwparserfromhell.parse(text).strip_code(normalize=True, collapse=True)
@@ -1053,6 +1097,11 @@ _UNDER_NAME_RE: Final = re.compile(
     r"[A-Z\u00C0-\u00DE]"
 )
 
+# "400 to 500 with Luckner": a detachment attached to a named officer. A
+# capital after the keyword separates it from "with 40 guns" and "with
+# artillery", which describe equipment.
+_WITH_NAME_RE: Final = re.compile(r"^(?i:with|led\s+by|commanded\s+by)\s+[A-Z\u00C0-\u00DE]")
+
 
 def _lead_has_label(lead: str) -> bool:
     """Whether a lead holds a label once estimate words are removed.
@@ -1110,7 +1159,7 @@ def classify_figure(quantity: Quantity, *, first_in_field: bool) -> str:
     if quantity.branch != "total":
         return "arm"
 
-    if _UNDER_NAME_RE.match(quantity.noun):
+    if _UNDER_NAME_RE.match(quantity.noun) or _WITH_NAME_RE.match(quantity.noun):
         return "component"
 
     if is_modern_estimate(quantity):
