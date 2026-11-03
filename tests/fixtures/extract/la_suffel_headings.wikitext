@@ -1,0 +1,23 @@
+<!-- Minimal fixture written from the corpus3 audit (handover-log 36/37); not fetched from Wikipedia. -->
+{{Infobox military conflict
+| conflict         = Battle of La Suffel
+| partof           = the [[Hundred Days]]
+| date             = 1815
+| place            = [[La Suffel]]
+| result           = Allied victory
+| combatant1       = {{flagcountry|First French Empire}}
+| combatant2       = '''Seventh Coalition:'''<br />{{flagicon|Austrian Empire}} [[Austrian Empire]]<br />{{flagicon|Kingdom of Württemberg}} [[Kingdom of Württemberg|Württemberg]]
+| commander1       = [[Jean Rapp]]
+| commander2       = [[Karl Philipp Schwarzenberg]]
+| strength1        = 10,000
+| strength2        = 30,000
+}}
+
+'''Battle of La Suffel''' was an engagement of the period.
+
+== Background ==
+The armies had been manoeuvring for several days before the engagement, and each commander expected the other to give battle on the ground he had chosen.
+
+The opening moves were cautious. Both sides probed the flanks and sent forward skirmishers, and the main bodies did not come into contact until the afternoon.
+
+By evening the field had been cleared and the losing side withdrew in good order, leaving the victor in possession of the ground.

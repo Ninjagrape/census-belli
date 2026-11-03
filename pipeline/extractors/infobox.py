@@ -360,6 +360,23 @@ def _level(qualifiers: list[str]) -> str:
 parse_result = _parse_result
 
 
+def _is_heading(item: str) -> bool:
+    """Say whether a list item is a bold heading line rather than a name.
+
+    Infobox editors put lines such as ``Seventh Coalition:`` inside a
+    combatant or commander field to group what follows. The check lives here
+    rather than in ``split_list_items`` because that function also feeds the
+    LLM passage text, and changing it would re-key the offline LLM cache.
+
+    Args:
+        item: One item from :func:`split_list_items`.
+
+    Returns:
+        True when the item ends with a colon.
+    """
+    return item.rstrip().endswith(":")
+
+
 def _commander_mentions(
     value: str, side_label: str, provenance: Provenance, first_order: int = 0
 ) -> list[CommanderMention]:
@@ -380,6 +397,8 @@ def _commander_mentions(
     mentions: list[CommanderMention] = []
 
     for item in split_list_items(value):
+        if _is_heading(item):
+            continue
         note_match = re.search(
             r"\((KIA|WIA|POW|MIA|DOW|executed|surrendered)\)", item, re.IGNORECASE
         )
@@ -795,9 +814,14 @@ def _build_extraction(
         # A combatant field often holds a coalition as a bulleted list. The
         # first entry names the side; the rest are recorded as aliases so the
         # resolve stage can still match a source that names an ally instead.
-        labels: list[str] = []
+        items: list[str] = []
         for _, value in combatants.get(index, []):
-            labels.extend(split_list_items(value))
+            items.extend(split_list_items(value))
+        # Headings such as "Seventh Coalition:" group the entries after them
+        # and would otherwise become the side's name and polity.
+        labels = [item for item in items if not _is_heading(item)]
+        if not labels and items:
+            labels = [items[0].rstrip().rstrip(":").rstrip()]
         label = labels[0] if labels else f"side {index}"
 
         side = SideExtraction(

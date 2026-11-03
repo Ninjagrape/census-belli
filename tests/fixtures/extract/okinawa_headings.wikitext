@@ -1,0 +1,28 @@
+<!-- Minimal fixture written from the corpus3 audit (handover-log 36/37); not fetched from Wikipedia. -->
+{{Infobox military conflict
+| conflict         = Battle of Okinawa
+| partof           = the [[Pacific War]]
+| date             = 1 April – 22 June 1945
+| place            = [[Okinawa Island]], [[Japan]]
+| result           = Allied victory
+| combatant1       = {{plainlist|
+* '''Ground forces:'''
+* {{flag|United States|1912}}
+* '''Naval support:'''
+* {{flagcountry|United Kingdom}}
+}}
+| combatant2       = {{flagcountry|Empire of Japan}}
+| commander1       = [[Simon Bolivar Buckner Jr.]]
+| commander2       = [[Mitsuru Ushijima]]
+| strength1        = 183,000
+| strength2        = 100,000
+}}
+
+'''Battle of Okinawa''' was an engagement of the period.
+
+== Background ==
+The armies had been manoeuvring for several days before the engagement, and each commander expected the other to give battle on the ground he had chosen.
+
+The opening moves were cautious. Both sides probed the flanks and sent forward skirmishers, and the main bodies did not come into contact until the afternoon.
+
+By evening the field had been cleared and the losing side withdrew in good order, leaving the victor in possession of the ground.

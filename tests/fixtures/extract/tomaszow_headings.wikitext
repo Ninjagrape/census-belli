@@ -1,0 +1,23 @@
+<!-- Minimal fixture written from the corpus3 audit (handover-log 36/37); not fetched from Wikipedia. -->
+{{Infobox military conflict
+| conflict         = Battle of Tomaszów Lubelski
+| partof           = the [[Invasion of Poland]]
+| date             = 18–26 September 1939
+| place            = [[Tomaszów Lubelski]], [[Poland]]
+| result           = German victory
+| combatant1       = {{flagcountry|Poland}}
+| combatant2       = {{flagcountry|Nazi Germany}}
+| commander1       = '''First Phase:'''<br />[[Name A]]<br />'''Second Phase:'''<br />[[Name B]]
+| commander2       = [[Name C]]
+| strength1        = 10,000
+| strength2        = 20,000
+}}
+
+'''Battle of Tomaszów Lubelski''' was an engagement of the period.
+
+== Background ==
+The armies had been manoeuvring for several days before the engagement, and each commander expected the other to give battle on the ground he had chosen.
+
+The opening moves were cautious. Both sides probed the flanks and sent forward skirmishers, and the main bodies did not come into contact until the afternoon.
+
+By evening the field had been cleared and the losing side withdrew in good order, leaving the victor in possession of the ground.

@@ -1001,10 +1001,10 @@ entries:
     reviewed: {by: historiography-reviewer, "on": 2026-10-30}
   - id: ov-0126
     kind: commander_link
-    target: {battle: Battle_of_Quatre_Bras-85d71570b9, side: "Seventh Coalition:", mention: William of Orange}
+    target: {battle: Battle_of_Quatre_Bras-85d71570b9, side: United Kingdom of Great Britain and Ireland, mention: William of Orange}
     value: Q154287
     source: "Wikidata Q154287 (William II of the Netherlands, 1792-1849)"
-    note: "Commanded I Corps in 1815 (Q154287 is William II, 1792-1849). Menin and Fleurus are the Hereditary Prince, later William I (Q2079957): ov-0135 and ov-0136."
+    note: "Commanded I Corps in 1815 (Q154287 is William II, 1792-1849). Menin and Fleurus are the Hereditary Prince, later William I (Q2079957): ov-0135 and ov-0136. Side retargeted from the heading label after the extract heading fix (cloud-extract-resolve-fixes); confirm on the next local extract."
     reviewed: {by: historiography-reviewer, "on": 2026-10-30}
   - id: ov-0127
     kind: commander_link
@@ -3181,11 +3181,11 @@ entries:
     reviewed: {by: historiography-reviewer, "on": 2026-11-03}
   - id: ov-0534
     kind: troop_strength
-    target: {battle: Battle_of_Okinawa-3f7a438b53, side: "Ground forces:"}
+    target: {battle: Battle_of_Okinawa-3f7a438b53, side: United States}
     value: {low: 183000, high: 250000}
     scope: deployed
     source: "Wikipedia, 'Battle of Okinawa', infobox strength1 '~183,000 combat troops (Sloan 2007 p. 18) rising to ~250,000 (Keegan 2005 p. 567)'"
-    note: "The label is the infobox heading for the US side. The rows were ~541,000 (the whole Tenth Army, including non-combat personnel), 183,000 and 250,000. Japan's ground force is 116,000 (ov-0535), so US combat troops are the like-for-like figure. Polity is ov-0536."
+    note: "The label is the infobox heading for the US side. The rows were ~541,000 (the whole Tenth Army, including non-combat personnel), 183,000 and 250,000. Japan's ground force is 116,000 (ov-0535), so US combat troops are the like-for-like figure. Polity is ov-0536. Side retargeted from the heading label after the extract heading fix (cloud-extract-resolve-fixes); confirm on the next local extract."
     reviewed: {by: historiography-reviewer, "on": 2026-11-03}
   - id: ov-0535
     kind: troop_strength
@@ -3197,10 +3197,10 @@ entries:
     reviewed: {by: historiography-reviewer, "on": 2026-11-03}
   - id: ov-0536
     kind: side_polity
-    target: {battle: Battle_of_Okinawa-3f7a438b53, side: "Ground forces:"}
+    target: {battle: Battle_of_Okinawa-3f7a438b53, side: United States}
     value: United States
     source: "Wikipedia, 'Battle of Okinawa', infobox combatant1 ('Ground forces: United States')"
-    note: "The infobox heading was read as the side label and the polity."
+    note: "The infobox heading was read as the side label and the polity. Side retargeted from the heading label after the extract heading fix (cloud-extract-resolve-fixes); confirm on the next local extract."
     reviewed: {by: historiography-reviewer, "on": 2026-11-03}
   - id: ov-0537
     kind: troop_strength

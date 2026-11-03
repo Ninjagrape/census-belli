@@ -1,0 +1,23 @@
+<!-- Minimal fixture written from the corpus3 audit (handover-log 36/37); not fetched from Wikipedia. -->
+{{Infobox military conflict
+| conflict         = Battle of Quatre Bras
+| partof           = the [[Hundred Days]]
+| date             = 16 June 1815
+| place            = [[Quatre Bras]], [[Belgium]]
+| result           = Inconclusive
+| combatant1       = {{flagcountry|First French Empire}}
+| combatant2       = '''Seventh Coalition:'''<br />{{flagcountry|United Kingdom of Great Britain and Ireland}}<br />{{flagicon|Netherlands}} [[United Kingdom of the Netherlands|Netherlands]]<br />[[Duchy of Brunswick|Brunswick]]<br />[[Duchy of Nassau|Nassau]]
+| commander1       = [[Michel Ney]]
+| commander2       = '''Seventh Coalition:'''<br />[[Arthur Wellesley, 1st Duke of Wellington|Duke of Wellington]]<br />[[William II of the Netherlands|William, Prince of Orange]]
+| strength1        = 20,000
+| strength2        = 8,000 rising to 36,000
+}}
+
+'''Battle of Quatre Bras''' was an engagement of the period.
+
+== Background ==
+The armies had been manoeuvring for several days before the engagement, and each commander expected the other to give battle on the ground he had chosen.
+
+The opening moves were cautious. Both sides probed the flanks and sent forward skirmishers, and the main bodies did not come into contact until the afternoon.
+
+By evening the field had been cleared and the losing side withdrew in good order, leaving the victor in possession of the ground.
