@@ -760,7 +760,7 @@ def build_model(
         # its block's offset the intercept under another name.
         offset_bar_expr = pt.dot(w_regime, g_regime) + pt.dot(w_level, delta_level)
         era_h = None
-        if rotated_era:
+        if era_levels is not None and pre_anchor is not None:
             g_unlabelled = g_regime[unlabelled_ix] if unlabelled_ix is not None else 0.0
             era_h = g_unlabelled * pre_anchor + a_era * era_levels
             offset_bar_expr = offset_bar_expr + era_h.mean()
