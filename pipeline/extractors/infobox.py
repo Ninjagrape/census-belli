@@ -273,7 +273,7 @@ def _template_fields(template: mwparserfromhell.nodes.Template) -> dict[str, str
     fields: dict[str, str] = {}
     for param in template.params:
         name = re.sub(r"\s+", " ", str(param.name).strip().lower())
-        value = strip_markup(str(param.value))
+        value = strip_markup(str(param.value), infobox=True)
         if name and value:
             fields[name] = value
     return fields
