@@ -57,6 +57,7 @@ __all__ = [
     "QidLookupSource",
     "candidate_keys",
     "collect_query_names",
+    "escape_sparql",
     "fetch_candidates",
     "fetch_candidates_by_qid",
     "fetch_non_person_kinds",
@@ -652,6 +653,9 @@ def _escape_sparql(value: str) -> str:
     for char, replacement in _SPARQL_ESCAPES:
         escaped = escaped.replace(char, replacement)
     return escaped
+
+
+escape_sparql = _escape_sparql
 
 
 def _sparql_literals(value: str) -> tuple[str, ...]:

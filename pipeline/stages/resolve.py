@@ -88,6 +88,13 @@ from pipeline.resolvers.candidates import (
 )
 from pipeline.resolvers.names import clean_surface, name_keys
 from pipeline.resolvers.overrides import ResolveOverrides
+from pipeline.resolvers.wikilinks import (
+    DEFAULT_MAX_PAGE_FETCHES,
+    WikilinkIndex,
+    WikilinkLinker,
+    collect_link_titles,
+    wikilink_cache_path,
+)
 from pipeline.stages.base import StageContext, StageOutcome
 
 __all__ = ["LazyService", "resolve_groups", "run"]
@@ -604,6 +611,7 @@ def resolve_groups(
     template: str = "",
     schema: dict[str, Any] | None = None,
     overrides: ResolveOverrides | None = None,
+    wikilinks: WikilinkLinker | None = None,
 ) -> dict[str, Decision]:
     """Decide what every group refers to.
 
@@ -628,6 +636,10 @@ def resolve_groups(
             taken out of their groups first and resolved as fixed decisions
             that skip the guards, the matcher and the LLM; ``general_merge``
             relinks the final decisions at the end.
+        wikilinks: The infobox-wikilink linker. After the manual links, a
+            mention whose links name exactly one human who could have
+            commanded there is taken out of its name group and linked to
+            that person; the rest of the group is matched as before.
 
     Returns:
         A final decision per group, keyed by group key.
@@ -636,6 +648,13 @@ def resolve_groups(
     fixed: dict[str, Decision] = {}
     if overrides is not None:
         manual_groups, fixed = overrides.take_links(groups, source)
+    if wikilinks is not None:
+        # After the overrides, so a manual link has already claimed its mention.
+        linked_groups, linked_fixed = wikilinks.take_links(
+            groups, source, threshold=threshold, margin=margin
+        )
+        manual_groups.extend(linked_groups)
+        fixed.update(linked_fixed)
     groups[:] = _split_lifetimes(groups)
     groups.extend(manual_groups)
     resolver = _GroupResolver(groups, source, threshold=threshold, margin=margin)
@@ -855,6 +874,8 @@ async def _gather_sparql_candidates(
     threshold: float,
     margin: float,
     qids: Sequence[str] = (),
+    wikilinks: WikilinkIndex | None = None,
+    max_page_fetches: int = DEFAULT_MAX_PAGE_FETCHES,
 ) -> PrefetchedCandidateSource:
     """Open one client and ask the query service about every group.
 
@@ -880,6 +901,9 @@ async def _gather_sparql_candidates(
         threshold: The spec's ``fuzzy_threshold``.
         margin: The spec's ``ambiguity_margin``.
         qids: Entities manual overrides name outright, fetched by item id.
+        wikilinks: The article titles the infoboxes link. Their items are
+            looked up (cache first) and fetched by item id with ``qids``.
+        max_page_fetches: Redirect page fetches the wikilink lookup may spend.
 
     Returns:
         A source holding the candidates and non-person verdicts found.
@@ -917,8 +941,14 @@ async def _gather_sparql_candidates(
             source.set_non_person(
                 await fetch_non_person_kinds(fetcher, kind_names, batch_size=batch_size)
             )
-        if qids:
-            source.add_by_qid(await fetch_candidates_by_qid(fetcher, qids, batch_size=batch_size))
+        wanted = list(qids)
+        if wikilinks is not None:
+            await wikilinks.resolve(
+                fetcher, batch_size=batch_size, max_page_fetches=max_page_fetches
+            )
+            wanted.extend(wikilinks.required_qids())
+        if wanted:
+            source.add_by_qid(await fetch_candidates_by_qid(fetcher, wanted, batch_size=batch_size))
         return source
 
 
@@ -932,6 +962,7 @@ def _build_candidate_source(
     threshold: float,
     margin: float,
     qids: Sequence[str] = (),
+    wikilinks: WikilinkIndex | None = None,
 ) -> CandidateSource:
     """Construct the candidate source the spec asks for.
 
@@ -946,6 +977,8 @@ def _build_candidate_source(
         margin: The spec's ``ambiguity_margin``.
         qids: Q-ids manual overrides name, which the SPARQL source fetches
             directly; the local source indexes them from disk.
+        wikilinks: The linked article titles. Only the SPARQL source asks the
+            network about them; the other sources read the cache alone.
 
     Returns:
         A source. A dry run always gets the null source, because the point of
@@ -959,6 +992,9 @@ def _build_candidate_source(
     if ctx.dry_run:
         logger.info("resolve_dry_run_skipping_candidate_lookup")
         return NullCandidateSource()
+
+    if kind in ("local", "none") and wikilinks is not None:
+        wikilinks.log_uncached()
 
     if kind == "local":
         return LocalCandidateSource(raw_root / _WIKIDATA_DIR)
@@ -987,6 +1023,8 @@ def _build_candidate_source(
             threshold=threshold,
             margin=margin,
             qids=qids,
+            wikilinks=wikilinks,
+            max_page_fetches=int(params.get("wikilink_max_page_fetches", DEFAULT_MAX_PAGE_FETCHES)),
         )
     )
 
@@ -1311,6 +1349,11 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
     counts.mentions = sum(len(g.mentions) for g in groups)
     counts.groups = len(groups)
 
+    link_titles = collect_link_titles(groups) if params.get("use_infobox_wikilinks", True) else []
+    wikilink_index = (
+        WikilinkIndex(link_titles, wikilink_cache_path(processed_root)) if link_titles else None
+    )
+
     source = _build_candidate_source(
         source_kind,
         groups,
@@ -1320,6 +1363,7 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
         threshold=threshold,
         margin=margin,
         qids=resolve_overrides.required_qids(groups),
+        wikilinks=wikilink_index,
     )
     source.prefetch(groups)
 
@@ -1338,6 +1382,11 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
         template=template,
         schema=schema,
         overrides=resolve_overrides,
+        wikilinks=(
+            WikilinkLinker(wikilink_index.qids)
+            if wikilink_index is not None and not ctx.dry_run
+            else None
+        ),
     )
 
     counts.groups = len(groups)

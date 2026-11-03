@@ -42,6 +42,15 @@ params:
   # Era bins for generals.era, shared with the impute stage so a general's era
   # and a battle's era mean the same thing.
   imputation_priors: config/imputation_priors.yaml
+  # Identify a commander by the article its infobox wikilinks instead of by the
+  # name shown: a link to exactly one human who could have commanded in that
+  # battle wins over name matching (manual overrides still win over the link).
+  # Titles become Q-ids through enwiki sitelinks (SPARQL), then, for redirects,
+  # the article page itself; answers are cached in
+  # data/processed/resolve/wikilink_qids.json. 'local' and 'none' sources read
+  # that cache only and never use the network.
+  use_infobox_wikilinks: true
+  wikilink_max_page_fetches: 2000   # redirect page fetches per run; the rest wait for the next run
   rate_limit_sparql: 2.0       # seconds between queries; stricter than the article API
   respect_robots: true
 

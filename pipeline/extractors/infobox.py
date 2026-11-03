@@ -23,8 +23,8 @@ Both feed the same field mapping, so everything downstream sees one shape.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Final
 
 import mwparserfromhell
@@ -33,6 +33,7 @@ from bs4 import BeautifulSoup
 
 from pipeline.extractors.dates import parse_date_text
 from pipeline.extractors.infobox_html import find_infobox_table, html_infobox_fields
+from pipeline.extractors.links import CommanderLink, commander_wikilinks, titles_in_item
 from pipeline.extractors.records import (
     BattleFacts,
     CasualtyReport,
@@ -380,7 +381,11 @@ def _is_heading(item: str) -> bool:
 
 
 def _commander_mentions(
-    value: str, side_label: str, provenance: Provenance, first_order: int = 0
+    value: str,
+    side_label: str,
+    provenance: Provenance,
+    first_order: int = 0,
+    links: Sequence[CommanderLink] = (),
 ) -> list[CommanderMention]:
     """Split a commander field into one mention per named person.
 
@@ -390,6 +395,8 @@ def _commander_mentions(
         provenance: Where the field came from.
         first_order: ``infobox_order`` of the first mention, so a side with
             several commander fields keeps one running order.
+        links: The field's wikilinks from the raw wikitext; each mention keeps
+            those whose display text is in its own item.
 
     Returns:
         One mention per item. Roles stay ``unclear``: an infobox lists who
@@ -418,6 +425,7 @@ def _commander_mentions(
                 role_evidence=value[:500],
                 note=note.upper() if note else "",
                 infobox_order=first_order + len(mentions),
+                link_titles=titles_in_item(links, item),
             )
         )
 
@@ -791,6 +799,7 @@ def _build_extraction(
     *,
     campaigns: list[str],
     fallback_name: str,
+    commander_links: Mapping[str, Sequence[CommanderLink]] | None = None,
 ) -> SourceExtraction:
     """Assemble a source extraction from collected infobox fields.
 
@@ -800,6 +809,8 @@ def _build_extraction(
         provenance: Where the fields came from.
         campaigns: Campaign names from campaignboxes, if any were readable.
         fallback_name: Battle name to use when the infobox names none.
+        commander_links: Commander field name to its wikilinks, read from the
+            raw wikitext; absent for rendered HTML.
 
     Returns:
         What the infobox says about the battle.
@@ -857,9 +868,15 @@ def _build_extraction(
             aliases=labels[1:],
             polity=label if labels else None,
         )
-        for _, value in commanders.get(index, []):
+        for field_name, value in commanders.get(index, []):
             side.commanders.extend(
-                _commander_mentions(value, label, provenance, len(side.commanders))
+                _commander_mentions(
+                    value,
+                    label,
+                    provenance,
+                    len(side.commanders),
+                    (commander_links or {}).get(field_name, ()),
+                )
             )
         side.troop_reports = _side_troop_reports(
             strengths.get(index, []), variant, label, provenance
@@ -907,6 +924,8 @@ class _LocatedInfobox:
         variant: The infobox family.
         provenance: Where the fields came from.
         campaigns: Campaign names from campaignboxes.
+        commander_links: Commander field name to the article links in its raw
+            value. Empty for rendered HTML, whose links are already flattened.
     """
 
     fields: dict[str, str]
@@ -914,6 +933,7 @@ class _LocatedInfobox:
     variant: InfoboxVariant
     provenance: Provenance
     campaigns: list[str]
+    commander_links: dict[str, list[CommanderLink]] = field(default_factory=dict)
 
 
 def _locate_wikitext(wikitext: str, source_ref: str, source_title: str) -> _LocatedInfobox | None:
@@ -944,6 +964,12 @@ def _locate_wikitext(wikitext: str, source_ref: str, source_title: str) -> _Loca
             source_title=source_title,
         ),
         campaigns=campaign_names(wikitext),
+        commander_links={
+            name: links
+            for name, raw in raw_fields.items()
+            if _field_role(name, variant) == "commander"
+            if (links := commander_wikilinks(raw))
+        },
     )
 
 
@@ -980,6 +1006,7 @@ def _build_located(located: _LocatedInfobox, fallback_name: str) -> SourceExtrac
         located.provenance,
         campaigns=located.campaigns,
         fallback_name=fallback_name,
+        commander_links=located.commander_links,
     )
 
 
@@ -1119,6 +1146,7 @@ def _build_parts(
             located.provenance,
             campaigns=located.campaigns,
             fallback_name=part.name,
+            commander_links=located.commander_links,
         )
         extraction.facts.name = part.name
         built[part.key] = extraction

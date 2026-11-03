@@ -213,6 +213,13 @@ def _optional_int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _link_titles(value: Any) -> tuple[str, ...]:
+    """Read the ``link_titles`` key of a commander row; absent or malformed is empty."""
+    if not isinstance(value, list):
+        return ()
+    return tuple(item.strip() for item in value if isinstance(item, str) and item.strip())
+
+
 def load_mentions(commanders_path: Path, battles_path: Path) -> list[Mention]:
     """Read every commander mention, with its battle context attached.
 
@@ -255,6 +262,7 @@ def load_mentions(commanders_path: Path, battles_path: Path) -> list[Mention]:
                 polity=polities.get((slug, side_label), ""),
                 context=contexts.get(slug),
                 infobox_order=_optional_int(row.get("infobox_order")),
+                link_titles=_link_titles(row.get("link_titles")),
             )
         )
 

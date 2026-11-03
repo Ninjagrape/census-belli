@@ -232,6 +232,10 @@ class CommanderMention:
     # 0-based position among the side's infobox commanders; None for every
     # other source. Infobox editors list the principal commander first.
     infobox_order: int | None = None
+    # English Wikipedia titles the infobox wikilinked inside this commander's
+    # item, in order of appearance. Resolve uses them as identity evidence;
+    # empty for every source that has no link markup.
+    link_titles: tuple[str, ...] = ()
 
 
 @dataclass

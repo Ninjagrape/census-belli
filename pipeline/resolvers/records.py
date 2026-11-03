@@ -49,6 +49,10 @@ METHODS: Final[tuple[str, ...]] = (
     # bypasses the lifespan guard and the gap split on purpose: that is what a
     # correction is for.
     "manual",
+    # The infobox wikilinked the commander to an English Wikipedia article whose
+    # Wikidata item is a human who could have commanded in that battle. Ranks
+    # below "manual" and above every name-based method.
+    "infobox_wikilink",
 )
 
 # Written to ``generals.notes`` for a corpus-local person created because the LLM
@@ -155,6 +159,7 @@ class Mention:
     polity: str = ""
     context: BattleContext | None = None
     infobox_order: int | None = None
+    link_titles: tuple[str, ...] = ()
 
 
 @dataclass

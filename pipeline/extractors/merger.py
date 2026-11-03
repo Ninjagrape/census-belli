@@ -441,6 +441,8 @@ def _merge_commanders(mentions: Sequence[CommanderMention]) -> list[CommanderMen
             existing.role_evidence = mention.role_evidence
         if not existing.note and mention.note:
             existing.note = mention.note
+        if not existing.link_titles and mention.link_titles:
+            existing.link_titles = mention.link_titles
 
     return list(by_name.values())
 
