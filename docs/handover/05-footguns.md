@@ -110,5 +110,14 @@ Part of the handover; the index is `handover.md` at the repo root.
   reads `battle_type`, so after adding or changing battle_type overrides run
   `classify --continue-past-deferred` before reconcile, then classify again
   after it (handover-log §38).
+- **`pipeline` is pip-installed editable from the main checkout.** A script
+  run as `python some/dir/script.py` gets its own directory on `sys.path`,
+  not the cwd, so it imports **main's** `pipeline` from any worktree. Pin it:
+  `PYTHONPATH=<checkout root> python script.py`, run from a neutral directory
+  (`python -c` and `python -m` put the cwd first instead). `python -m
+  pipeline.orchestrator` and pytest from a worktree root do load that
+  worktree's code (checked 2026-11-06). The §37 "passage text byte-identical"
+  check was likely run this way, so it may have compared main with itself;
+  handover-log §39 has the pinned re-run.
 
 ---

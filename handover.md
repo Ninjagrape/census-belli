@@ -11,11 +11,41 @@ would otherwise get it wrong. Session narratives go in
 Code comments cite "handover §9.3" (a file in `docs/handover/`) and
 "handover-log §16" (a file in `docs/handover-log/`).
 
-Last updated: 2026-11-03 night (reconcile run 3 nearly passes; see §000 "2026-11-03 night").
+Last updated: 2026-11-07 early (reconcile run 4 failed ESS; A+B reparameterisation being built; see §000 "2026-11-06").
 
 ## 000. 2026-10-29/30: corpus3 seed, overrides ov-0101..0104, crawl
 
-- **2026-11-03 night (resume here; handover-log §38).** §37 steps 1-5 ran.
+- **2026-11-06 (resume here; handover-log §39).**
+  - **main** is 519e60d plus uncommitted, verified fixes:
+    - extract: the head noun decides equipment counts; tilde ranges are read as ranges.
+    - resolve: a wikilink becomes a commander's identity only when it names the mention; link-to-item attachment, decoding and fetch-failure counting are fixed.
+    - overrides: ov-0035, 0105 and 0108 retired; ov-0126 retargeted to `United Kingdom`; ov-0600..0606 added (471 entries).
+    - Verified: unit 2612, ruff, mypy. Integration on scratch `general_war_endash_it`: full suite 374/0/0 before the fixes; extract/resolve/override subset 142/0/0 with them (before the tilde fix).
+    - User commits; suggested messages in §39 section 1. main is ahead of origin, and the user pushes from GitHub Desktop.
+  - **w-c3seed (wip/corpus3-seed, 2808819)** holds uncommitted reconcile work:
+    - the Kalka override-supersede fix (reviewed);
+    - opt-in nutpie low-rank adaptation;
+    - tune 4000 / draws 8000;
+    - ov-0600..0606 (474 entries);
+    - the A+B reparameterisation: built, unit 2455, reviewer no BLOCKER/MAJOR (§39 sections 8-9). Model and recovery tests are not run yet.
+  - **Reconcile run 4 FAILED ESS (160, after 6 h with low-rank)**; the user stopped it during the neutral fit. Cause, per the model reviewer: the per-era-bin battle-effect mean duplicates the era level, and `s_d` vs infobox noise trade off on single-row sides. That is model geometry, which no sampler setting fixes.
+  - **Approved fix, now built:** (A) centre `zb` within era bin, a small stated prior change; (B) marginalise `d` exactly on single-row point sides. Design: `docs/handover-log/39-design-reconcile-A-B.md`.
+    - The 3-seed check at 1000 tune shows ESS about 200-260 per 4000 draws, against about 10-40 before.
+    - One seed had a frozen chain, from a step-size collapse in short tuning.
+    - `s_b` is the weak spot.
+  - **Noise gate (about 1.49-1.51 against 1.5):** the audit found it driven by contaminated multi-row sides. Overrides ov-0600..0606 approved (Yonan tilde range, Odesa totals, Dürenstein engaged, First Badajoz garrison); Ratisbon held; Ajnadayn none. They apply at **extract**, so corpus3 needs extract, resolve and classify re-run (cache-served) before the next reconcile: ask the user first.
+  - **Next, in order:**
+    1. Follow §39 section 9, steps 1-4:
+       - add a frozen-chain diagnostic plus MINORs 1 and 4;
+       - run a 3-seed scratch check at tune 4000 / draws 2000 on `general_war_c3_diag`;
+       - option C (centred b) or low-rank only if `s_b` misses;
+       - model/recovery tests one file at a time, plus `test_reconcile_p1_gates.py` on a scratch DB.
+    2. With user OK: back up corpus3, then extract,resolve,classify,reconcile from w-c3seed (`--set seed_path=config/sources_seed_corpus3.yaml --continue-past-deferred`). Read the gates; run the reviewer and `era_effect: none`.
+    3. Classify plus the 2,488 missingness requests (ask usage %).
+    4. Then `GENERAL_WAR_DATA_ROOT` plus `data/corpus3/` (user OK'd the direction; show the layout before building), commit, and remove w-c3seed.
+  - Footgun added: scripts import main's `pipeline` (editable install) unless `PYTHONPATH` is pinned (05-footguns.md).
+
+- **2026-11-03 night (handover-log §38).** §37 steps 1-5 ran.
   - **main = 40172bf (not pushed):** everything is fast-forwarded into it
     (corpus3-seed, extract-endash, the overrides, the cloud extract/resolve
     fixes). Unit 2547, mypy 161 and ruff are clean. No integration test or
