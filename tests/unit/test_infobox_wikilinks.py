@@ -63,8 +63,12 @@ def test_an_unlinked_name_has_no_link_titles() -> None:
 
 
 def test_file_and_interwiki_targets_are_skipped() -> None:
-    links = _links("[[File:Flag.svg|20px]] [[fr:Napoleon Ier|Napoleon]] [[Michel Ney]]")
+    links = _links("[[File:Flag.svg|20px]] [[Michel Ney]]")
     assert [titles for _, titles in links] == [("Michel Ney",)]
+    # An interwiki display is a second name left in the item, so no link is
+    # attached and the name matcher decides.
+    links = _links("[[fr:Napoleon Ier|Napoleon]] [[Michel Ney]]")
+    assert [titles for _, titles in links] == [()]
 
 
 def test_each_person_in_a_br_separated_field_gets_only_their_own_link() -> None:

@@ -381,9 +381,10 @@ _BETWEEN_RE: Final = re.compile(
     re.IGNORECASE,
 )
 _DASH_RANGE_RE: Final = re.compile(
-    rf"(?P<lo>{_NUM_PATTERN}{_MULT_PATTERN})\s*(?:[-–—]|\bto\b)\s*(?P<hi>{_NUM_PATTERN}{_MULT_PATTERN})",
+    rf"(?P<lo>{_NUM_PATTERN}{_MULT_PATTERN})\s*(?:[-–—~～〜]|\bto\b)\s*(?P<hi>{_NUM_PATTERN}{_MULT_PATTERN})",
     re.IGNORECASE,
 )
+_RANGE_TILDE_RE: Final = re.compile(r"[~～〜]")
 _ORDINAL_RE: Final = re.compile(r"\s*(?:st|nd|rd|th)\b", re.IGNORECASE)
 # "12 legions" counts formations, not men. Recording it as a troop report
 # would put a force of twelve into the force-ratio covariate.
@@ -919,7 +920,14 @@ def _range_quantities(
             scope, engaged, total_worded = _figure_wording(
                 segment, match.start(), match.end(), default_scope
             )
-            estimate = bool(_ESTIMATE_RE.search(segment))
+            # A tilde between the bounds is the range separator, not "approximately".
+            estimate = bool(
+                _ESTIMATE_RE.search(
+                    segment[: match.start()]
+                    + _RANGE_TILDE_RE.sub(" ", segment[match.start() : match.end()])
+                    + segment[match.end() :]
+                )
+            )
             lead, noun = _surround(segment, match.start(), match.end())
             trailing = _after_window(segment, match.end())
             for value, bound in ((low, "lower"), (high, "upper")):
@@ -1012,7 +1020,9 @@ _EQUIPMENT_NOUN_RE: Final = re.compile(
     r"|boats?|barges?|elephants?|oxen|camels?|chariots?|wagons?|supply"
     r"|kamikazes?|helicopters?|gliders?|seaplanes?|airships?|balloons?|sorties|horses|mules?"
     r"|ponies|pony|carts?|apcs?|cars|machine-guns?|rockets?|missiles?|craft|sloops?"
-    r"|schooners?|brigs?|dhows?|transports?|batteries)\b",
+    r"|schooners?|brigs?|dhows?|transports?|batteries"
+    r"|avisos?|luggers?|cutters?|ketches|ketch|fireships?|merchantmen|prams?|steamships?"
+    r"|steamers?|ironclads?|brigantines?|xebecs?|galleons?|galleasses?|longships?|monitors?)\b",
     re.IGNORECASE,
 )
 # Words that show a figure counts people. The scan in is_equipment_count stops
@@ -1022,6 +1032,18 @@ _PERSONNEL_NOUN_RE: Final = re.compile(
     r"|airmen|aircrews?|gunners?|artillerymen|infantrymen|cavalrymen|engineers?|sappers?"
     r"|pioneers?|miners?|pontoniers?|pontonniers?|signallers?|signalers?|militiamen|warriors?"
     r"|conscripts?|volunteers?|regulars?|guerrill(?:a|as))\b",
+    re.IGNORECASE,
+)
+# Arms and troop types that name men but not the personnel words above. They
+# count as people when they come first, so "5,000 infantry supported by
+# batteries" is a headcount. "artillery" is left out on purpose: it is
+# ambiguous (guns or gunners), so "artillery batteries" stays equipment.
+_ARM_NOUN_RE: Final = re.compile(
+    r"^(?:infantry|cavalry|foot|horse|horsemen|dragoons?|hussars?|lancers?|cuirassiers?"
+    r"|zouaves?|grenadiers?|musketeers?|archers?|riflemen|rifles|skirmishers?|fusiliers?"
+    r"|chasseurs?|jaegers?|jägers?|hoplites?|legionar(?:y|ies)|auxiliar(?:y|ies)|levies"
+    r"|knights?|spearmen|pikemen|cossacks?|infantrymen|cavalrymen|mounted|reiters?"
+    r"|janissar(?:y|ies)|sepoys?|spahis?|mamluks?|tirailleurs?|partisans?|irregulars?)\b",
     re.IGNORECASE,
 )
 _SUPPORT_ARM_NOUN_RE: Final = re.compile(
@@ -1067,11 +1089,11 @@ def is_equipment_count(quantity: Quantity) -> bool:
 
     Returns:
         True when an equipment word appears in the noun phrase before any
-        personnel word. Such a count must never be summed with, or mistaken
-        for, a headcount.
+        personnel or arm word, so the first noun decides. Such a count must
+        never be summed with, or mistaken for, a headcount.
     """
     for word in _noun_words(quantity):
-        if _PERSONNEL_NOUN_RE.match(word):
+        if _PERSONNEL_NOUN_RE.match(word) or _ARM_NOUN_RE.match(word):
             return False
         if _EQUIPMENT_NOUN_RE.match(word):
             return True

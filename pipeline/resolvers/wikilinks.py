@@ -46,14 +46,17 @@ from pipeline.crawlers.wikidata import (
     qid_from_uri,
     run_query,
 )
+from pipeline.extractors.textnorm import normalise_label
 from pipeline.resolvers.candidates import (
     DEFAULT_BATCH_SIZE,
     CandidateSource,
     QidLookupSource,
+    candidate_keys,
     escape_sparql,
     is_unlabelled,
 )
 from pipeline.resolvers.matcher import lifespan_verdict, match_group
+from pipeline.resolvers.names import fold, name_keys
 from pipeline.resolvers.overrides import _name_forms, _with_mentions
 from pipeline.resolvers.records import Candidate, Decision, Mention, MentionGroup
 
@@ -265,6 +268,9 @@ class WikilinkIndex:
         self.qids: dict[str, str | None] = {
             t: self._cache[t] for t in self.titles if t in self._cache
         }
+        # Titles the last resolve() could not answer (failed query or page
+        # fetch, or the page-fetch budget ran out); never cached.
+        self.failed_titles: list[str] = []
 
     def uncached(self) -> list[str]:
         """Titles with no answer yet."""
@@ -305,6 +311,17 @@ class WikilinkIndex:
         # the query failed, the title may well have a sitelink.
         misses = [t for t in todo if t in answered and t not in sitelinks]
         self.qids.update(await fetch_redirect_qids(fetcher, misses, max_fetches=max_page_fetches))
+        self.failed_titles = [t for t in todo if t not in self.qids]
+        if self.failed_titles:
+            # These mentions fall back to name matching, so a re-run with the
+            # lookups working can change their identities.
+            logger.warning(
+                "wikilink_fetch_failures",
+                titles=len(self.failed_titles),
+                of=len(todo),
+                sample=self.failed_titles[:5],
+                hint="re-run resolve; the failed titles are not cached",
+            )
         self.save()
 
     def save(self) -> None:
@@ -336,6 +353,54 @@ def _group_for(qid: str, mentions: list[Mention]) -> MentionGroup:
         confidence=WIKILINK_CONFIDENCE,
         method=WIKILINK_METHOD,
     )
+
+
+_CONNECTIVES: Final[frozenset[str]] = frozenset({"of", "the"})
+
+
+def _covers(mention_key: str, target_key: str) -> bool:
+    """Whether a mention key is the target name, shortened or with initials.
+
+    Every word of the mention (bar "of" and "the") must be a word of the
+    target, or a single letter that starts one, and at least one must be a
+    whole word, so "g h thomas" covers "george henry thomas" and "wellington"
+    covers "arthur wellesley 1st duke of wellington", but "jean lannes" does
+    not cover "augustus ii the strong".
+    """
+    wanted = [w for w in mention_key.split() if w not in _CONNECTIVES]
+    words = target_key.split()
+    if not wanted or not words:
+        return False
+    whole = 0
+    for word in wanted:
+        if word in words:
+            whole += 1
+        elif not (len(word) == 1 and any(w.startswith(word) for w in words)):
+            return False
+    return whole > 0
+
+
+def _link_names_mention(name: str, title: str, candidate: Candidate) -> bool:
+    """Whether the link is the mention's own name rather than a person it cites.
+
+    The display text of a link is not carried to resolve, so the check cannot
+    ask whether the mention is the display. It rejects the one thing that
+    marks a link as incidental: the linked person's name (article title or
+    Wikidata label) stands inside the mention's raw text, yet the mention's
+    own name keys (parentheticals dropped) are not a shortened form of any of
+    the person's names. "Jean Lannes (son of Augustus II the Strong)" and
+    "Jean Lannes, aide to Augustus II the Strong" fail that way. A mention
+    that merely spells the person differently ("Jean Bernadotte" for
+    [[Charles XIV John of Sweden]]) does not contain the title and passes, as
+    the link exists to allow. Extract already keeps such incidental links out
+    of ``link_titles``; this guards mentions extracted before that.
+    """
+    targets = (*name_keys(title), *candidate_keys(candidate))
+    if any(_covers(m, t) for m in name_keys(name) for t in targets):
+        return True
+    raw = f" {normalise_label(name)} "
+    named = {fold(title), fold(candidate.label)} - {""}
+    return not any(f" {n} " in raw for n in named)
 
 
 class WikilinkLinker:
@@ -448,6 +513,8 @@ class WikilinkLinker:
                 mentions_with_links=counts["mentions_with_links"],
                 linked=counts["linked"],
                 ignored_unresolved_title=counts["ignored_unresolved_title"],
+                unanswered_title=counts["unanswered_title"],
+                ignored_name_mismatch=counts["ignored_name_mismatch"],
                 ignored_non_human=counts["ignored_non_human"],
                 ignored_multi_human=counts["ignored_multi_human"],
                 ignored_date_rejected=counts["ignored_date_rejected"],
@@ -476,7 +543,11 @@ class WikilinkLinker:
         titled = [(t, self._title_qids.get(t)) for t in mention.link_titles]
         resolved = [(t, q) for t, q in titled if q]
         if not resolved:
-            counts["ignored_unresolved_title"] += 1
+            if any(t not in self._title_qids for t in mention.link_titles):
+                # Never answered: the lookup failed or the run was cache-only.
+                counts["unanswered_title"] += 1
+            else:
+                counts["ignored_unresolved_title"] += 1
             return None
 
         humans: dict[str, tuple[Candidate, str]] = {}
@@ -492,6 +563,9 @@ class WikilinkLinker:
             return None
 
         candidate, title = next(iter(humans.values()))
+        if not _link_names_mention(mention.name, title, candidate):
+            counts["ignored_name_mismatch"] += 1
+            return None
         year = mention.context.year if mention.context else None
         if lifespan_verdict(candidate, [] if year is None else [year]) is False:
             counts["ignored_date_rejected"] += 1

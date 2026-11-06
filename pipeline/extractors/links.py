@@ -10,14 +10,17 @@ module changes the plain text any other code reads.
 
 from __future__ import annotations
 
+import html
 import re
 from collections.abc import Sequence
 from typing import Final
+from urllib.parse import unquote
 
 import mwparserfromhell
 import structlog
 
 from pipeline.extractors.textnorm import strip_markup
+from pipeline.resolvers.names import LEADING_TITLES
 
 __all__ = ["CommanderLink", "commander_wikilinks", "titles_in_item"]
 
@@ -64,7 +67,10 @@ def _article_title(target: str) -> str | None:
         collapsed and the first letter upper-cased; None for a link that is
         not to an article (a file, category, interwiki link or bare fragment).
     """
-    title = target.split("#", 1)[0].replace("_", " ")
+    # MediaWiki reads entities and percent-escapes in a target before it looks
+    # the page up, so "Jean%20Lannes" and "Jean&nbsp;Lannes" are "Jean Lannes".
+    decoded = unquote(html.unescape(target))
+    title = decoded.split("#", 1)[0].replace("_", " ")
     title = _WHITESPACE_RE.sub(" ", title).strip()
     if not title:
         return None
@@ -109,8 +115,45 @@ def commander_wikilinks(raw: str) -> list[CommanderLink]:
     return links
 
 
+_PARENTHETICAL_RE: Final = re.compile(r"\([^()]*\)|\[[^\[\]]*\]")
+_WORD_RE: Final = re.compile(r"[^\W\d_][\w'’.-]*")
+_RANK_WORDS: Final[frozenset[str]] = frozenset(LEADING_TITLES)
+
+
+def _span_in_parentheses(item: str, start: int, end: int) -> bool:
+    """Whether ``item[start:end]`` lies inside a parenthetical or bracket."""
+    return any(m.start() <= start and end <= m.end() for m in _PARENTHETICAL_RE.finditer(item))
+
+
+def _names_the_item(item: str, spans: Sequence[tuple[int, int]]) -> bool:
+    """Whether the linked spans are all the name the item holds.
+
+    What is left of the item once the linked spans, parentheticals and rank
+    words are removed must hold no capitalised word. "Charles Smith (Duke)"
+    keeps "Smith", so a link on "Charles" does not name that item; "Vice
+    admiral Ernst Schirlitz" keeps nothing.
+    """
+    chars = list(item)
+    for start, end in spans:
+        chars[start:end] = " " * (end - start)
+    leftover = _PARENTHETICAL_RE.sub(" ", "".join(chars))
+    for word in _WORD_RE.findall(leftover):
+        if word[0].isupper() and word.casefold().strip(".") not in _RANK_WORDS:
+            return False
+    return True
+
+
 def titles_in_item(links: Sequence[CommanderLink], item: str) -> tuple[str, ...]:
     """Pick the links that belong to one commander item.
+
+    A link belongs to the item when its display text stands in the item as a
+    whole word, outside any parenthetical, and the linked text is all the name
+    the item holds (see :func:`_names_the_item`). That last test stops
+    ``[[Charles, Archduke of Austria|Charles]]`` attaching to an unlinked
+    "Charles Smith (Duke)", and stops a link on a relative or superior ("X,
+    aide to [[Y]]", "X (son of [[Y]])") naming X. Attribution is by
+    word-boundary match plus name coverage, not by position in the raw
+    wikitext. When in doubt no link is attached and the name matcher decides.
 
     Args:
         links: The field's links from :func:`commander_wikilinks`.
@@ -118,12 +161,21 @@ def titles_in_item(links: Sequence[CommanderLink], item: str) -> tuple[str, ...]
 
     Returns:
         Titles whose display text occurs in the item, in order of first
-        occurrence in it, without repeats.
+        occurrence in it, without repeats; empty when the item holds a name
+        the links do not cover.
     """
     found: list[tuple[int, str]] = []
+    spans: list[tuple[int, int]] = []
     for title, display in links:
-        position = item.find(display)
-        if position >= 0 and all(title != seen for _, seen in found):
-            found.append((position, title))
+        pattern = rf"(?<!\w){re.escape(display)}(?!\w)"
+        for match in re.finditer(pattern, item):
+            if _span_in_parentheses(item, match.start(), match.end()):
+                continue
+            spans.append((match.start(), match.end()))
+            if all(title != seen for _, seen in found):
+                found.append((match.start(), title))
+            break
+    if not found or not _names_the_item(item, spans):
+        return ()
     found.sort(key=lambda pair: pair[0])
     return tuple(title for _, title in found)

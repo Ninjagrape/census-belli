@@ -555,6 +555,7 @@ def _side_troop_reports(
     """
     reports: list[TroopReport] = []
     equipment: set[int] = set()
+    tiny: set[int] = set()
     unsafe: set[int] = set()
     support: set[int] = set()
     phases: dict[int, tuple[str, str]] = {}
@@ -589,11 +590,12 @@ def _side_troop_reports(
             # 20,000", "Battle: 40,000"), and a tiny count is more likely guns
             # or animals than men; neither is safe to add into a total. A tiny
             # count whose own words name people is a small detachment.
-            if (
-                is_equipment
-                or is_labelled_figure(quantity)
-                or (quantity.value < _MIN_SUMMED_HEADCOUNT and not is_personnel_count(quantity))
-            ):
+            is_tiny_count = quantity.value < _MIN_SUMMED_HEADCOUNT and not is_personnel_count(
+                quantity
+            )
+            if is_tiny_count:
+                tiny.add(len(reports))
+            if is_equipment or is_labelled_figure(quantity) or is_tiny_count:
                 unsafe.add(len(reports))
             has_orphan = has_orphan or is_orphan_figure(quantity)
             reports.append(
@@ -616,7 +618,7 @@ def _side_troop_reports(
     if reports and not any(r.branch == "total" for r in reports):
         _complete_total(
             reports,
-            equipment,
+            equipment | tiny,
             unsafe,
             support,
             side_label,
@@ -699,7 +701,8 @@ def _complete_total(
 
     Args:
         reports: The side's reports, modified in place.
-        equipment: Indexes of reports that count equipment, not men.
+        equipment: Indexes of reports that count equipment, or a few units or
+            vessels, not men. They are never promoted to the total.
         unsafe: Indexes of reports that must not be summed.
         support: Indexes of support-arm reports (engineers, sappers, ...).
         side_label: The side the reports describe.

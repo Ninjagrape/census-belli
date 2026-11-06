@@ -95,3 +95,80 @@ def test_small_unqualified_figure_stays_unsafe() -> None:
 def test_contingents_versus_arms_is_unchanged() -> None:
     reports = _strength("25,000 Romans<br>10,000 allies<br>8,000 cavalry")
     assert _derived(reports) == 35_000
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "5,000 French infantry supported by artillery batteries",
+        "7,000 cavalry mounted on horses",
+        "4,000 light infantry transported by ships",
+        "8,000 infantry and cannon",
+        "1,200 Zouaves attached to the artillery batteries",
+        "3,000 men and 40 guns",
+        "900 dragoons with horses",
+        "2,000 Hussars and lancers",
+        "60 artillery",
+    ],
+)
+def test_head_noun_personnel_is_not_equipment(text: str) -> None:
+    (quantity, *_) = parse_quantities(text)
+    assert not is_equipment_count(quantity)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "40 guns",
+        "120 tanks",
+        "300 aircraft",
+        "12 ships",
+        "60 artillery pieces",
+        "2,000 horses",
+        "15 batteries",
+        "850 Japanese Navy and Army aircraft",
+        "30 light cruisers",
+    ],
+)
+def test_head_noun_equipment_stays_equipment(text: str) -> None:
+    (quantity, *_) = parse_quantities(text)
+    assert is_equipment_count(quantity)
+
+
+def test_arm_with_supporting_equipment_is_summed() -> None:
+    text = "5,000 infantry supported by artillery batteries<br>2,000 cavalry"
+    assert _derived(_strength(text)) == 7_000
+
+
+def _branches(text: str) -> list[tuple[float, str]]:
+    return [(r.reported_value, r.branch) for r in _strength(text)]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "15 ships of the line<br>6 frigates<br>4 brigs<br>1 aviso",
+        "14 ships of the line<br>1 frigate<br>1 sloop<br>1 fireship",
+        "5 ships of the line<br>1 sloop<br>6 bomb ketches",
+        "2 schooners<br>1 steamship",
+        "37th Infantry Regiment",
+        "1 lugger",
+    ],
+)
+def test_ship_or_unit_counts_never_become_the_side_total(text: str) -> None:
+    assert not [v for v, b in _branches(text) if b == "total"]
+
+
+@pytest.mark.parametrize("text", ["1 aviso", "1 fireship", "6 bomb ketches", "30 merchantmen"])
+def test_more_vessel_words_are_equipment(text: str) -> None:
+    (quantity, *_) = parse_quantities(text)
+    assert is_equipment_count(quantity)
+
+
+def test_lone_small_personnel_figure_is_still_promoted() -> None:
+    assert (50.0, "total") in _branches("50 French troops")
+
+
+def test_actium_style_infantry_on_ships_keeps_arms_and_no_tiny_total() -> None:
+    text = "250 galleys<br>16,000 infantry on ships<br>3,000 archers"
+    assert (3_000.0, "total") not in _branches(text)
