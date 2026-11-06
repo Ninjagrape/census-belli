@@ -293,14 +293,6 @@ entries:
     note: "209 BC. Africanus took the city in his first Spanish campaign; the father had died in 211 BC. Corpus-local general_id 817 ('Publius Cornelius Scipio', the bare name shared by father and son) holds this battle, splitting Africanus from his Q2253 row (Baecula). Replaces the draft general_merge, which would also catch the father (Q3293507) in any future crawl."
     reviewed: {by: historiography-reviewer, "on": 2026-10-17}
 
-  - id: ov-0035
-    kind: commander_link
-    target: {battle: Battle_of_Noryang-552de750a7, side: Japan, mention: "Main:"}
-    value: none
-    source: "Wikipedia, 'Battle of Noryang', infobox (Japanese commanders listed under 'Main:' and 'Reinforcement:')"
-    note: "'Main:' is an infobox sub-heading and became a corpus-local general named 'Main'. Unlinked."
-    reviewed: {by: historiography-reviewer, "on": 2026-10-17}
-
   - id: ov-0036
     kind: commander_link
     target: {battle: Battle_of_Noryang-552de750a7, side: Joseon, mention: Yi Yeong-nam}
@@ -850,13 +842,6 @@ entries:
     reviewed: {by: lee, "on": 2026-10-29}
 
   # --- corpus3: dynasty names in commander fields (approved 2026-10-30) ---
-  - id: ov-0105
-    kind: commander_link
-    target: {battle: Siege_of_Namwon-a121a0a4cb, side: Korean Garrison, mention: "Ming:"}
-    value: none
-    source: "Wikipedia, 'Siege of Namwon', infobox (commander field lists the Ming dynasty)"
-    note: "'Ming' is the dynasty named in the infobox commander field, not a person. Resolve made it a corpus-local general linked to four Imjin War sieges, so the mention is unlinked."
-    reviewed: {by: lee, "on": 2026-10-30}
   - id: ov-0106
     kind: commander_link
     target: {battle: Siege_of_Pyongyang_1593-7979707e96, side: Ming dynasty, mention: Ming}
@@ -869,13 +854,6 @@ entries:
     target: {battle: Siege_of_Suncheon-8bafceb374, side: Joseon and Ming dynasties, mention: Ming}
     value: none
     source: "Wikipedia, 'Siege of Suncheon', infobox (commander field lists the Ming dynasty)"
-    note: "'Ming' is the dynasty named in the infobox commander field, not a person. Resolve made it a corpus-local general linked to four Imjin War sieges, so the mention is unlinked."
-    reviewed: {by: lee, "on": 2026-10-30}
-  - id: ov-0108
-    kind: commander_link
-    target: {battle: Siege_of_Ulsan-06b1513ec8, side: Joseon and Ming dynasty, mention: "Ming:"}
-    value: none
-    source: "Wikipedia, 'Siege of Ulsan', infobox (commander field lists the Ming dynasty)"
     note: "'Ming' is the dynasty named in the infobox commander field, not a person. Resolve made it a corpus-local general linked to four Imjin War sieges, so the mention is unlinked."
     reviewed: {by: lee, "on": 2026-10-30}
 
@@ -1001,10 +979,10 @@ entries:
     reviewed: {by: historiography-reviewer, "on": 2026-10-30}
   - id: ov-0126
     kind: commander_link
-    target: {battle: Battle_of_Quatre_Bras-85d71570b9, side: United Kingdom of Great Britain and Ireland, mention: William of Orange}
+    target: {battle: Battle_of_Quatre_Bras-85d71570b9, side: United Kingdom, mention: William of Orange}
     value: Q154287
     source: "Wikidata Q154287 (William II of the Netherlands, 1792-1849)"
-    note: "Commanded I Corps in 1815 (Q154287 is William II, 1792-1849). Menin and Fleurus are the Hereditary Prince, later William I (Q2079957): ov-0135 and ov-0136. Side retargeted from the heading label after the extract heading fix (cloud-extract-resolve-fixes); confirm on the next local extract."
+    note: "Commanded I Corps in 1815 (Q154287 is William II, 1792-1849). Menin and Fleurus are the Hereditary Prince, later William I (Q2079957): ov-0135 and ov-0136. Side retargeted to the label main's extract gives (checked against the real article 2026-11-06)."
     reviewed: {by: historiography-reviewer, "on": 2026-10-30}
   - id: ov-0127
     kind: commander_link
@@ -3185,7 +3163,7 @@ entries:
     value: {low: 183000, high: 250000}
     scope: deployed
     source: "Wikipedia, 'Battle of Okinawa', infobox strength1 '~183,000 combat troops (Sloan 2007 p. 18) rising to ~250,000 (Keegan 2005 p. 567)'"
-    note: "The label is the infobox heading for the US side. The rows were ~541,000 (the whole Tenth Army, including non-combat personnel), 183,000 and 250,000. Japan's ground force is 116,000 (ov-0535), so US combat troops are the like-for-like figure. Polity is ov-0536. Side retargeted from the heading label after the extract heading fix (cloud-extract-resolve-fixes); confirm on the next local extract."
+    note: "The label is the infobox heading for the US side. The rows were ~541,000 (the whole Tenth Army, including non-combat personnel), 183,000 and 250,000. Japan's ground force is 116,000 (ov-0535), so US combat troops are the like-for-like figure. Polity is ov-0536. Side retargeted from the heading label after the extract heading fix (cloud-extract-resolve-fixes); confirmed against the real article 2026-11-06."
     reviewed: {by: historiography-reviewer, "on": 2026-11-03}
   - id: ov-0535
     kind: troop_strength
@@ -3200,7 +3178,7 @@ entries:
     target: {battle: Battle_of_Okinawa-3f7a438b53, side: United States}
     value: United States
     source: "Wikipedia, 'Battle of Okinawa', infobox combatant1 ('Ground forces: United States')"
-    note: "The infobox heading was read as the side label and the polity. Side retargeted from the heading label after the extract heading fix (cloud-extract-resolve-fixes); confirm on the next local extract."
+    note: "The infobox heading was read as the side label and the polity. Side retargeted from the heading label after the extract heading fix (cloud-extract-resolve-fixes); confirmed against the real article 2026-11-06."
     reviewed: {by: historiography-reviewer, "on": 2026-11-03}
   - id: ov-0537
     kind: troop_strength
@@ -3327,3 +3305,60 @@ entries:
     source: "Wikipedia, 'Battle of Okinawa', infobox (Date: 1 April - 22 June 1945, citing US Army Center of Military History, 'Ryukyus')"
     note: "Stored as 1945-01-01 to 1945-06-23 at year precision, a default rather than a date. The battle ran 1 April to 22 June 1945."
     reviewed: {by: historiography-reviewer, "on": 2026-11-03}
+  # --- corpus3 noise-gate audit (approved 2026-11-06) ---
+  - id: ov-0600
+    kind: troop_strength
+    target: {battle: Battle_of_Yonan-fe9ae18584, side: Joseon}
+    value: {low: 500, high: 1400}
+    scope: deployed
+    source: "Wikipedia, 'Battle of Yonan', infobox strength '500~1,400' (infobox figure uncited; article body, citing the Encyclopedia of Korean Culture, says more than 500 troops gathered before entering the fortress on 27 September)"
+    note: "One range wrongly split into two points. No better modern figure found; the range is kept. The 1,400 upper bound has no source in the article. Pair of ov-0601."
+    reviewed: {by: lee, "on": 2026-11-06}
+  - id: ov-0601
+    kind: troop_strength
+    target: {battle: Battle_of_Yonan-fe9ae18584, side: Japan}
+    value: {low: 3000, high: 5000}
+    scope: deployed
+    source: "Wikipedia, 'Battle of Yonan', infobox strength '3,000~5,000'; body: attackers about 3,000 (Veritable Records of Seonjo, revision, 25th September), Kuroda Nagamasa personally led 5,000 on 5 October (Baeksajip vol. 3)"
+    note: "One range wrongly split into two points; both ends are the two primary-source readings. Kuroda's whole Third Division (11,000, Doosan Encyclopedia) is not the assault force. Pair of ov-0600."
+    reviewed: {by: lee, "on": 2026-11-06}
+  - id: ov-0602
+    kind: troop_strength
+    target: {battle: Siege_of_Odessa-8d6ed3d8ef, side: Soviet Union}
+    value: {point: 86000}
+    scope: deployed
+    source: "Wikipedia, 'Siege of Odessa (1941)', infobox strength 'total 86,000' (Bolshaya sovetskaya entsiklopediya, 'Odesskaya oborona 1941'); the 34,500 initial figure is Glantz 1995 p. 293 as cited by the article"
+    note: "Total committed across the 73-day siege, the same whole-operation convention as the Toulon total. The 34,500 is the opening garrison before the Separate Coastal Army was reinforced by sea. Pair of ov-0603, which uses the matching total basis."
+    reviewed: {by: lee, "on": 2026-11-06}
+  - id: ov-0603
+    kind: troop_strength
+    target: {battle: Siege_of_Odessa-8d6ed3d8ef, side: Kingdom of Romania}
+    value: {point: 340223}
+    scope: deployed
+    source: "Wikipedia, 'Siege of Odessa (1941)', infobox strength 'total 340,223' (no inline citation); initial 160,000 is Axworthy 1995 p. 50 as cited by the article"
+    note: "Total committed across the siege, matching ov-0602. The 340,223 is cumulative and includes replacements, so it overstates concurrent strength; the article's Koltunov and Selyanichev 1967 snapshot for early September is about 277,000 German and Romanian. Total-to-total ratio is about 3.96 and initial-to-initial about 4.6, so the ratio is stable under any consistent choice."
+    reviewed: {by: lee, "on": 2026-11-06}
+  - id: ov-0604
+    kind: troop_strength
+    target: {battle: Battle_of_Dürenstein-c5194ffa8f, side: Russian Empire}
+    value: {low: 10500, high: 12000}
+    scope: engaged
+    source: "Wikipedia, 'Battle of Dürenstein', infobox strength engaged 10,500-12,000 (Sokolov 2019, as cited by the article); body: Smith 1998 gives 24,000 present, Sokolov says up to half were involved"
+    note: "The c. 24,000 is the whole Allied force present (Smith 1998 p. 213), the engaged figure is about half of it. Scope kept as engaged on both sides. Pair of ov-0605."
+    reviewed: {by: lee, "on": 2026-11-06}
+  - id: ov-0605
+    kind: troop_strength
+    target: {battle: Battle_of_Dürenstein-c5194ffa8f, side: First French Empire}
+    value: {low: 6000, high: 8000}
+    scope: engaged
+    source: "Wikipedia, 'Battle of Dürenstein', infobox strength engaged 6,000-8,000 (Sokolov 2019 p. 219; Bodart 1908 p. 368, as cited by the article); body: Gazan's division began with about 6,000 and reached close to 8,000 when Dupont's men arrived (Smith 1998)"
+    note: "The 14,000 'at end' is not supported by the body, which gives VIII Corps about 12,000 with not all engaged (Smith 1998 p. 213). Pair of ov-0604."
+    reviewed: {by: lee, "on": 2026-11-06}
+  - id: ov-0606
+    kind: troop_strength
+    target: {battle: First_siege_of_Badajoz_1811-65243ae9e4, side: Kingdom of Spain}
+    value: {low: 8000, high: 9000}
+    scope: deployed
+    source: "Oman 1911, History of the Peninsular War vol. IV, pp. 40, 54-56, 61 (garrison 4,100 at the start of 1811, 5,000 after Mendizabal's two battalions, over 8,000 after the Gebora survivors; rations found for 8,000), as cited by Wikipedia 'First siege of Badajoz (1811)'; infobox 9,000 at the end (Bodart 1908 p. 422)"
+    note: "The 21,000 'at the beginning' is not a garrison: Oman's garrison was 4,100 to 5,000 until the Gebora survivors arrived. It appears to count Mendizabal's field army. The besieged force that fought and surrendered was 8,000 to 9,000. The infobox 14,000 captured conflicts with Oman and is not used. The French 17,000 (Bodart) was not checked against Oman."
+    reviewed: {by: lee, "on": 2026-11-06}
