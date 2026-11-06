@@ -105,5 +105,10 @@ Part of the handover; the index is `handover.md` at the repo root.
   still has a placeholder UA; change it before the corpus3 crawl.
 - `claude-haiku-5-5` thinks unless told not to (handled by the
   `thinking_on_by_default` trait) and cannot take temperature 0.
+- **`battle_type` overrides apply in classify, which runs after reconcile**
+  (`pipeline/overrides.py` KINDS_BY_STAGE). Reconcile's `exclude_campaigns`
+  reads `battle_type`, so after adding or changing battle_type overrides run
+  `classify --continue-past-deferred` before reconcile, then classify again
+  after it (handover-log §38).
 
 ---

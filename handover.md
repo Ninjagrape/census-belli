@@ -11,9 +11,43 @@ would otherwise get it wrong. Session narratives go in
 Code comments cite "handover §9.3" (a file in `docs/handover/`) and
 "handover-log §16" (a file in `docs/handover-log/`).
 
-Last updated: 2026-11-03 evening (contamination fixes approved and built, not applied; see §000 "2026-11-03 evening").
+Last updated: 2026-11-03 night (reconcile run 3 nearly passes; see §000 "2026-11-03 night").
 
 ## 000. 2026-10-29/30: corpus3 seed, overrides ov-0101..0104, crawl
+
+- **2026-11-03 night (resume here; handover-log §38).** §37 steps 1-5 ran.
+  - **main = 40172bf (not pushed):** everything is fast-forwarded into it
+    (corpus3-seed, extract-endash, the overrides, the cloud extract/resolve
+    fixes). Unit 2547, mypy 161 and ruff are clean. No integration test or
+    corpus run on main yet.
+  - **wip/corpus3-seed (w-c3seed) = 2808819,** without the cloud commits. Its
+    integration suites passed (reconcile/prior_check 82, extract 51).
+  - **Corpus3:** extract, resolve and classify re-ran and every override gate
+    applied (467). The 26 retypes land at classify, so classify ran before
+    reconcile (footgun added).
+  - **Reconcile run 3 FAILED, but close.** noise 3.30 -> 1.514 (gate 1.5),
+    within-battle 0.10 -> 0.76, rhat 1.58 -> 1.041, **troop ESS 130 < 400**
+    (neutral fit 116). No troop estimates written; casualties written.
+  - **Cause found:** ov-0103 Kalka (`troop_strength`) did not replace the
+    infobox `modern_scholarly` row, so it is the worst side (span 1.5). That
+    is a load-logic bug. Otherwise only 35 multi-row sides identify the
+    noise.
+  - **Next, in order (user-approved):**
+    (a) Sonnet fixes the Kalka replacement bug in reconcile load, on
+    wip/corpus3-seed, tests first, then bayesian-model-reviewer;
+    (b) raise reconcile troop tune/draws for ESS;
+    (c) back up, re-run reconcile on corpus3, then bayesian-model-reviewer
+    and an `era_effect: none` run;
+    (d) only if the noise gate still fails, source Odesa/Dürenstein/Badajoz/
+    Ratisbon;
+    (e) classify re-run plus the 2,488 missingness requests
+    (`classify_20261103T100314Z.jsonl`); ask the user's usage % first.
+  - **Before main runs extract or resolve:** see the cloud items in §38
+    section 6 (retire ov-0035/0105/0108, confirm three retargets, real-article
+    passage check, wikilink network fetches).
+  - **Worktrees:** the user wants all four removed once corpus3 reconcile is
+    done. w-c3seed's 6.2 GB data/ needs its own folder, not a merge into
+    data/ (§38 section 7).
 
 - **2026-11-03 evening (resume here; handover-log §37).** Step 1 is done. Its
   fixes are approved but not applied, and no DB writes were made.
