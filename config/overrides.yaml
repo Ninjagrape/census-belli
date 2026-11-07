@@ -3340,7 +3340,7 @@ entries:
     reviewed: {by: lee, "on": 2026-11-06}
   - id: ov-0604
     kind: troop_strength
-    target: {battle: Battle_of_Dürenstein-c5194ffa8f, side: Russian Empire}
+    target: {battle: Battle_of_D_renstein-c5194ffa8f, side: Russian Empire}
     value: {low: 10500, high: 12000}
     scope: engaged
     source: "Wikipedia, 'Battle of Dürenstein', infobox strength engaged 10,500-12,000 (Sokolov 2019, as cited by the article); body: Smith 1998 gives 24,000 present, Sokolov says up to half were involved"
@@ -3348,7 +3348,7 @@ entries:
     reviewed: {by: lee, "on": 2026-11-06}
   - id: ov-0605
     kind: troop_strength
-    target: {battle: Battle_of_Dürenstein-c5194ffa8f, side: First French Empire}
+    target: {battle: Battle_of_D_renstein-c5194ffa8f, side: First French Empire}
     value: {low: 6000, high: 8000}
     scope: engaged
     source: "Wikipedia, 'Battle of Dürenstein', infobox strength engaged 6,000-8,000 (Sokolov 2019 p. 219; Bodart 1908 p. 368, as cited by the article); body: Gazan's division began with about 6,000 and reached close to 8,000 when Dupont's men arrived (Smith 1998)"

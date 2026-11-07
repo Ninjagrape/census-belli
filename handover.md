@@ -11,9 +11,18 @@ would otherwise get it wrong. Session narratives go in
 Code comments cite "handover §9.3" (a file in `docs/handover/`) and
 "handover-log §16" (a file in `docs/handover-log/`).
 
-Last updated: 2026-11-07 early (reconcile run 4 failed ESS; A+B reparameterisation being built; see §000 "2026-11-06").
+Last updated: 2026-11-07 afternoon (corpus3 reconcile run 5 converged; ranking chain running; see §000 "2026-11-07").
 
 ## 000. 2026-10-29/30: corpus3 seed, overrides ov-0101..0104, crawl
+
+- **2026-11-07 (resume here; handover-log §40).**
+  - **Corpus3 reconcile run 5 converged** with opt-in `battle_effect_centred=true` (C): troops rhat 1.006, ESS 1517, 0 divergences; noise 1.134. Troop estimates written. One gate miss: reports_honoured, Rovereto 1796 Austrians (scope inversion). Draft ov-0607 awaits the user's sign-off (§40 section 5).
+  - Missingness batch done: 2,495 + 66 classify answers and 1 resolve imported into corpus3.
+  - **First corpus3 ranking produced** (provisional; every stage succeeded, warning-level checks failed; §40 section 5b). Outputs in w-c3seed `data/processed/report/`. Unreviewed.
+  - `era_effect: none` sensitivity: noise and ratio results unchanged, era effect carries level placement (§40 section 5).
+  - Report disclosures (plan C) built and reviewed in worktree `agent-adf22892058598c5e`; all report gates pass on a corpus2 copy.
+  - Uncommitted: w-c3seed (reconcile work + tests), the agent worktree (report), main (`config/overrides.yaml` Dürenstein slug, footguns, docs). The user commits; suggested messages in the session's final reply.
+  - **Next:** (1) bayesian-model-reviewer on reconcile run 5 and the model run, historiography-reviewer on the ranking (Burnside, Beauregard, Forrest). (2) User signs off ov-0607; then the refit: extract..report with all answers cached. (3) Data-root layout (proposal in the session reply, awaiting OK), then commit and remove w-c3seed.
 
 - **2026-11-06 (resume here; handover-log §39).**
   - **main** is 519e60d plus uncommitted, verified fixes:

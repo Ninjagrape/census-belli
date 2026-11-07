@@ -119,5 +119,20 @@ Part of the handover; the index is `handover.md` at the repo root.
   worktree's code (checked 2026-11-06). The §37 "passage text byte-identical"
   check was likely run this way, so it may have compared main with itself;
   handover-log §39 has the pinned re-run.
+- **Override battle slugs must be the stored `battles.source_slug`, where
+  non-ASCII characters are `_`.** `Battle_of_Dürenstein-c5194ffa8f` is stored
+  as `Battle_of_D_renstein-c5194ffa8f`; the ü form reports "battle not found"
+  and the entry silently does not apply. Check `overrides_<stage>.json`
+  `unmatched` after every extract (handover-log §40).
+- **`scripts.llm_offline split --skip-answered` and `import` use
+  `DATABASE_URL`.** Unset, they check and write the default DB, not the
+  corpus. Export the corpus DB URL first (handover-log §40).
+- **Reconcile writes relative `data/processed/` paths.** A sensitivity run on
+  a copy DB from the same cwd overwrites the real run's
+  `reconciliation_report.json` and draws. Run it from a scratch cwd holding
+  copies of `agents/` and `config/` (handover-log §40).
+- **Synthetic model-test corpora with one era bin** make `corpus_level` vs
+  `u_c` a prior-only split that misses the 400-ESS write gate. Use
+  `era_effect: none` there (test_reconcile_contamination, handover-log §40).
 
 ---
