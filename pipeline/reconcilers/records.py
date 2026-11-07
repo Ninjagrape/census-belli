@@ -226,6 +226,7 @@ class ReconcileCounts:
     excluded_naval: int = 0
     excluded_population_scope: int = 0
     excluded_superseded_by_modern: int = 0
+    excluded_superseded_by_override: int = 0
     excluded_campaign: int = 0
     excluded_non_positive: int = 0
     excluded_implausible_small: int = 0
@@ -263,6 +264,7 @@ class ReconcileCounts:
             "excluded_naval": self.excluded_naval,
             "excluded_population_scope": self.excluded_population_scope,
             "excluded_superseded_by_modern": self.excluded_superseded_by_modern,
+            "excluded_superseded_by_override": self.excluded_superseded_by_override,
             "excluded_campaign": self.excluded_campaign,
             "excluded_non_positive": self.excluded_non_positive,
             "excluded_implausible_small": self.excluded_implausible_small,

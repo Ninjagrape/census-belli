@@ -210,7 +210,8 @@ def _write_thresholds(params: dict[str, Any]) -> dict[str, float]:
 
     Returns:
         ``max_rhat``, ``min_ess_bulk``, ``max_divergences`` and
-        ``max_quantile_mcse_frac``. Recorded in the run's config so
+        ``max_quantile_mcse_frac``, ``max_median_mcse_log`` and
+        ``min_chain_zd_sd``. Recorded in the run's config so
         ``neutral_fit_converged`` judges by what the run used.
     """
     return {
@@ -219,6 +220,7 @@ def _write_thresholds(params: dict[str, Any]) -> dict[str, float]:
         "max_divergences": float(params.get("write_max_divergences", 0)),
         "max_quantile_mcse_frac": _max_quantile_mcse_frac(params),
         "max_median_mcse_log": _max_median_mcse_log(params),
+        "min_chain_zd_sd": float(params.get("write_min_chain_zd_sd", 0.5)),
     }
 
 
@@ -311,7 +313,26 @@ def _global_failures(worst: dict[str, Any], params: dict[str, Any]) -> list[str]
         failed.append(f"min_ess_bulk {ess:.0f} < {min_ess:g}")
     if divergences > max_div:
         failed.append(f"divergences {divergences} > {max_div}")
+    failed.extend(_frozen_chain_failures(worst, limits["min_chain_zd_sd"]))
     return failed
+
+
+def _frozen_chain_failures(worst: dict[str, Any], min_zd_sd: float) -> list[str]:
+    """Describe chains whose marginalised ``zd`` barely moves, judged at the write limit.
+
+    Payloads from before the diagnostic existed carry no ``chain_zd_sd`` and pass.
+    So do fits with no marginalised sides (casualty fits, non-Normal likelihoods),
+    where ``chain_health`` reports ``chain_zd_sd`` as None: a frozen chain is not
+    detected here in those fits, and only rhat and ESS apply.
+    """
+    sds = worst.get("chain_zd_sd")
+    if not sds:
+        return []
+    frozen = [c for c, sd in enumerate(sds) if sd < min_zd_sd]
+    if not frozen:
+        return []
+    low = min(sds[c] for c in frozen)
+    return [f"frozen chains {frozen} (median marginal zd sd {low:.3g} < {min_zd_sd:g})"]
 
 
 def _mcse_failures(worst: dict[str, Any], params: dict[str, Any]) -> list[str]:

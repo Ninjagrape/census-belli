@@ -99,10 +99,18 @@ params:
   ancient_cutoff_year: 500
 
   # ── sampling ──────────────────────────────────────────────────────────────
-  mcmc_samples: 5000                   # neutral fit hit ESS 313 at 2000 on the 211-article corpus; 5000 cleared 400 on the pilot
+  # corpus3 run 3 (2026-11-03): 4 x 5000 draws after 1000 tune gave troop ESS 130
+  # (neutral 116) at rhat 1.04, i.e. ~0.6% efficiency in a few slow global
+  # directions. Longer tuning is aimed at the mass-matrix adaptation; draws rise
+  # 1.6x, capped by memory: the trace holds several side- and battle-shaped
+  # variables (zd, mu_side ~2100 sides; zb, b ~1650 battles; source_key-shaped
+  # deterministics), so total trace memory is several GB per fit; 8000 draws
+  # keeps it near 3 GB.
+  mcmc_samples: 8000                   # neutral fit hit ESS 313 at 2000 on the 211-article corpus; 5000 cleared 400 on the pilot
   mcmc_chains: 4
-  mcmc_tune: 1000
+  mcmc_tune: 4000
   mcmc_target_accept: 0.99            # P1: 0.9 gave 15-37 divergences, 0.97 gave 12-53 on bound-heavy corpora (write_max_divergences is 0)
+  mcmc_low_rank_mass_matrix: false    # nutpie low-rank adaptation for correlated global directions; corpus3 run 3 had worst ESS on corpus_level
   mcmc_cores: 1                       # >1 respawns the interpreter under pytest on Windows
   random_seed: 20260923               # a re-run must reproduce, not merely converge
   # PyTensor needs g++ to compile its C backend and falls back to Python
@@ -126,6 +134,9 @@ params:
   # with s_d ~ HalfNormal(sqrt(battle_effect_prior_sd^2 + side_deviation_prior_sd^2)).
   # An ablation, used to compare P1 against independent sides per regime.
   side_prior_independent: false
+  # true samples the battle effect centred (b ~ StudentT(0, s_b)) instead of s_b * zb: the same
+  # prior, opt-in for data-dominated corpora where the non-centred s_b funnel mixes slowly.
+  battle_effect_centred: false
   # Under `contaminated` point rows are a two-component Normal mixture (faithful
   # noise plus a wide component, keys below). Kept as an ablation: on the real
   # corpus pi_contam came back at 0.02, so it was not the cause of the collapse.
@@ -164,6 +175,9 @@ params:
   # relative or this one. It stops a very narrow interval from passing the
   # relative test while the median is still visibly noisy.
   write_max_median_mcse_log: 0.05
+  # A chain whose step size collapsed in tuning leaves the marginalised zd (exactly
+  # iid N(0,1)) with a tiny within-chain sd; below this median sd the chain is frozen.
+  write_min_chain_zd_sd: 0.5
 
   # ── gate thresholds (resolved into the quality_checks thresholds below) ────
   min_spread_ratio: 0.85              # estimates_not_collapsed (was 0.25 before the noise prior)

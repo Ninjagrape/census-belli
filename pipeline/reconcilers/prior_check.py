@@ -46,6 +46,20 @@ DEFAULT_TROOP_BOUNDS: Final[tuple[float, float]] = (50.0, 5_000_000.0)
 
 _QUANTILES: Final[tuple[float, ...]] = (0.01, 0.5, 0.99)
 _POINT_VARIABLE: Final[str] = "obs_point"
+_SIDE_PARTS: Final[list[str]] = ["m0", "e", "b", "s_d", "zd"]
+
+
+def _prior_side_location(prior: Any, design: Design) -> np.ndarray:
+    """Prior draws of ``m0 + e[era_bin] + b[battle] + s_d * zd``, shape ``(chain, draw, side)``."""
+    m0 = np.asarray(prior["m0"])[..., None]
+    location = m0 + np.asarray(prior["s_d"])[..., None] * np.asarray(prior["zd"])
+    if "e" in prior:
+        e = np.asarray(prior["e"])
+        e = np.concatenate([e, np.zeros((*e.shape[:-1], 1))], axis=-1)
+        location = location + e[..., design.era_bin_of_side]
+    if "b" in prior:
+        location = location + np.asarray(prior["b"])[..., design.battle_of_side]
+    return np.asarray(location)
 
 
 def prior_predictive_check(
@@ -79,7 +93,11 @@ def prior_predictive_check(
         return {"skipped": "disabled"}
     import pymc as pm  # noqa: PLC0415 - deliberately deferred; see module docstring
 
-    variables = ["mu_side"]
+    # Under the marginalised side deviation (part B of the model.py module docstring) the
+    # model's ``mu_side`` is a posterior conditional that reads the observed log values, so its
+    # prior draw is rebuilt from the prior draws of its parts instead.
+    marginalised = "data_side_marginal" in model.named_vars
+    variables = [v for v in _SIDE_PARTS if v in model.named_vars] if marginalised else ["mu_side"]
     has_points = bool(design.point_rows.size)
     if has_points:
         variables.append(_POINT_VARIABLE)
@@ -94,7 +112,11 @@ def prior_predictive_check(
         )
         return {"status": "failed", "error": f"{type(exc).__name__}: {exc}"[:500]}
 
-    strength = np.exp(np.asarray(idata.prior["mu_side"]).reshape(-1))
+    if marginalised:
+        mu_side = _prior_side_location(idata.prior, design)
+    else:
+        mu_side = np.asarray(idata.prior["mu_side"])
+    strength = np.exp(mu_side.reshape(-1))
     p01, p50, p99 = (float(np.quantile(strength, q)) for q in _QUANTILES)
     block: dict[str, Any] = {
         "draws": draws,

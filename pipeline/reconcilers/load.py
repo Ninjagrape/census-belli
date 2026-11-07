@@ -309,8 +309,42 @@ def drop_superseded_by_modern(reports: list[Report], counts: ReconcileCounts) ->
     modern_sides = _sides_with_modern_estimate(reports)
     kept: list[Report] = []
     for report in reports:
-        if report.side_id in modern_sides and report.claim_regime != _MODERN_REGIME:
+        # An override row is a curator's figure; it is never superseded here,
+        # whatever regime its context classifies to.
+        if (
+            report.side_id in modern_sides
+            and report.claim_regime != _MODERN_REGIME
+            and not is_override_report(report)
+        ):
             counts.excluded_superseded_by_modern += 1
+            continue
+        kept.append(report)
+    return kept
+
+
+def drop_superseded_by_override(reports: list[Report], counts: ReconcileCounts) -> list[Report]:
+    """Drop every non-override troop row on a side that holds an override row.
+
+    A ``troop_strength`` override is a curator-settled figure and replaces every
+    other total on its side. The override is written with a modern-scholarly
+    label, so :func:`drop_superseded_by_modern` spares any other modern row on
+    the side (an infobox "modern estimates" line); this rule removes those too.
+    Points and bounds go alike. The rows stay in ``troop_reports``.
+
+    Args:
+        reports: Troop reports after :func:`drop_superseded_by_modern`.
+        counts: Counters; increments ``excluded_superseded_by_override``.
+
+    Returns:
+        The reports in their original order, minus the superseded ones.
+    """
+    overridden = {r.side_id for r in reports if is_override_report(r)}
+    if not overridden:
+        return reports
+    kept: list[Report] = []
+    for report in reports:
+        if report.side_id in overridden and not is_override_report(report):
+            counts.excluded_superseded_by_override += 1
             continue
         kept.append(report)
     return kept
@@ -522,6 +556,7 @@ def _build_troop_reports(
     # describes the reports the model will actually see.
     reports = filter_troop_reports(reports, counts, min_plausible_troops=min_plausible_troops)
     reports = drop_superseded_by_modern(reports, counts)
+    reports = drop_superseded_by_override(reports, counts)
     counts.troop_reports_used += len(reports)
     counts.regime_unlabelled += sum(1 for r in reports if r.claim_regime == "unlabelled")
     return reports
@@ -641,7 +676,8 @@ def load_reports(
             ``troop_reports_used``, ``casualty_reports_used``,
             ``excluded_non_total_branch``, ``excluded_naval``,
             ``excluded_population_scope``, ``excluded_superseded_by_modern``,
-            ``excluded_campaign``, ``excluded_non_positive``, the four plausibility counters
+            ``excluded_superseded_by_override``, ``excluded_campaign``,
+            ``excluded_non_positive``, the four plausibility counters
             (``excluded_implausible_small``, ``excluded_non_personnel``,
             ``excluded_date_context``, ``excluded_component_of_stated_total``),
             ``regime_unlabelled``, ``lineages`` and the span guard's
@@ -690,6 +726,7 @@ def load_reports(
         excluded_naval=counts.excluded_naval,
         excluded_population_scope=counts.excluded_population_scope,
         excluded_superseded_by_modern=counts.excluded_superseded_by_modern,
+        excluded_superseded_by_override=counts.excluded_superseded_by_override,
         excluded_campaign=counts.excluded_campaign,
         excluded_non_positive=counts.excluded_non_positive,
         excluded_implausible_small=counts.excluded_implausible_small,

@@ -186,10 +186,13 @@ def test_the_within_battle_slope_matches_the_implied_reliability(fit: Fit) -> No
     )
 
 
-def test_a_troop_fit_has_no_dispersion_terms_and_records_the_side_prior(fit: Fit) -> None:
+def test_a_troop_fit_has_no_dispersion_terms_and_records_the_side_prior(
+    fit: Fit, priors: ModelPriors
+) -> None:
     names = set(fit.idata.posterior.data_vars)
+    battle_offset = "b_raw" if priors.battle_effect_centred else "zb"
 
-    assert {"e", "s_b", "s_d", "u_c", "zb", "zd", "mu_side"} <= names
+    assert {"e", "s_b", "s_d", "u_c", battle_offset, "zd", "mu_side"} <= names
     assert not {"s0", "z_side", "sigma_round", "sigma_estimate"} & names
 
 
