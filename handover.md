@@ -11,9 +11,25 @@ would otherwise get it wrong. Session narratives go in
 Code comments cite "handover §9.3" (a file in `docs/handover/`) and
 "handover-log §16" (a file in `docs/handover-log/`).
 
-Last updated: 2026-11-07 afternoon (corpus3 reconcile run 5 converged; ranking chain running; see §000 "2026-11-07").
+Last updated: 2026-11-10 (refit 7 reviewed; ACW-bias design decision pending with the user; see §000 "2026-11-10").
 
 ## 000. 2026-10-29/30: corpus3 seed, overrides ov-0101..0104, crawl
+
+- **2026-11-10 (resume here; handover-log §42).**
+  - Both reviewers ran on refit 7 (reconcile 29, model 52): no inference blocker; estimates fit to write. All §41 fixes verified except Brice's Cross Roads value (lone-branch offset lifts an all-cavalry 3,500 to about 6,700).
+  - **ACW bias diagnosed** (§42 section 4): not Confederate, not outnumbered-win credit; the model rates ACW generals lowest per battle. Rank comes from density x volume x rule_single credit x prior-centred components with one global replacement level (BMR M3). WW2 is low from credit splitting.
+  - **Decision pending with the user** (§42 section 5): aggregation density weighting + rule_single cut (BMR C+D, ACW 17 -> 9 of top 50) vs size tiers + sub-action collapse in likelihood and sum (Hist E, 17 -> 12), plus within-component headline ranks. No implementation before the choice.
+  - Data fixes found, no design choice needed (draft overrides/changes for the user): Actium side 125 archers-as-total; 55 nested parent/child battle pairs; about 20-25 campaign/operation rows; Chester Station and Swift Creek Beauregard credit; cavalry-only lone-branch offset; "Capt. Cleaver".
+  - Done: records.py docstring nit (w-c3seed). Data-root code review: no CRITICAL/HIGH; follow-up fixes done in agent-a512e2a4e3d0264a4 (root-named extract hint, `report_under_root` rejects `..`/absolute, override-precedence comments, 4 new tests): unit 2569, ruff, mypy 162 clean. Ready to commit.
+  - **Next, in order:** (1) User picks the ACW design. (2) User commits w-c3seed and the data-root worktree (messages in the session reply); then merge both into main (agents/report.yaml conflict; convert w-c3seed's two new report gates to `report_under_root`), unit+ruff+mypy, move w-c3seed `data/` to `data/corpus3/`, remove w-c3seed and agent-adf22892058598c5e with the user's OK. (3) Data fixes above, then the chosen design, then refit 8.
+
+- **2026-11-08 (resume here; handover-log §41).**
+  - Both reviewers ran on run 5 / ranking run 28: no model blocker; keep n_imputations 20. Historiography found two reconcile blockers (100-troop floor drops real small sides; single-arm figures always dropped) and campaign double counting (§41 section 2).
+  - User approved and added to main + w-c3seed: ov-0607 (Rovereto) and ov-0608..0616 (Mesilla unlink, Fort Sumter 85, five campaign retypes, Fredericksburg date, Fort Wagner field).
+  - w-c3seed (uncommitted, all verified and reviewer-gated GO): disclosures cherry-picked from ee1c9de plus the agreement fix; override floor exemption; lone-branch promotion; per-side prior-only `d_lone_branch[k] ~ TN(log 1.5, 0.6, lower 0)` (the shared scalar was rejected: it learned from the opponent gap); reports_honoured B1 fix; overrides ov-0607..0616. Unit 2563, reconcile integration and model files pass (§41 section 3).
+  - **Refit 7 DONE** 2026-11-10 04:24 (reconcile run 29, model run 52, evaluate 5/5, report gates pass; all reconcile gates green, reports_honoured 0 misses, 62 sides with prior-dominated `d_lone_branch`). Gates read; details and top 20 in §41 section 3b. Log `w-c3seed/data/logs/corpus3_refit7_20261109.log`. Pre-refit backup `data/backups/general_war_corpus3_20261109_pre_rerun7.dump`.
+  - Data-root setting built in worktree agent-a512e2a4e3d0264a4 (off main), uncommitted, not code-reviewed (§41 section 5).
+  - **Next, in order:** (1) Gates are read (§41 3b); run both reviewers, both briefed on the user's ACW-bias concern (§41 3c: 17 of top 50 are ACW, WW2 credit split, volume effect) (bayesian on reconcile+model, historiography on the ranking: Burnside/Beauregard/Forrest, campaign rows gone, Fort Sumter, Brice's Cross Roads). (2) Nit: records.py:465 docstring still says "shared offset". (3) Code-review the data root, merge wip/corpus3-seed and the data-root branch into main (agents/report.yaml conflict expected), move w-c3seed `data/` to `data/corpus3/`, then remove w-c3seed and agent-adf22892058598c5e with the user's OK. (4) Open items from §41 section 2 (rule_single audit and variant, PPC/accuracy gates, date-parser bug, campaign rows sweep).
 
 - **2026-11-07 (resume here; handover-log §40).**
   - **Corpus3 reconcile run 5 converged** with opt-in `battle_effect_centred=true` (C): troops rhat 1.006, ESS 1517, 0 divergences; noise 1.134. Troop estimates written. One gate miss: reports_honoured, Rovereto 1796 Austrians (scope inversion). Draft ov-0607 awaits the user's sign-off (§40 section 5).
