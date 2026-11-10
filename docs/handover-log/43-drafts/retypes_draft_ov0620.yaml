@@ -1,0 +1,131 @@
+# Draft battle_type retypes for nested parents and operation rows, general_war_corpus3, credited rows of model run 52.
+# Not applied. Append under `entries:` in config/overrides.yaml after sign-off (set reviewed.by and reviewed.on first).
+# Every target was checked to match exactly one battles.source_slug row.
+
+# (A) Nested parents to retype as campaign. Their credited sub-battles stay in the model.
+- id: ov-0620
+  kind: battle_type
+  target: {battle: Siege_of_Petersburg-b905c2f450}
+  value: campaign
+  source: "Wikipedia, 'Siege of Petersburg' (Richmond-Petersburg campaign, 9 June 1864 to 25 March 1865)"
+  note: "Campaign-level row. 18 of its battles are separate credited rows (Second Petersburg, the Crater, Globe Tavern, Hatcher's Run and others) and all five of its generals (Grant, Meade, Butler, Lee, Beauregard) are credited on them, so the siege row double counts. Sub-battles kept."
+  reviewed: {by: PENDING, "on": null}
+
+- id: ov-0621
+  kind: battle_type
+  target: {battle: Siege_of_Knoxville-a54d9e21f9}
+  value: campaign
+  source: "Wikipedia, 'Siege of Knoxville' and 'Battle of Fort Sanders'"
+  note: "Fort Sanders (29 November 1863) is its own credited row with the same two generals, Burnside and Longstreet, so the siege row double counts. Sub-battle kept."
+  reviewed: {by: PENDING, "on": null}
+
+- id: ov-0622
+  kind: battle_type
+  target: {battle: Battle_of_Wilmington-050225425c}
+  value: campaign
+  source: "Wikipedia, 'Battle of Wilmington' (Operations Against Fort Fisher campaignbox)"
+  note: "Campaign-level row covering Fort Fisher, Fort Anderson and the city. Second Fort Fisher is a separate credited row that carries Bragg, Porter and Hoke from this row. Schofield is credited only here, so retyping loses his row; the double count on the other three is the larger distortion. Sub-battle kept."
+  reviewed: {by: PENDING, "on": null}
+
+# (B) Campaign or operation rows with no credited children, retyped because they are multi-engagement operations, not single battles.
+- id: ov-0623
+  kind: battle_type
+  target: {battle: Manassas_Station_Operations-94ab76f095}
+  value: campaign
+  source: "Wikipedia, 'Manassas Station Operations' (25-27 August 1862)"
+  note: "Umbrella for several actions (Bristoe Station, Kettle Run, Bull Run Bridge, Union Mills) within the Northern Virginia Campaign, not a single battle."
+  reviewed: {by: PENDING, "on": null}
+
+- id: ov-0624
+  kind: battle_type
+  target: {battle: Ambiorix_s_revolt-94000acc76}
+  value: campaign
+  source: "Wikipedia, \"Ambiorix's revolt\" (winter 54-53 BCE)"
+  note: "A winter-long rebellion with several separate engagements (Aduatuca and the attacks on the Roman winter camps), part of the Gallic Wars. Not one battle."
+  reviewed: {by: PENDING, "on": null}
+
+- id: ov-0625
+  kind: battle_type
+  target: {battle: Barvenkovo_Lozovaya_offensive-890319afa8}
+  value: campaign
+  source: "Wikipedia, 'Barvenkovo-Lozovaya offensive' (18-31 January 1942)"
+  note: "Front-level Red Army offensive operation over two weeks, also stored as aerial. An operation, not a battle."
+  reviewed: {by: PENDING, "on": null}
+
+- id: ov-0626
+  kind: battle_type
+  target: {battle: Tikhvin_Offensive-81585d2617}
+  value: campaign
+  source: "Wikipedia, 'Tikhvin offensive' (10 November to 30 December 1941)"
+  note: "Seven-week operation with a German offensive and a Soviet counter-offensive phase. A campaign-level operation, not a battle."
+  reviewed: {by: PENDING, "on": null}
+
+- id: ov-0627
+  kind: battle_type
+  target: {battle: Melitopol_offensive-a345bc83c9}
+  value: campaign
+  source: "Wikipedia, 'Melitopol offensive' (26 September to 5 November 1943)"
+  note: "Front-level strategic offensive over six weeks. An operation, not a battle."
+  reviewed: {by: PENDING, "on": null}
+
+- id: ov-0628
+  kind: battle_type
+  target: {battle: Polesskoe_offensive-f5f8cd8081}
+  value: campaign
+  source: "Wikipedia, 'Polesskoe offensive' (15 March to 5 April 1944)"
+  note: "Front-level offensive operation (the Kovel operation) over three weeks. An operation, not a battle."
+  reviewed: {by: PENDING, "on": null}
+
+- id: ov-0629
+  kind: battle_type
+  target: {battle: Moonsund_operation-7678d3bdf4}
+  value: campaign
+  source: "Wikipedia, 'Moonsund landing operation' (29 September to 24 November 1944)"
+  note: "Eight-week amphibious operation clearing the West Estonian archipelago island by island. An operation, not a battle."
+  reviewed: {by: PENDING, "on": null}
+
+- id: ov-0630
+  kind: battle_type
+  target: {battle: Battle_of_the_St._Lawrence-b90e05c1a9}
+  value: campaign
+  source: "Wikipedia, 'Battle of the St. Lawrence' (1942 to 1944)"
+  note: "A U-boat campaign spread over three seasons and many separate actions, credited to a single commander. A campaign despite the name."
+  reviewed: {by: PENDING, "on": null}
+
+- id: ov-0631
+  kind: battle_type
+  target: {battle: Battle_of_Britain-9be0cb19b5}
+  value: campaign
+  source: "Wikipedia, 'Battle of Britain' (July to October 1940)"
+  note: "A months-long air campaign made of many separate air actions, not one engagement. Judgement call: it is the best known air battle, so reviewer may prefer to keep it."
+  reviewed: {by: PENDING, "on": null}
+
+- id: ov-0632
+  kind: battle_type
+  target: {battle: Van_Buren_raid-ad793b0260}
+  value: campaign
+  source: "Wikipedia, 'Van Buren raid' (28 December 1862)"
+  note: "A one-day Union raid on Van Buren after Prairie Grove with no contested battle, like Stoneman's raid (ov-0613). Judgement call."
+  reviewed: {by: PENDING, "on": null}
+
+# (C) Reviewed and NOT retyped. Commented out; delete the comment marker to override the call.
+#
+# Fragments: the credited children cover only part of the parent, so retyping would lose most of it.
+# Battle_of_the_Bulge-35837b5379 (15 generals): credited children are Elsenborn Ridge (5 generals) and Heartbreak Crossroads (3). Overlap is Bradley and Dietrich only. Keep the parent.
+# Battle_of_Gazala-31b0a03912 (11 generals): children Bir Hakeim and Axis capture of Tobruk cover 2 of many actions, but Tobruk repeats 7 of 8 parent generals (Rommel, Nehring, Ritchie, Gott and others), a real double count. Keep; user may prefer to retype Gazala and accept losing Auchinleck, Norrie and Bastico.
+# Battle_of_Berlin-e9d1deec09 (8 generals): Seelow Heights and Halbe are credited, but the city fight itself has no row. Retyping would drop Weidling's only credited row and the Hitler, Stalin and Rokossovsky rows for this battle, while Zhukov and Konev (8 and 6 rows) lose one. Keep and flag; the double count on Zhukov and Konev stays.
+# Battle_of_Kursk-045b980c2f (26 generals): only Belgorod (1 general, Manstein) is a real child. Third Battle of Kharkov is a separate battle (February 1943) that the Kursk row's dummy 1 January start date makes look nested. Keep.
+# Battle_of_Stalingrad-9e41ff979f (34 generals): only Kalach is credited as a child. Keep.
+# Siege_of_Warsaw_1939-8e7c7ad281 (10 generals): only the Ochota and Wola defence is credited as a child. Keep.
+# Battle_of_Mobile_Bay-9004547db6 (4 generals): child Siege of Fort Morgan repeats Granger and Page, but the naval battle (Farragut, Buchanan) is only here. Keep.
+# Battle_of_Chancellorsville-76ae3d426b (2 generals): child Salem Church shares only Lee. Keep.
+# Battle_of_Aachen-5785fc6df4 (8 generals): child Crucifix Hill is a small fragment. Keep.
+# Battle_of_H_rtgen_Forest-b80d841210 (3 generals): Aachen and the Bulge are adjacent concurrent battles, not sub-actions; their part_of is the Allied advance to the Rhine. Keep.
+# Battle_of_Rich_Mountain-0b0c2fb695: Wikidata links Corrick's Ford (P361) but they are sibling battles of McClellan's western Virginia operations, not nested. Keep.
+#
+# Single continuous engagements stored with operation-like names, so battles:
+# Ruhr_pocket-8b4ef3b5c4: a battle of encirclement, 1 to 18 April 1945 (Wikipedia calls it a battle). Keep.
+# Heiligenbeil_Pocket-a8c6746637, Kholm_Pocket-54d2696f4b, Colmar_Pocket-e12a49716c, Battle_of_Korsun_Cherkassy-99048913d0: each is one encirclement and reduction with one outcome. Keep.
+# Joint_Expedition_Against_Franklin-f5204dd88e: Wikipedia calls it a single joint engagement (3 October 1862). Keep.
+# Lw_w_Uprising-9519a374cb: a five-day uprising in one city, one outcome. Keep.
+# 18th-century amphibious raids (Cherbourg_raid-66c707e16f, Le_Havre_raid-d6aa53d9f9, Raid_on_Lorient-4e2ac2df22, Raid_on_Rochefort-55b89a0054, Raid_on_St_Malo-a0e993847a, Raids_on_Boulogne-07fce5d6ec, 1757_raid_on_Berlin-87e1982cd8): each is a single event. Keep.

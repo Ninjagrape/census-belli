@@ -217,11 +217,22 @@ report-gate integration test with a deliberately broken weight fails.
 
 ## 9. Measurement and implementation
 
-Not started. The density measurement script is written
-(`measure.py`, session scratchpad, ephemeral: rewrite from this brief if lost):
-included battles of the latest converged run, `d` under `/(2w+1)` and `/2w`,
-percentiles inside and outside the ACW, `war_id` coverage and top wars.
-Implementation by Sonnet in a worktree waits for that number.
+**Measured 2026-11-10 on run 52** (1535 included battles, 0 undated; ACW =
+war_id 3, 436 battles counting theatre wars 36/66, which have none included):
+
+| d under /(2w+1), w=1 | p5 | p25 | p50 | p75 | p90 | p95 | max |
+|---|---|---|---|---|---|---|---|
+| all | 0.9 | 9.8 | 27.7 | 62.7 | 101.3 | 127.3 | 127.3 |
+| ACW | 52.3 | 91.0 | 101.3 | 127.3 | 127.3 | 127.3 | 127.3 |
+| non-ACW | 0.67 | 5.7 | 19.0 | **30.0** | 36.0 | 38.7 | 127.3 |
+
+Non-ACW p75 is 30.0 (design: 29). With d_ref 29: ACW median a 0.535 (all
+below 1), non-ACW median 1.0 (25% below 1). With 30: ACW median 0.544.
+`war_id` coverage 82.5% (269 included battles NULL, the "no war recorded"
+bucket). Wars 27 and 28 are both "Arab-Byzantine wars" (capitalisation
+duplicate in `wars`): merge before within-war ranks are published.
+Run 52 gates false: fmi_top_generals, top_generals_cross_component,
+posterior_predictive_category_check.
 
 ## 10. Session 2026-11-10 (second half): data-fix drafts and rule_single
 
@@ -270,6 +281,25 @@ ready to re-run as is: credited = rows in `battle_war_details` for the latest
 run; signals P361 (`data/corpus3/raw/wikidata/Q*.json`) and infobox `partof`
 (`data/corpus3/raw/battles_html/*.wikitext`); ids from ov-0620; flag parents
 whose credited children are fragments (Bulge?); flag Berlin and Kursk.
+
+**Decisions 2026-11-11 (user).**
+- Retypes ov-0620..0632 approved as drafted (`43-drafts/retypes_draft_ov0620.yaml`):
+  nested parents Siege of Petersburg, Siege of Knoxville, Wilmington; operation
+  rows Manassas Station Ops, Ambiorix, Barvenkovo-Lozovaya, Tikhvin, Melitopol,
+  Polesskoe, Moonsund, St. Lawrence, Battle of Britain, Van Buren raid. Kept as
+  battles (children are fragments, or adjacent not nested): Berlin, Gazala,
+  Bulge, Stalingrad/Kalach, Warsaw 1939, Kursk, the pockets. The P361/partof
+  signals find only 6 credited pairs; the review's "55" was not reproduced
+  (campaignbox children are unexpanded templates), so recall is low. Dummy
+  1 January dates (Kursk, Atlanta, Nashville, ...) distort date-based nesting.
+- ov-0700, 0703, 0704 approved. Chester Station / Swift Creek: option (a),
+  `commander_link: none` on Beauregard (both battles Butler v Beauregard,
+  indecisive; Ransom not in `generals`, Bushrod Johnson linked to neither).
+- Cavalry-only lone-branch figures: no offset (ordinary total); infantry-only
+  keeps TN(log 1.5, 0.6). Reconcile change, BMR gate, before refit 8.
+- rule_single: write the W < 1 design brief for BMR review; prompt change and
+  LLM batch only after. `rule_single_half` variant ships meanwhile.
+- `density_ref` = 30.0 (the measured value).
 
 **rule_single finding (blocks the classify-only fix).** A sole commander's
 weight cannot be cut below 1 today: `validate_side` requires weights to sum to
