@@ -1,0 +1,162 @@
+Counter({'2026-11-08T14': 87})
+72 Counter({'infantry': 30, 'cavalry': 30, 'irregular': 12})
+261 cavalry 2000.0 Battle_of_Avesnes-le-Sec-e79d18bf1b | Austria | 3061
+      cavalry 2000.0 engaged 2,000 cavalry
+364 cavalry 900.0 Battle_of_Bornh_ved_1813-a3c2d80179 | Sweden | 2113
+      cavalry 900.0 engaged 900 cavalry
+389 cavalry 3500.0 Battle_of_Brice_s_Cross_Roads-43bd2b80f5 | Confederate States | 6729
+      cavalry 3500.0 engaged 3,500 cavalry
+397 cavalry 2.0 Battle_of_Britton_s_Lane-bdd098ba3c | United States (Union) | 0
+      cavalry 2.0 engaged 2 Cavalry troops
+617 cavalry 9000.0 Battle_of_Columbus_1865-25f1c7301d | United States (Union) | 12076
+      cavalry 9000.0 engaged (9,000 cavalry)
+810 cavalry 900.0 Battle_of_Fayetteville_1863-6af59df735 | Confederate States | 1343
+      cavalry 900.0 engaged 900 cavalry
+      artillery 2.0 engaged 2 guns
+1120 cavalry 400.0 Battle_of_Jackson_Tennessee-87c466d88b | Confederate States of America | 1028
+      cavalry 400.0 engaged 400 cavalry
+1262 cavalry 8000.0 Battle_of_Legnica-259d8e0d4f | Mongol Empire | 5895
+      cavalry 3000.0 engaged 3,000–8,000 cavalry
+      cavalry 8000.0 engaged 3,000–8,000 cavalry
+1375 cavalry 600.0 Battle_of_Marash_953-86af490c6d | Hamdanid Emirate of Aleppo | 1126
+      cavalry 600.0 engaged 600 cavalry
+1390 cavalry 4000.0 Battle_of_Marj_al-Dibaj-ecb51c10dd | Rashidun Caliphate | 5833
+      cavalry 4000.0 engaged 4,000 cavalry
+1402 cavalry 600.0 Battle_of_Massard_Prairie-18640fff9d | Confederate States | 1058
+      cavalry 600.0 engaged ~600 cavalry
+1403 cavalry 200.0 Battle_of_Massard_Prairie-18640fff9d | United States (Union) | 565
+      cavalry 200.0 engaged ~200 cavalry
+1678 cavalry 2000.0 Battle_of_Pine_Bluff-e136e71212 | Confederate States | 4094
+      cavalry 2000.0 engaged 2,000 cavalry,
+      artillery 12.0 engaged 12 guns
+1789 cavalry 1500.0 Battle_of_Rio_Hill-aa35cfcaf4 | USA | 3175
+      cavalry 1500.0 engaged 1,500 cavalrymen, 2 cannons
+      artillery 2.0 engaged 1,500 cavalrymen, 2 cannons
+1803 cavalry 3000.0 Battle_of_Rocquencourt-4a6526fc21 | French Empire | 4630
+      cavalry 3000.0 engaged 3,000 blocking cavalry
+1804 cavalry 700.0 Battle_of_Rocquencourt-4a6526fc21 | Kingdom of Prussia | 1884
+      cavalry 600.0 engaged 600–700 officers and light cavalry troopers
+      cavalry 700.0 engaged 600–700 officers and light cavalry troopers
+1825 cavalry 1600.0 Battle_of_Ruspina-3fe4b9c4ff | Pompeians | 7311
+      cavalry 9600.0 engaged 9,600 Numidian cavalry
+      cavalry 1600.0 engaged 1,600 Gallic and Germanic cavalry
+1852 cavalry 10000.0 Battle_of_Saint-Dizier-3d6322cd5d | Russian Empire | 15113
+      cavalry 8000.0 engaged 8,000–10,000, mostly cavalry
+      cavalry 10000.0 engaged 8,000–10,000, mostly cavalry
+1960 cavalry 1.0 Battle_of_St._Johns_Bluff-1d2c359503 | CSA (Confederacy) | 0
+      cavalry 1.0 engaged 1 cavalry company
+      artillery 1.0 engaged 1 artillery battery
+2017 cavalry 1000.0 Battle_of_Tebbs_Bend-48fe630449 | Confederacy (CSA) | 1218
+      cavalry 800.0 engaged 800–1,000 cavalry
+      cavalry 1000.0 engaged 800–1,000 cavalry
+      artillery 4.0 engaged 4 Artillery pieces
+2035 cavalry 6000.0 Battle_of_Ticinus-fcf8bf3f9b | Carthage | 11011
+      cavalry 6000.0 engaged 6,000 cavalry
+2099 cavalry 500.0 Battle_of_Utica_49_BC-aea42cb31e | Caesarians | 15383
+      cavalry 10000.0 engaged 10,000+ (2 legions + 500 Gallic cavalry)
+      cavalry 500.0 engaged 10,000+ (2 legions + 500 Gallic cavalry)
+2177 cavalry 30000.0 Battle_of_Vosges_58_BC-9279a2f8fd | Roman Republic | 36935
+      cavalry 25000.0 engaged 25,000–30,000 (6 legions with cavalry and auxiliaries)
+      cavalry 30000.0 engaged 25,000–30,000 (6 legions with cavalry and auxiliaries)
+2263 cavalry 4500.0 Battle_of_Yellow_Bayou-044be8e7cf | United States (Union) | 7460
+      cavalry 4500.0 engaged 4,500 plus cavalry
+2363 cavalry 6000.0 Battle_of_the_Lycus_950-3814ab2220 | Byzantine Empire | 8320
+      cavalry 5000.0 engaged 5,000 - 6,000 cavalry
+      cavalry 6000.0 engaged 5,000 - 6,000 cavalry
+2364 cavalry 14000.0 Battle_of_the_Lycus_950-3814ab2220 | Hamdanid Dynasty | 12918
+      cavalry 14000.0 engaged Up to 14,000 cavalry
+2430 cavalry 15000.0 Battle_of_the_Vingeanne-ec6f29197f | Coalition of Gallic tribes | 18619
+      cavalry 15000.0 engaged 15,000 cavalry
+2519 cavalry 150.0 Combat_of_Stockerau-1b7828f734 | French Empire | 479
+      cavalry 150.0 engaged 150 cavalrymen
+2570 cavalry 3000.0 First_Battle_of_Collierville-7ad1def2bf | Confederate States | 4428
+      cavalry 3000.0 engaged 3,000 cavalry
+      artillery 8.0 engaged 8 guns
+2754 cavalry 2000.0 Second_Battle_of_Cabin_Creek-6e9071e861 | Confederate States | 4083
+      cavalry 2000.0 engaged 2,000 cavalry and 6 guns
+      artillery 6.0 engaged 2,000 cavalry and 6 guns
+134 infantry 4000.0 Battle_of_Ager_Falernus-40028b4206 | Roman Republic | 7794
+      infantry 4000.0 engaged 4,000 infantry
+167 infantry 44000.0 Battle_of_Alexandria_30_BC-a865fc6836 | Octavian's forces | 55894
+      infantry 44000.0 engaged 44,000 Roman legionaries
+237 infantry 15000.0 Battle_of_Arras_1940-caee2dc2aa | United Kingdom | 23563
+      infantry 15000.0 engaged 15,000 infantry
+      armour 88.0 engaged 88 tanks (Frankforce)
+238 infantry 10000.0 Battle_of_Arras_1940-caee2dc2aa | Nazi Germany | 15082
+      infantry 5000.0 engaged 5,000–10,000 infantry
+      infantry 10000.0 engaged 5,000–10,000 infantry
+      armour 225.0 engaged c. 225 tanks
+585 infantry 32.0 Battle_of_Christmas_Island-f345a9ab2c | United Kingdom | 0
+      infantry 32.0 engaged 32 infantry
+      naval 1.0 engaged 1 submarine
+1193 infantry 1500.0 Battle_of_Kohima-c51ef243c9 | United Kingdom | 5235
+      infantry 1500.0 engaged 1 infantry brigade (1,500)
+1194 infantry 20000.0 Battle_of_Kohima-c51ef243c9 | Japan | 22697
+      infantry 15000.0 engaged 1 infantry division (15,000–20,000)
+      infantry 20000.0 engaged 1 infantry division (15,000–20,000)
+1203 infantry 4900.0 Battle_of_Krasny_Bor-9700501fb6 | Nazi Germany | 13566
+      infantry 4900.0 engaged 250th: 4,900 infantry
+1204 infantry 43000.0 Battle_of_Krasny_Bor-9700501fb6 | Soviet Union | 49550
+      infantry 33000.0 engaged 33,000 infantry
+      infantry 43000.0 engaged 43,000 infantry
+      artillery 1000.0 engaged 1,000 artillery pieces
+      armour 30.0 engaged 30 tanks
+      armour 90.0 engaged 90 tanks
+1258 infantry 400.0 Battle_of_Lebanon_Kentucky-477401daa7 | United States (Union) | 1085
+      infantry 350.0 engaged 350–400 of the 20th Kentucky Infantry
+      infantry 400.0 engaged 350–400 of the 20th Kentucky Infantry
+1407 infantry 11000.0 Battle_of_Maudach-973fa759ae | Habsburg Austria | 15257
+      infantry 11000.0 engaged 11,000 infantry and cavalry
+1514 infantry 1.0 Battle_of_Mount_Tambu-50346f718d | Australia | 0
+      infantry 1.0 engaged 1/162nd Infantry Regiment
+1522 infantry 4000.0 Battle_of_Muar-a354c60045 | Australia | 9062
+      infantry 4000.0 engaged 4,000 infantry
+      air 60.0 engaged 60 aircraft
+1523 infantry 8000.0 Battle_of_Muar-a354c60045 | Empire of Japan | 13474
+      infantry 8000.0 engaged 8,000 infantry
+      air 400.0 engaged 400 aircraft
+1524 infantry 2.0 Battle_of_Mubo-061a8dac8b | Australia | 0
+      infantry 2.0 engaged 2/5th Infantry Battalion
+1571 infantry 4000.0 Battle_of_New_Bern-ab95e4cf78 | Confederate States | 7360
+      infantry 4000.0 engaged 6 infantry regiments (4,000)
+1920 infantry 20.0 Battle_of_Shepherdstown-a3735fc604 | Confederate States | 2414
+      infantry 600.0 engaged 600 infantry, ~44 cannons (Sept. 19)
+      infantry 2000.0 engaged 2,000 infantry (Sept. 20)
+      infantry 20.0 engaged 2,000 infantry (Sept. 20)
+      artillery 44.0 engaged 600 infantry, ~44 cannons (Sept. 19)
+      artillery 19.0 engaged 600 infantry, ~44 cannons (Sept. 19)
+1942 infantry 2400.0 Battle_of_Sokolovo-6d214bb35e | Germany | 3039
+      infantry 2400.0 engaged 2,400 infantry
+      armour 20.0 engaged 20–40 tanks
+      armour 40.0 engaged 20–40 tanks
+      armour 20.0 engaged 20 Armored vehicles
+2010 infantry 5000.0 Battle_of_Tarentum_212_BC-9f577c3194 | Roman Republic | 8842
+      infantry 5000.0 engaged 5,000 infantry
+2031 infantry 1.0 Battle_of_Thompson_s_Station-bdf9d6abcd | United States (Union) | 0
+      infantry 1.0 engaged 1 Reinforced Infantry Brigade
+2389 infantry 2.0 Battle_of_the_Pimple-87c6628e61 | Australia | 0
+      infantry 2.0 engaged 2/16th Infantry Battalion
+2427 infantry 8000.0 Battle_of_the_Uxian_Defile-fccd1423d2 | Macedonia | 13963
+      infantry 8000.0 engaged 8,000 infantry
+2521 infantry 800.0 Combat_of_Villaseca-52739de00f | French Empire | 2097
+      infantry 800.0 engaged Over 800 infantry and dragoons
+2569 infantry 480.0 First_Battle_of_Collierville-7ad1def2bf | United States (Union) | 1514
+      infantry 480.0 engaged 480 infantry
+2659 infantry 12000.0 Joint_Expedition_Against_Franklin-f5204dd88e | Confederate States Army | 17408
+      infantry 10000.0 engaged 10,000–12,000 Infantry
+      infantry 12000.0 engaged 10,000–12,000 Infantry
+2876 infantry 12000.0 Siege_of_Breda_1813-38fa4ec065 | First French Empire | 14049
+      infantry 12000.0 engaged 12,000 infantry
+      artillery 26.0 engaged 26 cannons
+2919 infantry 16000.0 Siege_of_Corfinium-3d06085caf | Optimates | 24328
+      infantry 16000.0 engaged c. 16,000 legionaries
+3048 infantry 15000.0 Siege_of_Massilia-46e0e94e65 | Supporters of Julius Caesar | 20965
+      infantry 15000.0 engaged Land forces: c. 15,000 legionaries (3 legions)
+      naval 12.0 engaged Traceback (most recent call last):
+  File "C:\Users\LeeMo\AppData\Local\Temp\claude\f4b98c78126dd30f\42379c66-02b4-44c5-a4ef-282b2c818338\scratchpad\t6.py", line 12, in <module>
+    for x in reps: print('     ',x[0],x[1],x[2],(x[3] or '')[:60])
+                   ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2212' in position 9: character maps to <undefined>

@@ -11,9 +11,16 @@ would otherwise get it wrong. Session narratives go in
 Code comments cite "handover §9.3" (a file in `docs/handover/`) and
 "handover-log §16" (a file in `docs/handover-log/`).
 
-Last updated: 2026-11-10 (refit 7 reviewed; ACW-bias design decided, §42 section 6; branches merged into main; see §000 "2026-11-10").
+Last updated: 2026-11-10 second half (density-weighting design reviewed, §43; data-fix drafts; DB access fix pending; see §000 "2026-11-10 second half").
 
 ## 000. 2026-10-29/30: corpus3 seed, overrides ov-0101..0104, crawl
+
+- **2026-11-10 second half (resume here; handover-log §43).**
+  - **DB access first:** `DATABASE_URL` is now in the Windows User env, but Postgres rejected its password; the user re-sets it with the working one. Agents read it via `os.environ` then `winreg` HKCU\Environment and swap the DB name to `general_war_corpus3`; they must not read `.claude/settings.local.json` (the classifier blocks it).
+  - Density weighting design written and reviewed: `docs/handover-log/43-design-density-weighting.md`, BMR GO with changes; section 8 amendments are binding (post-hoc routing, every `reduce_draws` caller, `cmd_method`, report readers, primary war by weighted battles, within-war 90% rank intervals from draws, `scope: global|component`, `war_per_battle` stays unweighted). Not implemented.
+  - Drafts awaiting sign-off: ov-0700..0704 in `docs/handover-log/43-drafts/` (Actium side 125 = Octavian's, 19,000; Chester Station/Swift Creek attribution entries **cannot apply** as drafted, options in §43 section 10; Capt. Cleaver unlink; Brice's 3,500). Lone-branch: 30 of 72 promoted sides are cavalry, most whole cavalry forces; proposal: no offset for cavalry-only.
+  - rule_single: cutting a sole commander below 1 needs a model change (W < 1 on ordinary sides, remainder `mu_unattributed`); user + BMR decide before any prompt change or LLM batch (§43 section 10).
+  - **Next, in order:** (1) With DB access: Haiku runs the density measurement (§43 section 9) and the Chester/Swift side check; Sonnet drafts the nested-pair and campaign retypes (brief in §43 section 10). (2) User signs off ov-0700..0704 (choose an option for Chester/Swift) and the retypes; decides the cavalry-only offset and rule_single W < 1 design. (3) Sonnet implements density weighting per §43 (worktree, tests), BMR gate on the code. (4) rule_single prompt + batch (ask usage %). (5) Integration suite on a scratch DB, then refit 8 with `GENERAL_WAR_DATA_ROOT=data/corpus3`.
 
 - **2026-11-10 (resume here; handover-log §42).**
   - Both reviewers ran on refit 7 (reconcile 29, model 52): no inference blocker; estimates fit to write. All §41 fixes verified except Brice's Cross Roads value (lone-branch offset lifts an all-cavalry 3,500 to about 6,700).

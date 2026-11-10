@@ -1,0 +1,41 @@
+  - id: ov-0700
+    kind: troop_strength
+    target: {battle: Battle_of_Actium-639679a575, side: "Octavian's forces"}
+    value: {point: 19000}
+    scope: engaged
+    source: "Wikipedia, 'Battle of Actium', infobox strength1 ('250-400 galleys; 16,000 infantry on ships; 3,000 archers'), citing Lendering (Livius.org)"
+    note: "Side 125 is Octavian's forces. The infobox lists galleys, 16,000 infantry on ships and 3,000 archers. The parser stored the 3,000 archers as the side's 'total' (the 16,000 went to the infantry branch), so reconcile used about 3,006. The fighting complement aboard is 16,000 marines plus 3,000 archers = 19,000; rowers and the galley count are not included. The 3,000 was only the archer component."
+    reviewed: {by: lee, "on": 2026-11-10}
+  - id: ov-0701
+    kind: attribution
+    target: {battle: Battle_of_Chester_Station-b305215632, side: "CSA (Confederacy)"}
+    value:
+      - {general: "Robert Ransom, Jr.", role: field_commander, rank: 0, weight: 0.90}
+      - {general: Q313976, role: theatre_commander, rank: 1, weight: 0.10}
+    source: "Wikipedia, 'Battle of Chester Station', description ('a reconnaissance-in-force of two Confederate brigades led by Major General Robert Ransom') and order of battle ('GEN Beauregard, Department of North Carolina and Southern Virginia; MG Robert Ransom, commanding Department of Richmond')"
+    note: "rule_single gave Beauregard weight 1.0 because the infobox lists only him. The article has Ransom leading the attack from Drewry's Bluff, and Beauregard at department level. Robert Ransom Jr. is NOT a resolved general in corpus3 (the only Ransom row is Thomas E. G. Ransom, Q7789162, a different man), so the name string is used; Wikidata id not verified. Check that the applier accepts an unresolved name before applying."
+    reviewed: {by: lee, "on": 2026-11-10}
+  - id: ov-0702
+    kind: attribution
+    target: {battle: Battle_of_Swift_Creek-4a5858ddf4, side: "CSA (Confederacy)"}
+    value:
+      - {general: Q434337, role: field_commander, rank: 0, weight: 0.90}
+      - {general: Q313976, role: theatre_commander, rank: 1, weight: 0.10}
+    source: "Wikipedia, 'Battle of Swift Creek', description ('met by Bushrod Johnson's Division at Swift Creek'; infobox commander2 Beauregard)"
+    note: "rule_single gave Beauregard 1.0. The article names Bushrod Johnson's Division as the force that met Butler; Beauregard is department commander. Johnson Hagood (Q886090, resolved in corpus3) is not mentioned in the article text, so he is left out; add him as a subordinate of Johnson only on a better source."
+    reviewed: {by: lee, "on": 2026-11-10}
+  - id: ov-0703
+    kind: commander_link
+    target: {battle: Second_Battle_of_Mesilla-08aeaa0ff0, side: Confederate States, mention: "Capt. Cleaver"}
+    value: none
+    source: "Wikipedia, 'Second Battle of Mesilla', infobox commander1 ('Captain Sherod Hunter; Colonel. Steel; Capt. Cleaver (killed in action)')"
+    note: "Capt. Cleaver (general_id 2991, no Wikidata id, appears in this one battle only) is a real but obscure junior officer, not a parse artefact. He is a default_split 0.5 / 0.5 with Hunter at role unknown, which halves Hunter's credit for no evidence. Unlinking him mirrors ov-0608 (Steele). Optional alternative: keep him and add an attribution override instead."
+    reviewed: {by: lee, "on": 2026-11-10}
+  - id: ov-0704
+    kind: troop_strength
+    target: {battle: Battle_of_Brice_s_Cross_Roads-43bd2b80f5, side: Confederate States}
+    value: {point: 3500}
+    scope: engaged
+    source: "Wikipedia, 'Battle of Brice's Cross Roads', infobox strength1 ('3,500 cavalry')"
+    note: "Forrest's whole force was cavalry (infobox strength1 lists nothing else), so 3,500 is the side's total and not a cavalry branch of a larger army. Reconcile promoted it as a lone cavalry branch and the side's estimate came out at about 6,729."
+    reviewed: {by: lee, "on": 2026-11-10}
