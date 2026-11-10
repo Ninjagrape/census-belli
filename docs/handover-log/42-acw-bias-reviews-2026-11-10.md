@@ -49,4 +49,9 @@ C+D side effect: the Napoleonic share of the top 50 rises to 46% (battle share 3
 
 ## 6. Decision
 
-Awaiting the user (see the session's final reply). No implementation before the choice.
+User decisions (2026-11-10), all four as recommended:
+
+1. **Aggregation: density weighting.** Each battle's contribution to total_war is multiplied by `min(1, (d_ref / d) ** power)`, where `d` is the number of included battles per year within +-1 year of the battle, `d_ref` = 29 (75th percentile of d outside the ACW in run 52) and `power` = 0.5. The likelihood stays unweighted (a small battle is still evidence about skill); per-entry xWAR is unchanged and stored alongside its aggregation weight. Sensitivity variants: unweighted, d_ref and power +-. Code (BMR outline): `pipeline/modelers/design.py` (density, weight per battle), `pipeline/modelers/war.py` (weighted total), `config/model_default.yaml` (`war_aggregation: {density_ref, power, window}`), outputs/store plus an Alembic migration adding `battle_war_details.aggregation_weight` so `war_decomposition_reconciles` checks the weighted sum, `agents/model.yaml` WAR definition, report and disclosures, evaluate variants. Watch: Napoleonic share of the top 50 rises to about 46% (32% of battles); historiography pass on the new top 50.
+2. **Sole-listed credit: classify fix plus variant.** Re-classify rule_single rows so weight is cut only where there is no evidence of tactical command (department/theatre commanders), sole field commanders keep 1.0. Needs a classify prompt/rule change and an LLM batch (about 1,000+ rows; ask usage % first). Until then, a blanket rule_single x0.5 evaluate variant.
+3. **Report: global plus within-war.** Keep the global table (density-weighted, labelled) and add a within-war/within-component rank column and explorer view.
+4. **Nesting: keep sub-battles.** Where a parent battle's sub-battles are credited, retype the parent as a campaign (out of the WAR model), as ov-0610..0614 did. Drafted as overrides for sign-off.
