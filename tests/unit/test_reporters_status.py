@@ -225,16 +225,16 @@ def test_a_rank_held_by_a_thin_general_inside_the_headline_range_is_disclosed() 
 
     v = view(ests)
 
-    gap = [d for d in v.disclosures if d.startswith("Ranks are positions among all credited")]
+    gap = [d for d in v.disclosures if d.startswith("Rank counts headline generals from 1")]
     assert len(gap) == 1
-    assert "1 general(s) with fewer than 3 credited battles" in gap[0]
+    assert "1 general with fewer than 3 credited battles" in gap[0]
     assert "—" not in gap[0]
 
 
 def test_contiguous_ranks_add_no_rank_gap_disclosure() -> None:
     v = view([estimate(1, rank=1), estimate(2, rank=2), estimate(3, rank=3, n_battles=1)])
 
-    assert not any(d.startswith("Ranks are positions") for d in v.disclosures)
+    assert not any(d.startswith("Rank counts headline generals from 1") for d in v.disclosures)
 
 
 def test_a_malformed_evaluation_report_degrades_to_unavailable_with_a_reason(

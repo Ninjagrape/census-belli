@@ -24,8 +24,12 @@ import re
 from collections import defaultdict
 from typing import Final
 
+import structlog
+
 from pipeline.extractors.store import OVERRIDE_SOURCE_PREFIX
 from pipeline.reconcilers.records import ReconcileCounts, Report, SourceKey
+
+logger = structlog.get_logger()
 
 __all__ = [
     "NON_PERSONNEL_TERMS",
@@ -336,24 +340,13 @@ def filter_troop_reports(
         reports: Troop reports that already passed the branch and positivity
             rules.
         counts: Counters; each exclusion is counted under its own reason.
-        min_plausible_troops: The small-value floor.
+        min_plausible_troops: The small-value floor. A ``troop_strength``
+            override is exempt from it: a curator entered the figure on
+            purpose, and small garrisons are real (Fort Sumter's 85).
 
     Returns:
         The reports that survive, in their original order.
-
-    Raises:
-        ValueError: If a ``troop_strength`` override is below the floor. A curator
-            entered it on purpose, so dropping it as implausible would discard the
-            correction without a trace.
     """
-    for report in reports:
-        if is_override_report(report) and report.reported_value < min_plausible_troops:
-            raise ValueError(
-                f"troop_strength override {report.source_key.url} (side {report.side_id},"
-                f" battle {report.battle_id}) gives {report.reported_value:g} troops, below"
-                f" min_plausible_troops {min_plausible_troops:g}; fix the override or lower"
-                f" the floor"
-            )
     reason_counter = {
         "date_context": "excluded_date_context",
         "parenthetical_subfigure": "excluded_parenthetical_subfigure",
@@ -368,7 +361,16 @@ def filter_troop_reports(
             report.extracted_context,
             min_plausible_troops=min_plausible_troops,
         )
-        if reason is None:
+        if reason == "implausible_small" and is_override_report(report):
+            logger.info(
+                "reconcile_override_below_floor",
+                side_id=report.side_id,
+                battle_id=report.battle_id,
+                value=report.reported_value,
+                floor=min_plausible_troops,
+            )
+            survivors.append(report)
+        elif reason is None:
             survivors.append(report)
         else:
             tally[reason_counter[reason]] += 1

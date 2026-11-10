@@ -246,6 +246,21 @@ def test_a_naval_ship_count_never_enters_the_personnel_reports(conn: Connection)
     assert counts.excluded_naval == 1
 
 
+def test_a_lone_cavalry_figure_becomes_the_sides_total(conn: Connection) -> None:
+    # Brice's Cross Roads: Forrest's all-cavalry 3,500 is the whole force.
+    battle = _battle(conn, "Brices Cross Roads", "1864-06-10")
+    side = _side(conn, battle, "Confederate")
+    source = _source(conn)
+    _troop(conn, side, source, 3_500.0, branch="cavalry")
+
+    reports, counts = _load(conn)
+    troops = [r for r in reports if r.quantity == "troops"]
+
+    assert [(r.reported_value, r.branch) for r in troops] == [(3_500.0, "total")]
+    assert counts.promoted_lone_branch == 1
+    assert counts.excluded_non_total_branch == 0
+
+
 def test_population_scope_rows_are_excluded_and_counted_like_naval_rows(conn: Connection) -> None:
     # Bibracte: "368,000 people" is the migrating nation, not an army. Even a
     # row stored as a total must not reach the fit, and the scope offsets must
@@ -347,7 +362,10 @@ def test_a_side_whose_only_report_is_cavalry_is_unfillable_with_a_reason(
 ) -> None:
     battle = _battle(conn, "Cavalry Only")
     side = _side(conn, battle)
-    _troop(conn, side, _source(conn), 5_000.0, branch="cavalry")
+    source = _source(conn)
+    # Two branches: a lone branch would be promoted to the side's total.
+    _troop(conn, side, source, 5_000.0, branch="cavalry")
+    _troop(conn, side, source, 20_000.0, branch="infantry")
 
     reports, _ = _load(conn)
     modellable, unfillable = classify_sides(reports, conn)
@@ -378,7 +396,9 @@ def test_a_rerun_does_not_duplicate_missing_data_log_rows(conn: Connection) -> N
     # A re-run must converge, not accumulate.
     battle = _battle(conn, "Rerun")
     side = _side(conn, battle)
-    _troop(conn, side, _source(conn), 5_000.0, branch="cavalry")
+    source = _source(conn)
+    _troop(conn, side, source, 5_000.0, branch="cavalry")
+    _troop(conn, side, source, 20_000.0, branch="infantry")
 
     for _ in range(3):
         reports, counts = _load(conn)
@@ -409,7 +429,9 @@ def test_a_rerun_does_not_delete_the_missing_data_rows_extract_wrote(
     )
 
     reconcile_side = _side(conn, battle, "Cavalry Only")
-    _troop(conn, reconcile_side, _source(conn), 5_000.0, branch="cavalry")
+    source = _source(conn)
+    _troop(conn, reconcile_side, source, 5_000.0, branch="cavalry")
+    _troop(conn, reconcile_side, source, 20_000.0, branch="infantry")
 
     for _ in range(2):
         reports, counts = _load(conn)

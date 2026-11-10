@@ -122,3 +122,28 @@ def test_a_pooled_key_in_a_single_type_corpus_has_no_bias_to_report() -> None:
         # The noise scale is the type-level one and is kept.
         assert bias.sigma_mu == pytest.approx(0.3)
         assert bias.n_reports == 1
+
+
+def test_a_promoted_side_is_judged_at_its_location_minus_the_offset() -> None:
+    from dataclasses import replace
+
+    reports = [_report(1, 1, 1_000_000.0), _report(2, 1, 1_200_000.0), _report(3, 2, 5_000.0)]
+    design = replace(_design(reports), lone_branch=np.array([1.0, 1.0, 0.0]))
+    d = 0.5
+    mu_side1 = math.log(1_100_000.0) + d  # published estimate sits above the raw figures
+    idata = _idata(design, {1: mu_side1, 2: math.log(5_000.0)}, sd=0.05)
+    posterior = idata.posterior.assign(
+        d_lone_branch=(("chain", "draw", "lone_side"), np.full((2, 200, 1), d))
+    )
+    idata = az.InferenceData(posterior=posterior)
+
+    honoured = reports_honoured(idata, design)
+
+    assert honoured["n_checked"] == 1
+    assert honoured["n_violations"] == 0
+    # With the offset ignored the same fit would sit 0.5 above every report.
+    no_offset = reports_honoured(
+        az.InferenceData(posterior=posterior.assign(d_lone_branch=posterior.d_lone_branch * 0.0)),
+        design,
+    )
+    assert no_offset["n_violations"] == 1

@@ -305,17 +305,23 @@ def test_an_undated_side_sits_at_the_corpus_level_with_no_era_effect() -> None:
 
 
 def test_battle_effects_are_shared_by_the_two_sides_of_a_battle() -> None:
-    design = _mixed_design("troops")
+    # Two battles in one era bin, two sides each: centring leaves their effects nonzero
+    # (opposite signs), and the two sides of one battle still share theirs.
+    reports = [
+        _report(i + 1, side_id=i + 1, battle_id=i // 2 + 1, year=1200, source_type="wikidata")
+        for i in range(4)
+    ]
+    design = build_design(reports, quantity="troops", ancient_cutoff_year=500)
     model = build_model(design, priors=ModelPriors(), inflation=InflationPrior())
     point = model.initial_point()
     point["zd"] = np.zeros_like(point["zd"])
-    point["zb"] = np.linspace(-1.0, 1.0, np.size(point["zb"]))
+    point["zb"] = np.array([-1.0, 1.0])
 
     (mu,) = _eval(model, [model["mu_side"]], point)
     by_id = dict(zip(design.side_ids, mu, strict=True))
 
-    # Sides 1 and 2 are one battle: same era bin, same zb, zd zero, so the same mu.
     assert by_id[1] == pytest.approx(by_id[2])
+    assert by_id[3] == pytest.approx(by_id[4])
     assert by_id[1] != pytest.approx(by_id[3])
 
 
@@ -372,14 +378,17 @@ def test_the_legacy_era_effect_stays_non_centred_because_centring_it_failed_to_c
 
 
 def test_the_battle_effect_stays_non_centred_because_centring_it_diverged() -> None:
+    # Non-centred in the scale: b is s_b times a fixed (bin-centred) vector, so it has no
+    # density of its own at fixed zb and doubles when s_b does.
     model = build_model(_mixed_design("troops"), priors=ModelPriors(), inflation=InflationPrior())
     point = model.initial_point()
     point["zb"] = np.linspace(-1.0, 1.0, np.size(point["zb"]))
+    point["s_b_log__"] = np.asarray(0.0)
+    (at_one,) = _eval(model, [model["b"]], point)
     point["s_b_log__"] = np.asarray(np.log(2.0))
+    (at_two,) = _eval(model, [model["b"]], point)
 
-    (b,) = _eval(model, [model["b"]], point)
-
-    assert b == pytest.approx(2.0 * point["zb"])
+    assert at_two == pytest.approx(2.0 * at_one)
 
 
 def test_the_independent_sides_variant_drops_the_battle_effect() -> None:

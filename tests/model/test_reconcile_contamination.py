@@ -124,7 +124,11 @@ def corpus() -> Corpus:
 def _troop_priors() -> ModelPriors:
     """The troop priors as agents/reconcile.yaml sets them (P1)."""
     params = yaml.safe_load((AGENTS / "reconcile.yaml").read_text(encoding="utf-8"))["params"]
-    return ModelPriors.from_params(params, quantity="troops")
+    priors = ModelPriors.from_params(params, quantity="troops")
+    # Every battle is dated 1800, so the corpus has one era bin and the era split would be
+    # identified only by the prior; this test is about range merging, so the era effect is
+    # switched off (bayesian-model-reviewer, 2026-11-07).
+    return replace(priors, era_effect="none")
 
 
 def _fit(

@@ -15,10 +15,34 @@ For observation ``i`` on the log scale::
 
     eta_i  = mu_side[s_i] + beta_source[j_i] + keep_i * g_regime[r_i]
              + delta_level[k_i] + a_era * era_i * unlabelled_i * keep_i
+             - d_lone_branch[k_i] * lone_i
     beta_j = b_type[t_j] + u_j
 
 ``mu_side`` is the quantity published. Everything else exists to explain why a
 particular source's number differs from it.
+
+``lone_i`` flags a troop row the loader promoted from a lone single-arm figure
+(only "3,500 cavalry") to the side's total because the side had no total report.
+Such a figure under-counts the force (on corpus3 sides that have both, median
+ln(total / branch) is 1.08: cavalry 2.39, irregular 0.62, infantry 0.24), so its
+reported log value is modelled as the side's true log total minus an offset
+``d_lone_branch[k] ~ TruncatedNormal(log 1.5, 0.6, lower=0)``, one per promoted side
+``k`` (dims ``lone_side``; all flagged rows of a side share its ``d_k``). The variable
+exists only when some row is flagged, so a fit with no promotion is unchanged.
+
+It is prior-only per side, deliberately not one shared scalar. A flagged row alone on
+its side is exactly confounded with ``mu_side``, so each ``d_k`` is identified by
+nothing but its own prior and its posterior stays there, widening that side's interval
+by the prior spread. A single scalar shared across sides was tried first: the data
+identified it through the battle effect ``b`` shared with the opponent (synthetic fit:
+posterior 1.095 +- 0.10 against a prior of 0.405 +- 0.6), which pulled every promoted
+side toward its opponent's size and so partly assumed the force ratio the model is
+there to measure. The offset's job is to move a promoted side's published estimate
+``exp(mu_side)`` above the raw figure by about the prior shift, with the spread the
+prior carries. It enters ``eta`` wherever ``delta_level`` does (the fit, the neutral
+fit, the prior predictive and summarise's rebuild), and the corpus-average offset
+``offset_bar`` carries the row average of ``d_k * lone_i``, so ``corpus_level`` stays the
+data-identified average of ``eta``.
 
 ## The troop side prior (P1, from 2026-10-23)
 
@@ -49,8 +73,13 @@ prior, 0.67 under a Normal fit).
 pass and made sampling worse: a centred ``b`` gave 2081 divergences on the main
 recovery corpus, and a centred ``e`` gave convergence failures on ``tau_e``/``e`` in
 test_reconcile_recovery and test_reconcile_contamination at target_accept 0.97-0.99.
-The non-centred ``b`` stays and target_accept stays 0.99. ``e`` is now sampled in
-rotated coordinates instead, see "The period mean and its rotation" below.
+The non-centred ``b`` stays the default and target_accept stays 0.99.
+``battle_effect_centred`` (default false) opts into the centred form, ``b ~ StudentT(nu, 0, s_b)``
+sampled directly. It is an exact reparameterisation, the joint prior of ``(s_b, b)`` is the same.
+It exists because on corpus3 the non-centred ``s_b`` mixes slowly (ESS 90-184 per 8000 draws,
+corr(s_b, rms zb) about -0.87, a funnel) while the battle effects are data-dominated (2026-11-07);
+it stays off by default because the 2081 divergences above came from a sparser corpus.
+``e`` is now sampled in rotated coordinates instead, see "The period mean and its rotation" below.
 ``side_prior_independent`` drops ``b`` and widens ``s_d`` to
 ``sqrt(battle_effect_prior_sd^2 + side_deviation_prior_sd^2)``, an ablation for
 comparing P1 against independent sides.
@@ -247,6 +276,25 @@ so ``m0 + hbar = corpus_level - (labelled offsets + delta_level)`` is free of
 unlabelled row's ``eta`` is then exactly constant in them (``eta = m0 + hbar + u_k + ...``);
 only labelled and undated rows move. ``era_effect: none`` drops ``e`` altogether, for
 sensitivity runs only.
+
+## Centred battle effect and marginalised side deviation (2026-11-06)
+
+**A.** ``zb`` is centred within each era bin over dated battles, so ``b`` is a deviation from
+its period's mean and ``e`` carries the whole period mean. Before, the bin mean of the
+non-centred Student-t ``zb`` duplicated ``e_k`` (a prior-only ridge). Undated battles stay
+uncentred. This is a stated prior change, not a re-expression.
+
+**B.** For a troop side with exactly one row, that row a point row, under the Normal
+likelihood (:func:`_marginal_side_mask`), ``d = s_d * zd`` is integrated out: the row's
+variance is ``var + s_d^2`` and ``eta`` is built without ``d``. ``zd`` of such a side has no
+likelihood term, so ``mu_side`` is drawn from the exact conditional
+``d | theta, y ~ N(k r, k v)`` with ``r = log y - eta``, ``v = var`` and
+``k = s_d^2 / (s_d^2 + v)``.
+The joint posterior over ``(theta, mu_side)`` is unchanged. ``model.row_eta`` and ``row_sd``
+stay conditional on ``d`` (``mu_side`` plus the row offsets, ``sqrt(var)``), which is what
+summarise's ``_row_eta_and_var`` rebuilds. Bound, multi-row and casualty sides keep explicit
+``zd``. Because ``mu_side`` then reads the observed values, the prior predictive check rebuilds
+its prior from ``m0``, ``e``, ``b``, ``s_d`` and ``zd``.
 
 ## The inflation prior
 
@@ -453,6 +501,9 @@ class ModelPriors:
     battle_effect_prior_sd: float = 1.0
     side_deviation_prior_sd: float = 0.5
     side_prior_independent: bool = False
+    battle_effect_centred: bool = False
+    lone_branch_offset_prior_mu: float = 0.405465  # log(1.5)
+    lone_branch_offset_prior_sd: float = 0.6
 
     @property
     def informative_noise(self) -> bool:
@@ -523,6 +574,11 @@ class ModelPriors:
             battle_effect_prior_sd=float(params.get("battle_effect_prior_sd", 1.0)),
             side_deviation_prior_sd=float(params.get("side_deviation_prior_sd", 0.5)),
             side_prior_independent=bool(params.get("side_prior_independent", False)),
+            battle_effect_centred=_parse_bool(
+                params.get("battle_effect_centred", False), "battle_effect_centred"
+            ),
+            lone_branch_offset_prior_mu=float(params.get("lone_branch_offset_prior_mu", 0.405465)),
+            lone_branch_offset_prior_sd=float(params.get("lone_branch_offset_prior_sd", 0.6)),
         )
 
 
@@ -576,6 +632,7 @@ class SamplerSettings:
     target_accept: float = 0.9
     random_seed: int = 20260923
     nuts_sampler: str = "nutpie"
+    low_rank_mass_matrix: bool = False
 
     @classmethod
     def from_params(cls, params: dict[str, Any]) -> SamplerSettings:
@@ -597,7 +654,32 @@ class SamplerSettings:
             target_accept=float(params.get("mcmc_target_accept", 0.9)),
             random_seed=int(params.get("random_seed", 20260923)),
             nuts_sampler=str(params.get("nuts_sampler", "nutpie")),
+            low_rank_mass_matrix=_parse_bool(
+                params.get("mcmc_low_rank_mass_matrix", False), "mcmc_low_rank_mass_matrix"
+            ),
         )
+
+
+_TRUE_STRINGS = frozenset({"true", "yes", "1", "on"})
+_FALSE_STRINGS = frozenset({"false", "no", "0", "off", ""})
+
+
+def _parse_bool(value: Any, name: str) -> bool:
+    """Read a real bool from a param that may arrive as a string.
+
+    ``bool("false")`` is True, so strings are matched explicitly.
+
+    Raises:
+        ValueError: If a string is not a recognised boolean spelling.
+    """
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _TRUE_STRINGS:
+            return True
+        if text in _FALSE_STRINGS:
+            return False
+        raise ValueError(f"{name} must be a boolean, got {value!r}")
+    return bool(value)
 
 
 def load_inflation_prior(path: Path = DEFAULT_PRIORS_PATH) -> InflationPrior:
@@ -740,6 +822,18 @@ def build_model(
             "delta_level", _level_offsets(pm, pt, design, priors), dims="level"
         )
 
+        # ── lone-branch offset: promoted single-arm figures under-count the total ──
+        # Only when a row is flagged, so a fit with no promotion is unchanged.
+        d_lone: Any = None
+        if design.has_lone_branch:
+            d_lone = pm.TruncatedNormal(
+                "d_lone_branch",
+                mu=priors.lone_branch_offset_prior_mu,
+                sigma=priors.lone_branch_offset_prior_sd,
+                lower=0.0,
+                dims="lone_side",
+            )
+
         # ── era fallback, on unlabelled rows only ────────────────────────────
         # Gated, because an ancient chronicle row already carries g_chronicle,
         # which was fitted on cases that were themselves mostly pre-modern:
@@ -764,12 +858,25 @@ def build_model(
             g_unlabelled = g_regime[unlabelled_ix] if unlabelled_ix is not None else 0.0
             era_h = g_unlabelled * pre_anchor + a_era * era_levels
             offset_bar_expr = offset_bar_expr + era_h.mean()
+        if d_lone is not None:
+            rows_per_lone_side = np.bincount(
+                design.lone_branch_offset_index,
+                weights=design.lone_branch_rows,
+                minlength=design.lone_branch_side_positions.size,
+            )
+            offset_bar_expr = offset_bar_expr - pt.dot(d_lone, rows_per_lone_side / design.n_obs)
         offset_bar = pm.Deterministic("offset_bar", offset_bar_expr)
         level = pm.Normal("corpus_level", mu=priors.side_prior_mu, sigma=_LEVEL_PRIOR_SD)
         m0 = pm.Deterministic("m0", level - offset_bar)
 
+        marginal_side = _marginal_side_mask(design, priors)
+        has_marginal = bool(marginal_side.any())
         if design.quantity == _TROOPS:
-            mu_side = _troop_side_prior(pm, pt, design, priors, m0, era_h=era_h)
+            side_loc, s_d_scale, zd = _troop_side_prior(
+                pm, pt, design, priors, m0, era_h=era_h, marginal_side=marginal_side
+            )
+            if not has_marginal:
+                side_loc = pm.Deterministic("mu_side", side_loc, dims="side")
         else:
             s0 = pm.HalfNormal("s0", sigma=priors.side_prior_sd_scale)
             # Heavy-tailed, with nu fixed from the spec. A Normal side prior against
@@ -777,7 +884,7 @@ def build_model(
             # as outlying reports around a typical one (Kursk's 2.5M read as noise).
             # Non-centred: mu_side = m0 + s0 * z_side is unchanged.
             z_side = pm.StudentT("z_side", nu=priors.side_prior_nu, mu=0.0, sigma=1.0, dims="side")
-            mu_side = pm.Deterministic("mu_side", m0 + s0 * z_side, dims="side")
+            side_loc = pm.Deterministic("mu_side", m0 + s0 * z_side, dims="side")
 
         # ── source bias: type mean plus within-type deviation ────────────────
         # Only keys spanning enough battles get a deviation (see the nesting
@@ -895,12 +1002,16 @@ def build_model(
         if anchor.any():
             row_g = row_g * _data(pm, "data_regime_keep", 1.0 - anchor)
         eta = (
-            mu_side[_data(pm, "data_side_index", design.side_index)]
+            side_loc[_data(pm, "data_side_index", design.side_index)]
             + beta_source[source_ix]
             + row_g
             + delta_level[_data(pm, "data_level_index", design.level_index)]
             + a_era * era_column
         )
+        if d_lone is not None:
+            eta = eta - d_lone[
+                _data(pm, "data_lone_branch_index", design.lone_branch_offset_index)
+            ] * _data(pm, "data_lone_branch", design.lone_branch_rows)
         ratio_mask = _ratio_level_mask(design)
         if ratio_mask.any():
             # delta_level is one corpus-wide constant per component, so the
@@ -937,15 +1048,36 @@ def build_model(
         if unknown_mask.any():
             sigma_unknown = pm.HalfNormal("sigma_unknown", sigma=priors.scope_unknown_dispersion_sd)
             var = var + sigma_unknown**2 * _data(pm, "data_unknown_mask", unknown_mask)
-        sd = pm.math.sqrt(var)
-
         log_y = _data(pm, "data_log_y", design.log_y)
+        if has_marginal:
+            # B: the side deviation d = s_d * zd of a single-point-row side is integrated out
+            # of the likelihood (row variance gains s_d^2) and mu_side is drawn from the
+            # exact conditional d | theta, y; see "Centred battle effect and marginalised side
+            # deviation" (part B) in the module docstring.
+            marg = marginal_side.astype(float)
+            rs = _data(pm, "data_row_of_side", _row_of_side(design, marginal_side))
+            v_s = var[rs]
+            gain = s_d_scale**2 / (s_d_scale**2 + v_s)
+            d_marg = (gain * (log_y[rs] - eta[rs]) + pt.sqrt(gain * v_s) * zd) * _data(
+                pm, "data_side_marginal", marg
+            )
+            mu_side = pm.Deterministic("mu_side", side_loc + d_marg, dims="side")
+            marginal_row = _data(pm, "data_marginal_row", marg[design.side_index])
+            sd = pm.math.sqrt(var + s_d_scale**2 * marginal_row)
+            # Conditional on d, as when d was explicit: summarise rebuilds the same pair.
+            row_eta = eta + (mu_side - side_loc)[design.side_index]
+            row_sd = pm.math.sqrt(var)
+        else:
+            sd = pm.math.sqrt(var)
+            row_eta = eta
+            row_sd = sd
+
         _attach_likelihood(pm, pt, design, eta, sd, log_y, priors)
         # Not registered as variables (n_obs-long deterministics would be
         # sampled and diagnosed for nothing); kept so a test can compile the
         # model's own per-row location and scale against summarise's rebuild.
-        model.row_eta = eta
-        model.row_sd = sd
+        model.row_eta = row_eta
+        model.row_sd = row_sd
 
     logger.info(
         "reconcile_model_built",
@@ -973,11 +1105,15 @@ def _troop_side_prior(
     priors: ModelPriors,
     m0: Any,
     era_h: Any = None,
-) -> Any:
+    marginal_side: np.ndarray | None = None,
+) -> tuple[Any, Any, Any]:
     """The P1 side prior: era mean, shared battle effect and side deviation.
 
-    ``mu_side = m0 + e[era_bin] + b[battle] + s_d * zd``, with ``b = s_b * zb`` non-centred;
-    centring it made sampling worse (module docstring). ``e`` depends on
+    ``mu_side = m0 + e[era_bin] + b[battle] + s_d * zd``, with ``b = s_b * zb`` non-centred by
+    default; centring it made sampling worse on a sparse corpus (module docstring). With
+    ``priors.battle_effect_centred`` (opt-in, for data-dominated corpora where the funnel
+    slows ``s_b``) the free variable is ``b_raw ~ StudentT(nu, 0, s_b)`` and there is no
+    ``zb``; the prior of ``(s_b, b)`` is identical. ``e`` depends on
     ``priors.era_effect``: ``legacy`` is ``tau_e * z_era`` with ``tau_e`` free,
     ``rotated`` is the sheared parameterisation of :func:`_rotated_era_effect`, and
     ``none`` drops it. An undated side maps to a sixth, appended zero rather than to a
@@ -995,9 +1131,14 @@ def _troop_side_prior(
         m0: The derived corpus level.
         era_h: ``g_unlabelled * pre + a_era * c`` over the five bins, required for
             ``rotated`` and ignored otherwise.
+        marginal_side: Boolean mask over sides whose deviation is marginalised out of the
+            likelihood (:func:`_marginal_side_mask`); their ``zd`` is dropped from the
+            returned location. None or all-false keeps every ``zd`` explicit.
 
     Returns:
-        The ``mu_side`` deterministic, over the ``side`` dimension.
+        ``(location, s_d, zd)``: the side location over ``side`` (not yet registered as
+        ``mu_side``, since :func:`build_model` adds the marginal-side conditional draw),
+        the side-deviation scale and the ``zd`` variable.
     """
     mode = _era_effect_name(priors.era_effect)
     era_of_side = _data(pm_module, "data_side_era_bin", design.era_bin_of_side)
@@ -1019,19 +1160,95 @@ def _troop_side_prior(
         )
     s_d = pm_module.HalfNormal("s_d", sigma=deviation_sd)
     zd = pm_module.Normal("zd", mu=0.0, sigma=1.0, dims="side")
-    location = m0 + era_term + s_d * zd
+    if marginal_side is not None and marginal_side.any():
+        explicit_zd = zd * _data(pm_module, "data_side_explicit_d", 1.0 - marginal_side)
+    else:
+        explicit_zd = zd
+    location = m0 + era_term + s_d * explicit_zd
 
     if not priors.side_prior_independent:
         s_b = pm_module.HalfNormal("s_b", sigma=priors.battle_effect_prior_sd)
         # Non-centred on purpose: centring the Student-t battle effect gave 2081
         # divergences (rhat 1.57) on the main recovery corpus at target_accept 0.9,
         # against 82 with it non-centred.
-        zb = pm_module.StudentT("zb", nu=priors.side_prior_nu, mu=0.0, sigma=1.0, dims="battle")
-        battle_effect = pm_module.Deterministic("b", s_b * zb, dims="battle")
+        if priors.battle_effect_centred:
+            raw = pm_module.StudentT(
+                "b_raw", nu=priors.side_prior_nu, mu=0.0, sigma=s_b, dims="battle"
+            )
+            scaled = _centre_in_bins(pm_module, pt_module, design, mode, raw)
+        else:
+            zb = pm_module.StudentT("zb", nu=priors.side_prior_nu, mu=0.0, sigma=1.0, dims="battle")
+            scaled = s_b * _centre_in_bins(pm_module, pt_module, design, mode, zb)
+        battle_effect = pm_module.Deterministic("b", scaled, dims="battle")
         battle_of_side = _data(pm_module, "data_side_battle", design.battle_of_side)
         location = location + battle_effect[battle_of_side]
 
-    return pm_module.Deterministic("mu_side", location, dims="side")
+    return location, s_d, zd
+
+
+def _centre_in_bins(pm_module: Any, pt_module: Any, design: Design, mode: str, x: Any) -> Any:
+    """Subtract each era bin's mean over dated battles from ``x`` (A); a no-op without ``e``.
+
+    A: ``b`` is a deviation from its period's mean over dated battles; ``e`` carries the
+    whole period mean. Without this the bin mean of ``b`` duplicates ``e_k``.
+    """
+    if mode == "none":
+        return x
+    onehot, mean_w = _battle_bin_projector(design)
+    bar = pt_module.dot(x, _data(pm_module, "data_battle_bin_mean", mean_w))
+    return x - pt_module.dot(_data(pm_module, "data_battle_bin_onehot", onehot), bar)
+
+
+def _battle_bin_projector(design: Design) -> tuple[np.ndarray, np.ndarray]:
+    """One-hot and mean-weight matrices of battles by era bin, for centring ``zb`` (A).
+
+    Args:
+        design: The troop design.
+
+    Returns:
+        ``(onehot, mean_w)``, each ``(n_battles, n_bins)``. ``onehot`` marks a dated
+        battle's bin (an undated battle's row is all zero); ``mean_w`` is ``onehot``
+        divided by the bin's battle count, so ``zb @ mean_w`` is the per-bin mean.
+    """
+    n_bins = len(ERA_BIN_LABELS)
+    bin_of_battle = np.full(design.n_battles, n_bins)
+    bin_of_battle[design.battle_of_side] = design.era_bin_of_side
+    onehot = np.zeros((design.n_battles, n_bins))
+    dated = np.flatnonzero(bin_of_battle < n_bins)
+    onehot[dated, bin_of_battle[dated]] = 1.0
+    counts = onehot.sum(axis=0)
+    return onehot, onehot / np.where(counts > 0, counts, 1.0)
+
+
+def _marginal_side_mask(design: Design, priors: ModelPriors) -> np.ndarray:
+    """Sides whose deviation ``d`` is integrated out of the likelihood (B).
+
+    A side qualifies when it has exactly one row and that row is a point row (not a bound
+    or censored one), the quantity is troops and the likelihood is Normal: then ``zd`` has
+    no likelihood term of its own and the marginal is closed form. Everything else keeps
+    an explicit ``zd``.
+
+    Args:
+        design: The design.
+        priors: Supplies ``likelihood_family``.
+
+    Returns:
+        Boolean array over sides.
+    """
+    mask = np.zeros(design.n_sides, dtype=bool)
+    if design.quantity != _TROOPS or priors.likelihood_family != "normal":
+        return mask
+    rows_per_side = np.bincount(design.side_index, minlength=design.n_sides)
+    point_per_side = np.bincount(design.side_index[design.point_rows], minlength=design.n_sides)
+    mask[(rows_per_side == 1) & (point_per_side == 1)] = True
+    return mask
+
+
+def _row_of_side(design: Design, mask: np.ndarray) -> np.ndarray:
+    """Per side, the index of its row where ``mask`` is set, else 0 (a masked-out dummy)."""
+    rows = np.zeros(design.n_sides, dtype=int)
+    rows[design.side_index] = np.arange(design.n_obs)
+    return np.where(mask, rows, 0)
 
 
 def _zero_sum_basis(n: int) -> np.ndarray:
@@ -1727,21 +1944,16 @@ def _attach_exgaussian_bounds(
         )
 
 
-def sample(model: pm.Model, settings: SamplerSettings) -> az.InferenceData:
-    """Sample a built model.
+def build_sample_kwargs(settings: SamplerSettings) -> dict[str, Any]:
+    """Build the keyword arguments for ``pm.sample``.
 
     Args:
-        model: The model from :func:`build_model`.
         settings: Sampler settings.
 
     Returns:
-        The posterior, as ArviZ InferenceData.
-
-    Raises:
-        ImportError: If pymc is not installed.
+        The kwargs. ``nuts_sampler_kwargs`` is present only when low-rank mass
+        matrix adaptation is enabled and the sampler is nutpie.
     """
-    import pymc as pm  # noqa: PLC0415 - deliberately deferred; see module docstring
-
     kwargs: dict[str, Any] = {
         "draws": settings.draws,
         "tune": settings.tune,
@@ -1757,6 +1969,36 @@ def sample(model: pm.Model, settings: SamplerSettings) -> az.InferenceData:
         # nutpie ignores idata_kwargs and warns; only pass it where it applies.
         # The pointwise log-likelihood is n_obs by n_draws and nothing reads it.
         kwargs["idata_kwargs"] = {"log_likelihood": False}
+    if settings.low_rank_mass_matrix:
+        if settings.nuts_sampler == "nutpie":
+            # nutpie >= 0.16 spells the old low_rank_modified_mass_matrix flag
+            # adaptation="low_rank"; PyMC forwards nuts_sampler_kwargs to nutpie.sample.
+            kwargs["nuts_sampler_kwargs"] = {"adaptation": "low_rank"}
+        else:
+            logger.warning(
+                "reconcile_low_rank_ignored",
+                nuts_sampler=settings.nuts_sampler,
+                hint="low-rank mass matrix adaptation needs nuts_sampler=nutpie",
+            )
+    return kwargs
+
+
+def sample(model: pm.Model, settings: SamplerSettings) -> az.InferenceData:
+    """Sample a built model.
+
+    Args:
+        model: The model from :func:`build_model`.
+        settings: Sampler settings.
+
+    Returns:
+        The posterior, as ArviZ InferenceData.
+
+    Raises:
+        ImportError: If pymc is not installed.
+    """
+    import pymc as pm  # noqa: PLC0415 - deliberately deferred; see module docstring
+
+    kwargs = build_sample_kwargs(settings)
 
     with model:
         try:

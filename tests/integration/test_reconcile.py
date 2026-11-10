@@ -305,7 +305,9 @@ def seed_ids(engine: Engine) -> dict[str, int]:
 
     battle_cav = _battle(setup, "Battle Charlie Cavalry Fixture", "1850-01-01")
     side_cavalry = _side(setup, battle_cav, "Cavalry Only Side")
+    # Two distinct branches: a lone branch would be promoted to the total.
     _troop(setup, side_cavalry, source1, 5_000.0, branch="cavalry")
+    _troop(setup, side_cavalry, source1, 20_000.0, branch="infantry")
 
     battle_none = _battle(setup, "Battle Delta No Reports Fixture", "1860-01-01")
     side_no_reports = _side(setup, battle_none, "No Reports Side")
@@ -398,7 +400,7 @@ def test_a_side_with_one_report_gets_an_interval_spanning_more_than_a_factor_of_
     assert math.log(float(hi) / float(lo)) > math.log(2.0)
 
 
-def test_a_side_whose_only_report_is_a_cavalry_count_gets_a_missing_data_log_row(
+def test_a_side_with_only_cavalry_and_infantry_counts_gets_a_missing_data_log_row(
     conn: Connection, reconciled: Path, seed_ids: dict[str, int]
 ) -> None:
     del reconciled
@@ -589,6 +591,7 @@ def test_the_neutral_fit_writes_estimates_diagnostics_and_a_draws_file(
     assert block["written"] is True
     assert set(block["worst"]) == {
         "max_rhat",
+        "max_rhat_raw_battle",
         "min_ess_bulk",
         "min_ess_bulk_side",
         "divergences",
@@ -596,6 +599,10 @@ def test_the_neutral_fit_writes_estimates_diagnostics_and_a_draws_file(
         "worst_side",
         "mcse_failed_side_ids",
         "mcse_failed_limits",
+        "chain_zd_sd",
+        "frozen_chains",
+        "chain_step_size",
+        "small_step_chains",
     }
     assert block["m0"]["mean"] is not None and block["s0"]["mean"] is not None
     # Neutral diagnostics stay out of the rollup model_convergence reads.
@@ -1275,6 +1282,18 @@ def test_a_run_records_its_spread_ratio_and_source_effect_counts(
     assert "recovery" in diagnostics["troops_neutral"]
     honoured = troops["reports_honoured"]
     assert set(honoured) == {"n_checked", "n_violations", "violating_side_ids", "within_side_mad"}
+    assert isinstance(troops["promoted_lone_branch_sides"], list)
+    assert (troops["d_lone_branch"] is not None) == bool(troops["promoted_lone_branch_sides"])
+    if troops["d_lone_branch"] is not None:
+        assert set(troops["d_lone_branch"]) == {
+            "n_sides",
+            "mean_of_means",
+            "mean_sd",
+            "mean_contraction",
+        }
+        assert troops["d_lone_branch"]["n_sides"] == len(troops["promoted_lone_branch_sides"])
+    assert diagnostics["casualties"]["promoted_lone_branch_sides"] == []
+    assert diagnostics["casualties"]["d_lone_branch"] is None
     assert "sigma_type" in troops
     assert (
         troops["n_source_keys_own_effect"] + troops["n_source_keys_pooled"] == troops["n_sources"]

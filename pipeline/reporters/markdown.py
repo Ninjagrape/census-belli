@@ -15,6 +15,7 @@ __all__ = ["render_markdown"]
 
 UNDER_LIST_LIMIT: Final[int] = 200
 NA: Final[str] = "n/a"
+NL: Final[str] = chr(10)
 CREDITED_NOTE: Final[str] = (
     "Credited battles counts the battles in which the general has any positive share of "
     "credit. Effective battles (in rankings.csv) is the sum of those shares, so it can be lower."
@@ -50,6 +51,10 @@ ${evaluation}
 ## Figures
 
 ${figures}
+
+## Data coverage and caveats
+
+${coverage}
 
 ## Disclosures
 
@@ -100,19 +105,22 @@ def _overlap_cell(value: bool | None) -> str:
 
 def _headline_table(top: Sequence[RankedGeneral], show_overlap: bool) -> str:
     head = (
-        "| Rank | General | Credited battles | Expected WAR | WAR sd | WAR (95% interval) "
+        "| Rank | General | Stored rank (all generals) | Credited battles | Effective battles "
+        "| Expected WAR | WAR sd | WAR (95% interval) "
         "| P(above next ranked) | Skill (95% CI) |"
     )
-    rule = "|---:|---|---:|---:|---:|---|---:|---|"
+    rule = "|---:|---|---:|---:|---:|---:|---:|---|---:|---|"
     if show_overlap:
         head, rule = head + " Overlaps next listed general |", rule + "---|"
     lines = [head, rule]
     for g in top:
         e = g.estimate
         cells = [
-            NA if g.rank is None else str(g.rank),
+            NA if g.headline_rank is None else str(g.headline_rank),
             _esc(e.name),
+            NA if g.rank is None else str(g.rank),
             str(e.n_battles),
+            _num(g.rubin.effective_battles),
             _num(e.total_war),
             _num(e.war_sd),
             _war_interval(g),
@@ -184,13 +192,31 @@ def _figure_lines(figure_names: Sequence[str]) -> str:
     return "\n\n".join(f"![{name.removesuffix('.png')}](figures/{name})" for name in figure_names)
 
 
-def render_markdown(view: ReportView, figure_names: Sequence[str]) -> str:
+def _coverage_section(view: ReportView, coverage_figures: Sequence[str]) -> str:
+    parts = []
+    if view.coverage_disclosures:
+        parts.append(NL.join(f"- {_esc(d)}" for d in view.coverage_disclosures))
+    if coverage_figures:
+        parts.append(_figure_lines(coverage_figures))
+        if any("timeline" in n for n in coverage_figures):
+            parts.append(
+                "Timeline bars are coloured by the era of each bin's midpoint, so a bin that "
+                "straddles an era cut takes the era that holds most of it."
+            )
+    return (NL * 2).join(parts) if parts else "No coverage data is available."
+
+
+def render_markdown(
+    view: ReportView, figure_names: Sequence[str], coverage_figures: Sequence[str] = ()
+) -> str:
     """Render ``report.md``.
 
     Args:
         view: The report view.
         figure_names: File names under ``figures/`` to embed, forward-slash
             relative, own figures first.
+        coverage_figures: The coverage PNGs, embedded under "Data coverage and
+            caveats" beside the coverage sentences.
 
     Returns:
         The Markdown text.
@@ -230,6 +256,7 @@ def render_markdown(view: ReportView, figure_names: Sequence[str]) -> str:
         under_table=_under_table(view.under_determined),
         evaluation=_evaluation_section(view),
         figures=_figure_lines(figure_names),
+        coverage=_coverage_section(view, coverage_figures),
         # Evaluate's disclosures are file input, so they are escaped like names.
         disclosures="\n".join(f"- {_esc(d)}" for d in view.disclosures),
     )

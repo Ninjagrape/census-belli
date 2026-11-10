@@ -25,7 +25,7 @@ outputs:
   - data/processed/report/rankings.json         # same data, nested with per-battle detail
   - data/processed/report/explorer.html         # self-contained interactive explorer
   - data/processed/report/report.md             # static narrative report
-  - data/processed/report/figures/              # forest plot, plus evaluate's PNGs copied in
+  - data/processed/report/figures/              # forest plot, coverage_*.png, plus evaluate's PNGs copied in
   - data/processed/report/manifest.json         # counts, provisional flag and the stage-side gates
   - db: none                                    # this stage is read-only against the database
 
@@ -188,6 +188,31 @@ quality_checks:
     params: {report: data/processed/report/manifest.json, gate: export_matches_db}
     severity: error
     description: "The CSV must hold exactly the generals the database has at or above min_battles"
+
+  - name: disclosures_match_db
+    check: "every number in the coverage disclosures equals a fresh database recomputation"
+    method: evaluation_gate
+    params: {report: data/processed/report/manifest.json, gate: disclosures_match_db}
+    severity: error
+    description: >
+      The coverage sentences (rule_single sides, components, passage pass,
+      corpus shape, fame bias, troop provenance, rank numbering) carry their
+      numbers. The stage recomputes them from the database after writing and
+      requires them to equal what the view carried and what reached
+      rankings.json and report.md.
+
+  - name: coverage_figures_written
+    check: "each coverage figure whose data existed was written and embedded, and the explorer has the coverage tab"
+    method: evaluation_gate
+    params: {report: data/processed/report/manifest.json, gate: coverage_figures_written}
+    severity: error
+    description: >
+      The "Data coverage and caveats" set (corpus timeline, comparison
+      components, credit source, information against rank, troop provenance,
+      fame bias) is drawn from the same CoverageStats as the coverage
+      sentences. A panel whose data is missing is skipped with a warning; every
+      panel that had data must have its PNG in figures/ and a reference in
+      report.md, and explorer.html must contain the coverage tab.
 
   - name: evaluation_current
     check: "the evaluation report read describes the reported model run"

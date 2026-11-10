@@ -58,8 +58,8 @@ def test_a_hostile_general_name_cannot_break_out_of_the_inlined_json() -> None:
 
     assert "<b>x</b>" not in page
     assert html.escape(HOSTILE) not in page
-    # the three script elements (data, plotly, explorer) and no extra closer
-    assert page.count("</script>") == 3
+    # the four script elements (data, plotly, explorer, coverage tab) and no extra closer
+    assert page.count("</script>") == 4
     names = [g["name"] for g in json.loads(_data_block(page))["generals"]]
     assert HOSTILE in names
 
@@ -263,7 +263,7 @@ def test_the_report_marks_overlap_as_n_a_for_the_last_row_and_never_prints_none(
     v = view([estimate(1, rank=1, total_war=1.0), estimate(2, rank=None, total_war=5.0)])
 
     report = render_markdown(v, [])
-    unranked = [line for line in report.splitlines() if line.startswith("| n/a | General 2")]
+    unranked = [line for line in report.splitlines() if line.startswith("| 2 | General 2 | n/a |")]
 
     assert len(unranked) == 1 and unranked[0].rstrip().endswith("| n/a |")
     assert "None" not in report

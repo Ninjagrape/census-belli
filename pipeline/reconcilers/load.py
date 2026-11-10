@@ -83,10 +83,21 @@ _NAVAL_BRANCH: Final[str] = "naval"
 _POPULATION_SCOPE: Final[str] = "population"
 _MODERN_REGIME: Final[str] = "modern_scholarly"
 
-# The default for params.min_plausible_troops. No battle side fields fewer than
-# a hundred combatants in this corpus's sources; below that the figure is a day
-# number, a count of something else or a fragment of a date.
+# The default for params.min_plausible_troops. For raw extracted figures,
+# anything below a hundred is almost always a day number, a count of something
+# else or a fragment of a date. The premise is not universal: small American
+# Civil War garrisons are real (Fort Sumter's 85 defenders), which is why a
+# curated troop_strength override bypasses the floor.
 DEFAULT_MIN_PLAUSIBLE_TROOPS: Final[float] = 100.0
+
+# Single-arm branches that stand in for a side's total when they are the only
+# branch the side has. Equipment counts (artillery, armour, air) are counts of
+# guns, tanks or aircraft, not head counts of a force: they are never promoted
+# but they do not make a side "mixed" either. The catch-all "other" (ships,
+# siege armies) can hide a second arm, so it blocks promotion. Naval is handled
+# by its own exclusion.
+_PROMOTABLE_BRANCHES: Final[frozenset[str]] = frozenset({"infantry", "cavalry", "irregular"})
+_BLOCKING_BRANCH: Final[str] = "other"
 
 # Span guard bounds (params.troop_span_warn_log / troop_span_error_log), in log
 # units: ln(max / min) of a side's kept point totals. e (ratio 2.72) is more
@@ -309,8 +320,42 @@ def drop_superseded_by_modern(reports: list[Report], counts: ReconcileCounts) ->
     modern_sides = _sides_with_modern_estimate(reports)
     kept: list[Report] = []
     for report in reports:
-        if report.side_id in modern_sides and report.claim_regime != _MODERN_REGIME:
+        # An override row is a curator's figure; it is never superseded here,
+        # whatever regime its context classifies to.
+        if (
+            report.side_id in modern_sides
+            and report.claim_regime != _MODERN_REGIME
+            and not is_override_report(report)
+        ):
             counts.excluded_superseded_by_modern += 1
+            continue
+        kept.append(report)
+    return kept
+
+
+def drop_superseded_by_override(reports: list[Report], counts: ReconcileCounts) -> list[Report]:
+    """Drop every non-override troop row on a side that holds an override row.
+
+    A ``troop_strength`` override is a curator-settled figure and replaces every
+    other total on its side. The override is written with a modern-scholarly
+    label, so :func:`drop_superseded_by_modern` spares any other modern row on
+    the side (an infobox "modern estimates" line); this rule removes those too.
+    Points and bounds go alike. The rows stay in ``troop_reports``.
+
+    Args:
+        reports: Troop reports after :func:`drop_superseded_by_modern`.
+        counts: Counters; increments ``excluded_superseded_by_override``.
+
+    Returns:
+        The reports in their original order, minus the superseded ones.
+    """
+    overridden = {r.side_id for r in reports if is_override_report(r)}
+    if not overridden:
+        return reports
+    kept: list[Report] = []
+    for report in reports:
+        if report.side_id in overridden and not is_override_report(report):
+            counts.excluded_superseded_by_override += 1
             continue
         kept.append(report)
     return kept
@@ -436,6 +481,58 @@ def _record_span_findings(conn: Any, findings: list[SpanFinding], counts: Reconc
         )
 
 
+def _promote_lone_branches(
+    reports: list[Report],
+    candidates: list[Report],
+    mixed_sides: set[int],
+    counts: ReconcileCounts,
+) -> list[Report]:
+    """Count a side's lone single-arm figure as its total.
+
+    A side with no total-branch report (judged before the plausibility filter)
+    whose non-total candidates all name one branch (only cavalry, only
+    infantry) gets those reports promoted to ``branch="total"`` and flagged
+    ``lone_branch``, which the troop model reads as a figure that under-counts
+    the force. Two or more distinct branches are left excluded, since
+    summing them risks double counting. Candidates that stay out are counted as
+    ``excluded_non_total_branch``; promoted ones as ``promoted_lone_branch``.
+
+    Args:
+        reports: Reports that passed the per-row rules (totals).
+        candidates: Non-total, promotable-branch, positive, non-population rows.
+        mixed_sides: Sides that also have a positive ``other`` branch row, which
+            makes their branch set non-singular. Equipment rows (artillery,
+            armour, air) do not count.
+        counts: Counters to accumulate into.
+
+    Returns:
+        The promoted reports, ready for the remaining plausibility rules.
+    """
+    # Before the plausibility filter: a side whose total report is later dropped
+    # as implausible still has a total report and is not promoted.
+    sides_with_total = {r.side_id for r in reports}
+    by_side: dict[int, list[Report]] = defaultdict(list)
+    for candidate in candidates:
+        by_side[candidate.side_id].append(candidate)
+    promoted: list[Report] = []
+    for side_id, side_reports in by_side.items():
+        branches = {r.branch for r in side_reports}
+        if side_id in sides_with_total or side_id in mixed_sides or len(branches) != 1:
+            counts.excluded_non_total_branch += len(side_reports)
+            continue
+        for report in side_reports:
+            logger.info(
+                "reconcile_lone_branch_promoted",
+                side_id=side_id,
+                battle_id=report.battle_id,
+                branch=report.branch,
+                value=report.reported_value,
+            )
+            promoted.append(replace(report, branch=_TOTAL_BRANCH, lone_branch=True))
+        counts.promoted_lone_branch += len(side_reports)
+    return promoted
+
+
 def _build_troop_reports(
     conn: Any,
     counts: ReconcileCounts,
@@ -457,6 +554,8 @@ def _build_troop_reports(
         ``roundness`` set but ``lineage_id`` still None.
     """
     reports: list[Report] = []
+    candidates: list[Report] = []
+    mixed_sides: set[int] = set()
     for (
         report_id,
         side_id,
@@ -483,8 +582,21 @@ def _build_troop_reports(
         if exclude_campaigns and battle_type == _CAMPAIGN_BATTLE_TYPE:
             counts.excluded_campaign += 1
             continue
-        if not _classify_troop_report(str(branch), value, scope, counts):
-            if str(url).startswith(OVERRIDE_SOURCE_PREFIX):
+        is_override = str(url).startswith(OVERRIDE_SOURCE_PREFIX)
+        is_candidate = (
+            not is_override
+            and value > 0
+            and str(branch) in _PROMOTABLE_BRANCHES
+            and scope != _POPULATION_SCOPE
+        )
+        if value > 0 and scope != _POPULATION_SCOPE and str(branch) == _BLOCKING_BRANCH:
+            # A catch-all row may hide a second arm. Equipment counts (guns,
+            # tanks, aircraft) do not: "3,500 cavalry, 8 guns" is a lone arm.
+            mixed_sides.add(int(side_id))
+        # A promotable single-arm row is held back uncounted until its whole
+        # side is seen; _promote_lone_branches counts whichever way it goes.
+        if not is_candidate and not _classify_troop_report(str(branch), value, scope, counts):
+            if is_override:
                 # A curator entered this on purpose; dropping it silently would
                 # discard the correction without a trace.
                 _, reason = _troop_row_exclusion(str(branch), value, scope) or ("", "")
@@ -496,7 +608,7 @@ def _build_troop_reports(
 
         regime = classify_regime(extracted_context, value=value)
 
-        reports.append(
+        (candidates if is_candidate else reports).append(
             Report(
                 report_id=int(report_id),
                 side_id=int(side_id),
@@ -518,10 +630,12 @@ def _build_troop_reports(
             )
         )
 
+    reports = [*reports, *_promote_lone_branches(reports, candidates, mixed_sides, counts)]
     # After the per-row rules and the component rule, so every counter below
     # describes the reports the model will actually see.
     reports = filter_troop_reports(reports, counts, min_plausible_troops=min_plausible_troops)
     reports = drop_superseded_by_modern(reports, counts)
+    reports = drop_superseded_by_override(reports, counts)
     counts.troop_reports_used += len(reports)
     counts.regime_unlabelled += sum(1 for r in reports if r.claim_regime == "unlabelled")
     return reports
@@ -641,7 +755,8 @@ def load_reports(
             ``troop_reports_used``, ``casualty_reports_used``,
             ``excluded_non_total_branch``, ``excluded_naval``,
             ``excluded_population_scope``, ``excluded_superseded_by_modern``,
-            ``excluded_campaign``, ``excluded_non_positive``, the four plausibility counters
+            ``excluded_superseded_by_override``, ``excluded_campaign``,
+            ``excluded_non_positive``, the four plausibility counters
             (``excluded_implausible_small``, ``excluded_non_personnel``,
             ``excluded_date_context``, ``excluded_component_of_stated_total``),
             ``regime_unlabelled``, ``lineages`` and the span guard's
@@ -688,8 +803,10 @@ def load_reports(
         casualty_reports_used=counts.casualty_reports_used,
         excluded_non_total_branch=counts.excluded_non_total_branch,
         excluded_naval=counts.excluded_naval,
+        promoted_lone_branch=counts.promoted_lone_branch,
         excluded_population_scope=counts.excluded_population_scope,
         excluded_superseded_by_modern=counts.excluded_superseded_by_modern,
+        excluded_superseded_by_override=counts.excluded_superseded_by_override,
         excluded_campaign=counts.excluded_campaign,
         excluded_non_positive=counts.excluded_non_positive,
         excluded_implausible_small=counts.excluded_implausible_small,
@@ -699,6 +816,38 @@ def load_reports(
     )
 
     return [*troop_reports, *casualty_reports]
+
+
+def _is_promoted_then_floored(
+    rows: Sequence[tuple[str, float, str, str]], *, min_plausible_troops: float
+) -> bool:
+    """Whether a side's lone-branch promotion happened and every promoted row was then dropped.
+
+    Mirrors :func:`_promote_lone_branches`: no total row, positive non-population
+    rows of exactly one promotable branch, no ``other`` row. The side reads as
+    "non-total branch" to the raw rows, but the loader treated it as a total and
+    the plausibility rules rejected the values, which is the actionable reason.
+
+    Args:
+        rows: Every ``(branch, reported_value, extracted_context, scope)`` tuple
+            for one side.
+        min_plausible_troops: The plausibility floor the loader applied.
+
+    Returns:
+        True when the side was promoted and no promoted row survived.
+    """
+    live = [row for row in rows if row[1] > 0 and row[3] != _POPULATION_SCOPE]
+    if any(branch == _TOTAL_BRANCH for branch, _, _, _ in rows):
+        return False
+    if any(branch == _BLOCKING_BRANCH for branch, _, _, _ in live):
+        return False
+    candidates = [row for row in live if row[0] in _PROMOTABLE_BRANCHES]
+    if len({branch for branch, _, _, _ in candidates}) != 1:
+        return False
+    return all(
+        exclusion_reason(value, context, min_plausible_troops=min_plausible_troops) is not None
+        for _, value, context, _ in candidates
+    )
 
 
 def _unfillable_reason(
@@ -723,6 +872,8 @@ def _unfillable_reason(
     """
     if all(branch == _NAVAL_BRANCH for branch, _, _, _ in rows):
         return "only naval counts"
+    if _is_promoted_then_floored(rows, min_plausible_troops=min_plausible_troops):
+        return "only implausible or non-personnel figures"
     if all(branch != _TOTAL_BRANCH for branch, _, _, _ in rows):
         return "only non-total branch reports"
     if all(scope == _POPULATION_SCOPE for branch, _, _, scope in rows if branch == _TOTAL_BRANCH):

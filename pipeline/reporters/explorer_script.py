@@ -32,6 +32,10 @@ th { position:sticky; top:0; background:var(--bg); }
 td.num { text-align:right; font-variant-numeric:tabular-nums; }
 tr.pick { cursor:pointer; } tr.pick:hover { background:rgba(42,111,151,.12); }
 input[type=search] { width:100%; max-width:360px; padding:8px; margin-bottom:8px; box-sizing:border-box; }
+.tabs { margin-top:16px; border-bottom:1px solid var(--line); }
+.tabs button { background:none; border:0; color:var(--fg); padding:8px 14px; font:inherit; cursor:pointer; border-bottom:2px solid transparent; }
+.tabs button[aria-selected=true] { border-bottom-color:var(--accent); font-weight:600; }
+h3 { margin:20px 0 4px; font-size:1.05em; }
 .chart { width:100%; } #chart-sens { min-height:420px; } .flag { color:var(--flag); font-weight:600; }
 """
 
@@ -52,7 +56,7 @@ EXPLORER_JS: Final[str] = r"""
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
   function overlapText(v) { return v === true ? "yes" : (v === false ? "no" : "n/a"); }
-  function rankText(g) { return g.rank === null || g.rank === undefined ? "n/a" : String(g.rank); }
+  function rankText(g) { return g.headline_rank === null || g.headline_rank === undefined ? "n/a" : String(g.headline_rank); }
   function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
   function themed() {
     var line = css("--line");
@@ -81,6 +85,7 @@ EXPLORER_JS: Final[str] = r"""
       tr.className = "pick";
       tr.tabIndex = 0;
       cell(tr, g.headline ? rankText(g) : "unranked", true);
+      cell(tr, g.rank, true);
       cell(tr, g.name, false);
       cell(tr, g.n_battles, true);
       cell(tr, fmt(g.total_war, 2), true);
@@ -162,28 +167,41 @@ EXPLORER_JS: Final[str] = r"""
   function sensChart(variant) {
     var host = document.getElementById("chart-sens");
     var table = data.sensitivity.ranks[variant] || {};
-    var rows = gens.filter(function (g) { return g.headline && g.rank !== null && table[String(g.general_id)] !== undefined; });
+    var rows = gens.filter(function (g) { return g.headline && g.headline_rank !== null && table[String(g.general_id)] !== undefined; });
     if (typeof Plotly === "undefined" || rows.length === 0) {
       host.textContent = "No ranks to compare.";
       return;
     }
     var t = themed();
     var axis = {gridcolor: t.grid.gridcolor, zerolinecolor: t.grid.zerolinecolor, linecolor: t.grid.linecolor};
-    var hi = Math.max.apply(null, rows.map(function (g) { return Math.max(g.rank, table[String(g.general_id)]); }));
+    // The evaluate stage ranks among all generals; reposition the headline generals among themselves
+    // so both axes count 1..N the way the published headline rank does.
+    var order = rows.slice().sort(function (a, b) { return table[String(a.general_id)] - table[String(b.general_id)]; });
+    var under = {};
+    order.forEach(function (g, i) { under[String(g.general_id)] = i + 1; });
+    var hi = Math.max.apply(null, rows.map(function (g) { return Math.max(g.headline_rank, under[String(g.general_id)]); }));
     Plotly.newPlot(host, [
       {type: "scatter", mode: "lines", x: [0, hi], y: [0, hi], hoverinfo: "skip",
         line: {color: t.muted, dash: "dash"}, showlegend: false},
       {type: "scatter", mode: "markers", showlegend: false,
-        x: rows.map(function (g) { return g.rank; }),
-        y: rows.map(function (g) { return table[String(g.general_id)]; }),
+        x: rows.map(function (g) { return g.headline_rank; }),
+        y: rows.map(function (g) { return under[String(g.general_id)]; }),
         text: rows.map(function (g) { return plain(g.name); }), marker: {color: t.accent}}
     ], {
-      xaxis: Object.assign({title: {text: "Published rank"}}, axis),
-      yaxis: Object.assign({title: {text: "Rank under " + plain(variant)}, rangemode: "tozero"}, axis),
+      xaxis: Object.assign({title: {text: "Published headline rank"}}, axis),
+      yaxis: Object.assign({title: {text: "Headline position under " + plain(variant)}, rangemode: "tozero"}, axis),
       font: {color: t.font.color},
       margin: {t: 20}, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)"
     }, {responsive: true});
   }
+
+  window.resizeRankingCharts = function () {
+    if (typeof Plotly === "undefined" || !Plotly.Plots) { return; }
+    ["chart-war", "chart-sens"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el && el.data) { Plotly.Plots.resize(el); }
+    });
+  };
 
   function redraw() {
     warChart();

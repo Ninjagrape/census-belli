@@ -86,6 +86,7 @@ def test_the_diagnostics_block_carries_worst_and_the_hyperparameter_means() -> N
 
     assert set(block["worst"]) == {
         "max_rhat",
+        "max_rhat_raw_battle",
         "min_ess_bulk",
         "min_ess_bulk_side",
         "divergences",
@@ -93,6 +94,10 @@ def test_the_diagnostics_block_carries_worst_and_the_hyperparameter_means() -> N
         "mcse_failed_side_ids",
         "mcse_failed_limits",
         "worst_side",
+        "chain_zd_sd",
+        "frozen_chains",
+        "chain_step_size",
+        "small_step_chains",
     }
     assert math.isclose(block["m0"]["mean"], 9.0, abs_tol=0.05)
     assert math.isclose(block["s0"]["mean"], 1.2, abs_tol=0.02)

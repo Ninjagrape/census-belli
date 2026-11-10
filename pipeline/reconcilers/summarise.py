@@ -54,7 +54,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 
 import numpy as np
 import structlog
@@ -275,6 +275,10 @@ def summarise_fit(
         "contraction": _contraction(idata, design, priors, inflation),
         "g_regime": g_regime_stats(idata, design, inflation),
         "bound_excess": _bound_excess_stats(idata, priors),
+        # Sides whose troop figure is a promoted lone-branch figure, and the per-side
+        # offsets subtracted from such rows (prior-only; see the model docstring).
+        "promoted_lone_branch_sides": _promoted_lone_branch_sides(design),
+        "d_lone_branch": _lone_branch_offset_stats(idata, priors),
     }
     diagnostics.update(_contamination_diagnostics(idata, design, priors.contamination_sd))
     if design.quantity == "troops":
@@ -663,6 +667,20 @@ def _row_sigma(draw: Callable[[str], np.ndarray], design: Design, rows: np.ndarr
     return blended
 
 
+def _lone_branch_row_offset(d: np.ndarray, design: Design) -> np.ndarray:
+    """Per-draw lone-branch offset of every row (``d_k`` of its side, 0 if unflagged).
+
+    Args:
+        d: ``(n_draws, n_lone_sides)`` draws of ``d_lone_branch``.
+        design: The design the fit used.
+
+    Returns:
+        ``(n_draws, n_obs)``.
+    """
+    flag = design.lone_branch_rows[None, :]
+    return cast(np.ndarray, d[:, design.lone_branch_offset_index] * flag)
+
+
 def _row_eta_and_var(
     draw: Callable[[str], np.ndarray], design: Design, rows: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -688,6 +706,8 @@ def _row_eta_and_var(
         + draw("delta_level")[:, design.level_index[rows]]
         + draw("a_era")[:, None] * (design.era * _unlabelled_mask(design) * keep)[rows]
     )
+    if design.has_lone_branch:
+        eta = eta - _lone_branch_row_offset(draw("d_lone_branch"), design)[:, rows]
     ratio = _ratio_level_mask(design)
     if ratio.any():
         pair_of_row, _ = _ratio_pairs(design)
@@ -841,6 +861,11 @@ def reports_honoured(
     g_regime = _pooled(idata, "g_regime")
     delta = _pooled(idata, "delta_level")
     a_era = _pooled(idata, "a_era")
+    lone_row = (
+        _lone_branch_row_offset(_pooled(idata, "d_lone_branch"), design)
+        if design.has_lone_branch
+        else None
+    )
     keep = 1.0 - level_anchor_mask(design)
     era = design.era.copy()
     if "unlabelled" in design.regimes:
@@ -876,6 +901,8 @@ def reports_honoured(
                 + delta[:, int(design.level_index[row])]
                 + a_era * era[row]
             )
+            if lone_row is not None:
+                eta = eta - lone_row[:, row]
             lo, hi = np.quantile(eta, [lower_q, 1.0 - lower_q])
             if lo <= design.log_y[row] <= hi:
                 contained = True
@@ -1102,6 +1129,14 @@ def _source_biases(
     return biases
 
 
+# The raw battle offsets each carry a per-era-bin mean direction that the
+# likelihood never sees: the model subtracts it, and the published ``b``
+# deterministic excludes it, so that direction is prior-only and mixes slowly
+# without touching anything published. ``b`` carries what is published and stays
+# gated; these are reported as ``max_rhat_raw_battle`` for information only.
+RHAT_GATE_EXCLUDED: Final = frozenset({"zb", "b_raw"})
+
+
 # ─── Convergence diagnostics ────────────────────────────────────────────────────
 
 
@@ -1116,7 +1151,8 @@ def _convergence(
 
     Run over arviz's default variable selection for the ``posterior`` group,
     which is every free and deterministic variable the model registered --
-    the non-centred ``z_*`` offsets included, since a ridge in one of those
+    the non-centred ``z_*`` offsets included (but see ``RHAT_GATE_EXCLUDED``
+    for the raw battle offsets), since a ridge in one of those
     is exactly the failure mode that sampled cleanly on ``mu_side`` while
     ``ess(m0) = 5.3`` in the case §19.8 of ``docs/handover-log.md`` records. Restricting
     to a hand-picked variable list would have hidden that case by
@@ -1148,7 +1184,9 @@ def _convergence(
 
     Returns:
         A ``(worst, worst_variable, divergences)`` triple. ``worst`` maps
-        ``"max_rhat"`` (every variable), ``"min_ess_bulk"`` (global variables
+        ``"max_rhat"`` (every variable except ``RHAT_GATE_EXCLUDED``),
+        ``"max_rhat_raw_battle"`` (informational max rhat over the excluded raw
+        battle offsets, ``None`` if absent), ``"min_ess_bulk"`` (global variables
         only), ``"min_ess_bulk_side"`` (informational), ``"divergences"``,
         ``"n_sides_mcse_fail"`` and ``"worst_side"`` to their values, with
         ``None`` where every candidate value was non-finite (e.g. a
@@ -1162,12 +1200,16 @@ def _convergence(
 
     max_rhat = float("-inf")
     worst_rhat_var: str | None = None
+    max_rhat_raw = float("-inf")
     for var_name, data_array in rhat_ds.data_vars.items():
         values = np.asarray(data_array.values, dtype=float).ravel()
         values = values[~np.isnan(values)]
         if values.size == 0:
             continue
         candidate = float(values.max())
+        if str(var_name) in RHAT_GATE_EXCLUDED:
+            max_rhat_raw = max(max_rhat_raw, candidate)
+            continue
         if candidate > max_rhat:
             max_rhat = candidate
             worst_rhat_var = str(var_name)
@@ -1201,6 +1243,7 @@ def _convergence(
     )
     worst: dict[str, Any] = {
         "max_rhat": _finite(max_rhat) if worst_rhat_var is not None else None,
+        "max_rhat_raw_battle": _finite(max_rhat_raw) if max_rhat_raw != float("-inf") else None,
         "min_ess_bulk": _finite(min_ess) if worst_ess_var is not None else None,
         "min_ess_bulk_side": _finite(min_ess_side) if min_ess_side != float("inf") else None,
         "divergences": divergences,
@@ -1208,9 +1251,106 @@ def _convergence(
         "worst_side": worst_side,
         "mcse_failed_side_ids": sorted(int(label) for label in failed_sides),
         "mcse_failed_limits": failed_sides,
+        **_log_chain_health(chain_health(idata, _marginal_mask(idata))),
     }
     worst_variable: dict[str, str | None] = {"rhat": worst_rhat_var, "ess_bulk": worst_ess_var}
     return worst, worst_variable, divergences
+
+
+def _marginal_mask(idata: az.InferenceData) -> np.ndarray | None:
+    """Read the marginalised-side mask the model registered as ``data_side_marginal``.
+
+    pm.Data lands in ``constant_data`` on both the pymc and the nutpie path (pymc adds
+    it by hand for nutpie), so the mask travels with the fit and the neutral summary
+    needs no extra argument.
+
+    Args:
+        idata: The fit's posterior.
+
+    Returns:
+        A boolean array over sides, or None when the fit has no such data.
+    """
+    if "constant_data" not in idata.groups() or "data_side_marginal" not in idata.constant_data:
+        return None
+    return np.asarray(idata.constant_data["data_side_marginal"].values) > 0.5
+
+
+def _log_chain_health(health: dict[str, Any]) -> dict[str, Any]:
+    """Log a frozen chain loudly and a collapsed step size as a warning; pass ``health`` on."""
+    if health["frozen_chains"]:
+        logger.error(
+            "reconcile_frozen_chain",
+            frozen_chains=health["frozen_chains"],
+            chain_zd_sd=health["chain_zd_sd"],
+            chain_step_size=health["chain_step_size"],
+            hint="a chain's step size collapsed in tuning and its marginalised zd is not "
+            "moving; re-run with another random_seed or more tune steps",
+        )
+    elif health["small_step_chains"]:
+        logger.warning(
+            "reconcile_small_step_chain",
+            small_step_chains=health["small_step_chains"],
+            chain_step_size=health["chain_step_size"],
+            chain_zd_sd=health["chain_zd_sd"],
+        )
+    return health
+
+
+def chain_health(
+    idata: az.InferenceData,
+    marginal_side: np.ndarray | None,
+    *,
+    min_zd_sd: float = 0.5,
+    min_step_ratio: float = 0.2,
+) -> dict[str, Any]:
+    """Detect a chain whose step size collapsed in tuning (a "frozen" chain).
+
+    On a marginalised side ``zd`` has no likelihood term, so its exact posterior is
+    iid N(0, 1) and every healthy chain shows a within-chain sd near 1. A frozen chain
+    crawls (observed: sd 0.078, lag-1 autocorrelation 0.996). The sd test needs no
+    cross-chain comparison, so it also works with one chain.
+
+    Gap: ``chain_zd_sd`` is None when there are no marginalised sides (casualty fits,
+    non-Normal likelihoods), so a frozen chain is not detected here in those fits;
+    only rhat and ESS apply there.
+
+    Args:
+        idata: The fit.
+        marginal_side: Boolean mask over sides (from ``_marginal_side_mask``), or None.
+        min_zd_sd: A chain whose median marginal-side ``zd`` sd is below this is frozen.
+        min_step_ratio: A chain whose median step size is below this share of the
+            median over chains is listed in ``small_step_chains`` (informational).
+
+    Returns:
+        ``chain_zd_sd`` (per chain, None without ``zd`` or marginal sides),
+        ``frozen_chains``, ``chain_step_size`` (per chain, None without a step size
+        statistic) and ``small_step_chains``.
+    """
+    chain_zd_sd: list[float] | None = None
+    if marginal_side is not None and bool(np.any(marginal_side)) and "zd" in idata.posterior:
+        zd = np.asarray(idata.posterior["zd"].values, dtype=float)
+        chain_sd = np.std(zd[:, :, np.asarray(marginal_side, dtype=bool)], axis=1)
+        chain_zd_sd = [float(v) for v in np.median(chain_sd, axis=1)]
+    frozen = [] if chain_zd_sd is None else [c for c, v in enumerate(chain_zd_sd) if v < min_zd_sd]
+
+    chain_step: list[float] | None = None
+    if "sample_stats" in idata.groups():
+        for name in ("step_size", "step_size_bar"):
+            if name in idata.sample_stats:
+                values = np.asarray(idata.sample_stats[name].values, dtype=float)
+                per_chain = np.nanmedian(values.reshape(len(values), -1), axis=1)
+                chain_step = [float(v) for v in per_chain]
+                break
+    small: list[int] = []
+    if chain_step is not None:
+        typical = float(np.median(chain_step))
+        small = [c for c, v in enumerate(chain_step) if v < min_step_ratio * typical]
+    return {
+        "chain_zd_sd": chain_zd_sd,
+        "frozen_chains": frozen,
+        "chain_step_size": chain_step,
+        "small_step_chains": small,
+    }
 
 
 def _side_quantile_mcse(
@@ -1286,6 +1426,50 @@ def _side_quantile_mcse(
     return n_fail, worst_side, failed
 
 
+def _lone_branch_offset_stats(
+    idata: az.InferenceData, priors: ModelPriors
+) -> dict[str, float | int | None] | None:
+    """Summarise the per-side lone-branch offsets against their truncated prior.
+
+    Args:
+        idata: The fit's posterior.
+        priors: The hierarchy scales, for the offset prior.
+
+    Returns:
+        None when the fit has no offset; otherwise the number of promoted sides,
+        the mean of their posterior means, the mean posterior sd, and the mean
+        contraction ``1 - post_sd / prior_sd`` where ``prior_sd`` is the sd of the
+        truncated prior (near 0 means the posterior is the prior, as intended).
+    """
+    if "d_lone_branch" not in idata.posterior.data_vars:
+        return None
+    from scipy import stats  # noqa: PLC0415 - scipy is only needed on this path
+
+    d = _pooled(idata, "d_lone_branch")
+    mu0, sd0 = priors.lone_branch_offset_prior_mu, priors.lone_branch_offset_prior_sd
+    prior_sd = float(stats.truncnorm(-mu0 / sd0, np.inf, loc=mu0, scale=sd0).std())
+    post_sd = d.std(axis=0)
+    return {
+        "n_sides": int(d.shape[1]),
+        "mean_of_means": _finite(float(d.mean(axis=0).mean())),
+        "mean_sd": _finite(float(post_sd.mean())),
+        "mean_contraction": _finite(float((1.0 - post_sd / prior_sd).mean())),
+    }
+
+
+def _promoted_lone_branch_sides(design: Design) -> list[int]:
+    """List the sides that carry a promoted lone-branch row.
+
+    Args:
+        design: The design the fit used.
+
+    Returns:
+        Sorted ``side_id`` values, empty when nothing was promoted.
+    """
+    flagged = design.lone_branch_rows > 0
+    return sorted({int(design.side_ids[i]) for i in design.side_index[flagged]})
+
+
 def _scalar_stats(idata: az.InferenceData, name: str) -> dict[str, float | None]:
     """Posterior mean and sd of a scalar (no extra dims) variable.
 
@@ -1333,7 +1517,14 @@ def _identified_level_stats(
         g_row = _pooled(idata, "g_regime")[:, design.regime_index] * keep
         delta_row = _pooled(idata, "delta_level")[:, design.level_index]
         era_row = _pooled(idata, "a_era")[:, None] * (design.era * _unlabelled_mask(design) * keep)
-        combined = _pooled(idata, "m0") + (e_row + g_row + delta_row + era_row).mean(axis=1)
+        lone_row = (
+            _lone_branch_row_offset(_pooled(idata, "d_lone_branch"), design)
+            if design.has_lone_branch
+            else 0.0
+        )
+        combined = _pooled(idata, "m0") + (e_row + g_row + delta_row + era_row - lone_row).mean(
+            axis=1
+        )
     else:
         combined = _pooled(idata, "m0") + _pooled(idata, "offset_bar")
     return {"mean": _finite(float(np.mean(combined))), "sd": _finite(float(np.std(combined)))}
@@ -1488,6 +1679,8 @@ def _side_offsets(idata: az.InferenceData, design: Design) -> np.ndarray:
     regime_weight = np.zeros((design.n_sides, len(design.regimes)))
     level_weight = np.zeros((design.n_sides, len(design.levels)))
     era_weight = np.zeros(design.n_sides)
+    lone_positions = design.lone_branch_side_positions
+    lone_weight = np.zeros((design.n_sides, lone_positions.size))
     # A precise row says more about where the side sits than a vague one, so
     # the side's offset is the precision-weighted mean of its rows' offsets,
     # the same weighting the likelihood gives them.
@@ -1497,6 +1690,13 @@ def _side_offsets(idata: az.InferenceData, design: Design) -> np.ndarray:
     np.add.at(regime_weight, (design.side_index, design.regime_index), row_weight * keep)
     np.add.at(level_weight, (design.side_index, design.level_index), row_weight)
     np.add.at(era_weight, design.side_index, row_weight * era_row)
+    if lone_positions.size:
+        np.add.at(
+            lone_weight,
+            (design.side_index, design.lone_branch_offset_index),
+            row_weight * design.lone_branch_rows,
+        )
+        lone_weight /= totals[:, None]
     regime_weight /= totals[:, None]
     level_weight /= totals[:, None]
     era_weight /= totals
@@ -1505,6 +1705,8 @@ def _side_offsets(idata: az.InferenceData, design: Design) -> np.ndarray:
         + delta @ level_weight.T
         + _pooled(idata, "a_era")[:, None] * era_weight[None, :]
     )
+    if lone_positions.size:
+        offsets = offsets - _pooled(idata, "d_lone_branch") @ lone_weight.T
     return offsets
 
 

@@ -7,9 +7,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from pipeline.reporters.config import ReportParams
+from pipeline.reporters.coverage import CoverageStats, with_component_counts, with_component_sizes
 from pipeline.reporters.disclosures import (
     INTERVAL_METHOD_NOTE,
     STATIC_DISCLOSURES,
+    coverage_disclosures,
     interval_method_note,
     merge_disclosures,
     p_above_next_note,
@@ -47,6 +49,10 @@ class ReportView:
         disclosures: The merged, deduplicated disclosures.
         evaluation: The current evaluation report, if one was found.
         evaluation_reason: Why there is none, else empty.
+        coverage_disclosures: The data-coverage sentences, already part of
+            ``disclosures``; kept apart so the stage can re-derive and check them.
+        coverage: The coverage numbers, with component sizes added; the figures
+            are drawn from the same object as the sentences.
     """
 
     model_run_id: int
@@ -61,6 +67,8 @@ class ReportView:
     disclosures: tuple[str, ...]
     evaluation: EvaluationInfo | None
     evaluation_reason: str
+    coverage_disclosures: tuple[str, ...] = ()
+    coverage: CoverageStats | None = None
 
     @property
     def top(self) -> tuple[RankedGeneral, ...]:
@@ -90,6 +98,7 @@ def build_view(
     evaluation_reason: str,
     evaluation_severities: Mapping[str, str] | None = None,
     pooled_draws: PooledDraws | None = None,
+    coverage: CoverageStats | None = None,
 ) -> ReportView:
     """Combine the loaded inputs into one view, applying the split and the flags.
 
@@ -106,6 +115,8 @@ def build_view(
         evaluation_severities: Evaluate gate severities from the spec.
         pooled_draws: The run's pooled draws, used to recompute P(above next)
             over the headline ordering; None keeps the stored column.
+        coverage: Data-coverage numbers queried from the database; None adds
+            no coverage sentences.
 
     Returns:
         The view.
@@ -138,6 +149,9 @@ def build_view(
         interval_method_note(uses_normal_approx=uses_approx) if s == INTERVAL_METHOD_NOTE else s
         for s in STATIC_DISCLOSURES
     ) + (p_above_next_note(p_source),)
+    counted = None if coverage is None else with_component_counts(coverage, headline)
+    coverage_text = coverage_disclosures(counted, min_battles=params.min_battles) if counted else ()
+    full_coverage = None if counted is None else with_component_sizes(counted, rubin, headline)
     disclosures = merge_disclosures(
         static,
         evaluation.disclosures if evaluation else (),
@@ -147,6 +161,7 @@ def build_view(
             n_under_determined=len(under),
             n_ranks_in_gaps=_ranks_in_gaps(headline, under),
         ),
+        coverage_text,
     )
     return ReportView(
         model_run_id=run_id,
@@ -161,4 +176,6 @@ def build_view(
         disclosures=disclosures,
         evaluation=evaluation,
         evaluation_reason=evaluation_reason,
+        coverage_disclosures=coverage_text,
+        coverage=full_coverage,
     )

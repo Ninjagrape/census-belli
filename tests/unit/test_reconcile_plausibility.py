@@ -230,13 +230,38 @@ def _troop_report(value: float, *, url: str, source_type: str = "manual_entry") 
     )
 
 
-def test_an_override_below_the_floor_is_rejected_loudly_not_dropped() -> None:
-    report = _troop_report(50.0, url="override:ov-0007")
+def test_an_override_below_the_floor_survives_without_raising() -> None:
+    counts = ReconcileCounts()
+    report = _troop_report(85.0, url="override:ov-0007")
 
-    with pytest.raises(
-        ValueError, match=r"override:ov-0007 \(side \d+, battle \d+\) gives 50 troops, below"
-    ):
+    assert filter_troop_reports([report], counts, min_plausible_troops=MIN_TROOPS) == [report]
+    assert counts.excluded_implausible_small == 0
+
+
+def test_a_kept_override_below_the_floor_logs_an_info_line() -> None:
+    from structlog.testing import capture_logs
+
+    report = _troop_report(85.0, url="override:ov-0007")
+
+    with capture_logs() as logs:
         filter_troop_reports([report], ReconcileCounts(), min_plausible_troops=MIN_TROOPS)
+
+    events = [e for e in logs if e["event"] == "reconcile_override_below_floor"]
+    assert len(events) == 1
+    assert events[0]["log_level"] == "info"
+    assert (events[0]["value"], events[0]["floor"]) == (85.0, MIN_TROOPS)
+    assert {"side_id", "battle_id"} <= set(events[0])
+
+
+def test_an_ordinary_small_row_logs_no_override_line() -> None:
+    from structlog.testing import capture_logs
+
+    report = _troop_report(50.0, url="https://example/x", source_type="wikipedia_infobox")
+
+    with capture_logs() as logs:
+        filter_troop_reports([report], ReconcileCounts(), min_plausible_troops=MIN_TROOPS)
+
+    assert not [e for e in logs if e["event"] == "reconcile_override_below_floor"]
 
 
 def test_an_ordinary_small_row_is_still_dropped_and_counted() -> None:
@@ -253,3 +278,11 @@ def test_an_override_at_or_above_the_floor_passes() -> None:
     assert filter_troop_reports([report], ReconcileCounts(), min_plausible_troops=MIN_TROOPS) == [
         report
     ]
+
+
+def test_a_raw_row_of_85_is_still_dropped_by_the_floor() -> None:
+    counts = ReconcileCounts()
+    report = _troop_report(85.0, url="https://example/x", source_type="wikipedia_infobox")
+
+    assert filter_troop_reports([report], counts, min_plausible_troops=MIN_TROOPS) == []
+    assert counts.excluded_implausible_small == 1

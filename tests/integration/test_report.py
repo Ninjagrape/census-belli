@@ -73,11 +73,13 @@ SPEC_CHECKS = {
     "exclusion_concentration",
     "rank_ties_are_resolved",
     "export_matches_db",
+    "disclosures_match_db",
+    "coverage_figures_written",
     "evaluation_current",
 }
-# The explorer page closes three script elements: the data block, plotly.js and
-# the page script. Anything beyond that came from data.
-EXPLORER_SCRIPT_CLOSES = 3
+# The explorer page closes four script elements: the data block, plotly.js, the
+# page script and the coverage tab script. Anything beyond that came from data.
+EXPLORER_SCRIPT_CLOSES = 4
 HOSTILE_NAME = "</script><b>x</b>"
 EVAL_DISCLOSURE = "Orientation: positive skill favours the side with more force & fewer <losses>."
 EXCLUSION_MESSAGE = "18 top general(s) under 50% credited; default_split share of sides 100%"
@@ -154,7 +156,14 @@ def world(engine: Engine) -> dict[str, Any]:
             "CAST(:d AS JSONB)) RETURNING run_id",
             {
                 "t": POOLED,
-                "d": json.dumps({"converged": True, "estimates_written": True, "counts": COUNTS}),
+                "d": json.dumps(
+                    {
+                        "converged": True,
+                        "estimates_written": True,
+                        "counts": COUNTS,
+                        "components": {"n_components": 2},
+                    }
+                ),
             },
         )
         for name, qid, battles, rank in SPECS:
@@ -377,7 +386,12 @@ def test_clean_run_passes_every_gate_and_writes_consistent_outputs(
         "csv_rows": len(SPECS),
         "json_generals": len(SPECS),
     }
-    assert {g["name"] for g in manifest["gates"]} == {"export_matches_db", "evaluation_current"}
+    assert {g["name"] for g in manifest["gates"]} == {
+        "export_matches_db",
+        "disclosures_match_db",
+        "coverage_figures_written",
+        "evaluation_current",
+    }
     assert all(g["passed"] for g in manifest["gates"])
 
 
@@ -445,7 +459,7 @@ def test_every_disclosure_reaches_report_markdown_and_explorer(
     assert "PROVISIONAL" not in markdown
     assert "PROVISIONAL" not in page
     assert "figures/calibration.png" in markdown
-    assert "\\" not in markdown.split("## Figures")[1].split("## Disclosures")[0]
+    assert "\\" not in markdown.split("## Figures")[1].split("## Data coverage and caveats")[0]
     assert (out / "figures" / "calibration.png").read_bytes() == PNG_1X1
     assert (out / "figures" / "forest_top.png").is_file()
 

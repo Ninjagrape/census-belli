@@ -32,6 +32,7 @@ FORMULA_PREFIXES: Final[tuple[str, ...]] = ("=", "+", "-", "@", "\t", "\r")
 
 CSV_COLUMNS: Final[tuple[str, ...]] = (
     "rank",
+    "headline_rank",
     "general_id",
     "name",
     "wikidata_id",
@@ -82,6 +83,7 @@ def _scalars(g: RankedGeneral, provisional: bool) -> dict[str, Any]:
     e, r = g.estimate, g.rubin
     return {
         "rank": g.rank,
+        "headline_rank": g.headline_rank,
         "general_id": e.general_id,
         "name": e.name,
         "wikidata_id": e.wikidata_id,
@@ -206,7 +208,9 @@ def _sensitivity(view: ReportView, ids: set[int]) -> dict[str, Any] | None:
     }
 
 
-def build_payload(view: ReportView, *, limit: int | None = None) -> dict[str, Any]:
+def build_payload(
+    view: ReportView, *, limit: int | None = None, coverage: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     """The nested export: generals with per-battle detail, plus context.
 
     Each general carries every one of its battles, so the contributions sum to
@@ -216,6 +220,8 @@ def build_payload(view: ReportView, *, limit: int | None = None) -> dict[str, An
     Args:
         view: The report view.
         limit: Cap on generals (headline first), or None for all of them.
+        coverage: The coverage panels (``coverage_panels.build_panels``) for the
+            explorer's coverage tab; empty when omitted.
 
     Returns:
         A JSON-serialisable dictionary.
@@ -244,6 +250,7 @@ def build_payload(view: ReportView, *, limit: int | None = None) -> dict[str, An
         "overlap_method": interval_method_note(uses_normal_approx=view.uses_normal_approx),
         "labels": LABELS,
         "disclosures": list(view.disclosures),
+        "coverage": dict(coverage or {}),
         "n_headline": len(view.headline),
         "n_under_determined": len(view.under_determined),
         "n_generals_total": len(everyone),
