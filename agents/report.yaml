@@ -45,15 +45,11 @@ params:
   require_passing_diagnostics: true   # false stops failed blocking model gates marking outputs provisional
 
   # where the stage reads and writes; tests point these at temp directories
-  output_root: data/processed/report
-  diagnostics_root: data/processed/model_diagnostics
-  evaluation_root: data/processed/evaluation
   # the evaluate spec; its severities decide which failed evaluate gates block
   evaluate_spec_path: agents/evaluate.yaml
   # the manifest the evaluation_gate checks below read (quality._SPEC_PARAM_BINDINGS
   # binds evaluation_gate.report to this param, so they cannot be pointed at
   # evaluate's own report)
-  report_path: data/processed/report/manifest.json
 
   # rankings table
   top_n: 100
@@ -156,7 +152,7 @@ quality_checks:
   - name: exclusion_concentration
     check: "top-50 generals have most of their battles credited"
     method: model_gate
-    params: {gate: exclusion_concentration, root: data/processed/model_diagnostics, run: evaluable}
+    params: {gate: exclusion_concentration, run: evaluable}
     severity: error
     description: >
       The model stage's exclusion_concentration gate, read from the reported
@@ -185,7 +181,7 @@ quality_checks:
   - name: export_matches_db
     check: "rankings.csv headline rows equal the database count"
     method: evaluation_gate
-    params: {report: data/processed/report/manifest.json, gate: export_matches_db}
+    params: {report_under_root: processed/report/manifest.json, gate: export_matches_db}  # an explicit report_path overrides this
     severity: error
     description: "The CSV must hold exactly the generals the database has at or above min_battles"
 
@@ -217,7 +213,7 @@ quality_checks:
   - name: evaluation_current
     check: "the evaluation report read describes the reported model run"
     method: evaluation_gate
-    params: {report: data/processed/report/manifest.json, gate: evaluation_current}
+    params: {report_under_root: processed/report/manifest.json, gate: evaluation_current}  # an explicit report_path overrides this
     severity: error
     description: >
       Read from the manifest, whose model_run_id the evaluation_gate handler

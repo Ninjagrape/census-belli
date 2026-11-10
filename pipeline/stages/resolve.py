@@ -42,6 +42,7 @@ from pipeline.crawlers.fetcher import Fetcher, RateLimiter
 from pipeline.imputers.priors import DEFAULT_PRIORS_PATH, era_of_year, load_priors
 from pipeline.llm import LLMService
 from pipeline.overrides import OverrideReport, clear_report, load_overrides, overrides_path
+from pipeline.paths import data_path
 from pipeline.resolvers import (
     AMBIGUITY_MARGIN,
     Candidate,
@@ -101,8 +102,16 @@ __all__ = ["LazyService", "resolve_groups", "run"]
 
 logger = structlog.get_logger()
 
-PROCESSED_ROOT: Final[Path] = Path("data/processed")
-RAW_ROOT: Final[Path] = Path("data/raw")
+
+def default_processed_root() -> Path:
+    """Return the processed-data directory under the current data root."""
+    return data_path("processed")
+
+
+def default_raw_root() -> Path:
+    """Return the raw-data directory under the current data root."""
+    return data_path("raw")
+
 
 _COMMANDERS_FILE: Final[str] = "commanders_raw.jsonl"
 _BATTLES_FILE: Final[str] = "battles.jsonl"
@@ -1313,8 +1322,8 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
     ctx = context or StageContext()
     params = spec.get("params") or {}
 
-    processed_root = Path(str(params.get("processed_root", PROCESSED_ROOT)))
-    raw_root = Path(str(params.get("raw_root", RAW_ROOT)))
+    processed_root = Path(str(params.get("processed_root", default_processed_root())))
+    raw_root = Path(str(params.get("raw_root", default_raw_root())))
     threshold = float(params.get("fuzzy_threshold", 85))
     margin = float(params.get("ambiguity_margin", AMBIGUITY_MARGIN))
     source_kind = str(params.get("candidate_source", "sparql")).strip().lower()

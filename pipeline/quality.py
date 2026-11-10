@@ -26,13 +26,14 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Final, Protocol, cast
 
 import structlog
 from sqlalchemy import text
 
 from pipeline.overrides import OverrideError, file_sha256, load_overrides
+from pipeline.paths import data_path
 
 logger = structlog.get_logger()
 
@@ -675,7 +676,7 @@ def _check_imputation_gate(
     raw_params = check.get("params")
     params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
     path = (
-        Path(str(params.get("root", "data/imputed")))
+        Path(str(params.get("root", data_path("imputed"))))
         / str(params.get("scale", "neutral"))
         / "gate_report.json"
     )
@@ -801,7 +802,7 @@ def _check_model_gate(
     """
     raw_params = check.get("params")
     params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
-    root = Path(str(params.get("root", "data/processed/model_diagnostics")))
+    root = Path(str(params.get("root", data_path("processed", "model_diagnostics"))))
     selection = str(params.get("run", "latest"))
     if selection == "latest":
         directory = _latest_model_run_dir(root, conn)
@@ -863,6 +864,33 @@ def _stale_report_failure(report: Any, conn: Connection | None) -> str | None:
     return None
 
 
+def default_evaluation_report(params: dict[str, Any]) -> Path:
+    """Locate the report an evaluation gate reads when ``params.report`` is absent.
+
+    Args:
+        params: The check's ``params``. ``report_under_root`` is a path below
+            the data root (e.g. ``processed/report/manifest.json``), so a spec
+            can name a report without hard-coding the root.
+
+    Returns:
+        That path under the current data root, else the evaluate stage's
+        ``processed/evaluation_report.json``.
+    """
+    below_root = params.get("report_under_root")
+    if isinstance(below_root, str) and below_root:
+        if PurePosixPath(below_root).is_absolute() or PureWindowsPath(below_root).anchor:
+            raise ValueError(
+                f"report_under_root must be relative to the data root, got {below_root!r}"
+            )
+        segments = below_root.split("/")
+        if ".." in segments:
+            raise ValueError(
+                f"report_under_root must not contain '..' segments, got {below_root!r}"
+            )
+        return data_path(*segments)
+    return data_path("processed", "evaluation_report.json")
+
+
 def _check_evaluation_gate(
     name: str,
     check: dict[str, Any],
@@ -889,7 +917,7 @@ def _check_evaluation_gate(
     """
     raw_params = check.get("params")
     params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
-    path = Path(str(params.get("report", "data/processed/evaluation_report.json")))
+    path = Path(str(params.get("report", default_evaluation_report(params))))
     try:
         report = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -980,7 +1008,7 @@ def _check_overrides_gate(
     stage = params.get("stage")
     if not isinstance(stage, str) or not stage:
         return result(False, "overrides_gate needs params.stage")
-    path = Path(str(params.get("root", "data/processed"))) / f"overrides_{stage}.json"
+    path = Path(str(params.get("root", data_path("processed")))) / f"overrides_{stage}.json"
     try:
         report = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -1046,6 +1074,7 @@ METHOD_HANDLERS: dict[str, MethodHandler] = {
 # its input from where the run wrote it, which the run's params decide.
 _SPEC_PARAM_BINDINGS: dict[str, dict[str, str]] = {
     "imputation_gate": {"scale": "scale", "root": "imputed_root"},
+    # An explicit report_path in the spec overrides report_under_root.
     "evaluation_gate": {"report": "report_path"},
     "model_gate": {"root": "diagnostics_root"},
     "overrides_gate": {"root": "processed_root"},
@@ -1065,12 +1094,17 @@ UNIMPLEMENTED_METHODS: dict[str, str] = {
         "Requires model_runs.diagnostics from the reconcile/model stage "
         "(rhat, ess_bulk, divergences via ArviZ)"
     ),
-    "imputation_gate": "Requires data/imputed/{scale}/gate_report.json from the impute stage",
-    "model_gate": (
-        "Requires data/processed/model_diagnostics/run{N}/gate_report.json from the model stage"
+    "imputation_gate": (
+        "Requires <data root>/imputed/{scale}/gate_report.json from the impute stage"
     ),
-    "evaluation_gate": ("Requires data/processed/evaluation_report.json from the evaluate stage"),
-    "overrides_gate": "Requires data/processed/overrides_{stage}.json from the stage run",
+    "model_gate": (
+        "Requires <data root>/processed/model_diagnostics/run{N}/gate_report.json "
+        "from the model stage"
+    ),
+    "evaluation_gate": (
+        "Requires <data root>/processed/evaluation_report.json from the evaluate stage"
+    ),
+    "overrides_gate": "Requires <data root>/processed/overrides_{stage}.json from the stage run",
 }
 
 

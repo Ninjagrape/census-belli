@@ -2,6 +2,8 @@ Process a batch of deferred LLM requests with Claude Code subagents, under the s
 
 Argument: $ARGUMENTS, a request file (`data/llm_requests/<stage>_<timestamp>.jsonl`), optionally followed by `--parallel N` (default 4) or `--max-chunks N` (stop after N chunks this session). With no file given, use the newest `.jsonl` directly under `data/llm_requests/`.
 
+Paths below are relative to the data root: `data/` by default, or `$GENERAL_WAR_DATA_ROOT` (e.g. `data/corpus3`) when set. Use the same root as the pipeline run that wrote the request file.
+
 A stage running with `llm_mode: offline` (the default for extract, resolve and classify) answers what it can from the `llm_calls` cache, writes every other request to that file, and stops the pipeline. This command answers the file; re-running the stage then finds every answer in the cache.
 
 You are the coordinator. You do not answer requests yourself: that would spend the lead model's quota on work Haiku does well. Use the `llm-batch-worker` agent.

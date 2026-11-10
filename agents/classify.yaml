@@ -49,8 +49,6 @@ params:
   # above; the hash is the same, so the cache is shared between modes.
   # See pipeline/stages/classify.py.
   llm_mode: offline
-  processed_root: data/processed
-  raw_root: data/raw
   # Character budget for the article excerpt sent with a command-role
   # request; see pipeline.classifiers.requests.select_excerpt.
   excerpt_max_chars: 6000

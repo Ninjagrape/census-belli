@@ -96,6 +96,7 @@ from typing import Any, Final, cast
 import structlog
 
 from pipeline.db import get_connection
+from pipeline.paths import data_path
 from pipeline.reconcilers import store
 from pipeline.reconcilers.design import (
     DEFAULT_MIN_BATTLES_PER_SOURCE_EFFECT,
@@ -146,7 +147,11 @@ logger = structlog.get_logger()
 # so a failed fit stays inspectable, which needs a connection it controls.
 OWNS_DB_CONNECTION = True
 
-PROCESSED_ROOT: Final[Path] = Path("data/processed")
+
+def default_processed_root() -> Path:
+    """Return the processed-data directory under the current data root."""
+    return data_path("processed")
+
 
 # Fit order only; both quantities share one model_runs row (see the module
 # docstring), so there is no "which one is latest" question any more.
@@ -814,7 +819,7 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> None:
     ctx = context or StageContext()
     params: dict[str, Any] = spec.get("params") or {}
 
-    processed_root = Path(str(params.get("processed_root", PROCESSED_ROOT)))
+    processed_root = Path(str(params.get("processed_root", default_processed_root())))
     ancient_cutoff_year = int(params.get("ancient_cutoff_year", 500))
     ci_mass = float(params.get("ci_mass", 0.95))
     model_type = str(params.get("model_type", "source_disagreement"))

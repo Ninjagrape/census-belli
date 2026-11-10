@@ -29,6 +29,7 @@ from pipeline.config import load_agent_spec as _load_spec
 from pipeline.db import DatabaseConfigError, get_connection, get_engine
 from pipeline.logging_config import configure as configure_logging
 from pipeline.overrides import KINDS_BY_STAGE, OverrideError, load_overrides
+from pipeline.paths import DATA_ROOT_ENV, data_root
 from pipeline.quality import (
     QualityCheckResult,
     QualityRunner,
@@ -561,6 +562,7 @@ def main() -> None:
     # be read before logging is configured and before the engine is built.
     load_env()
     configure_logging(level=args.log_level)
+    logger.info("data_root_resolved", data_root=str(data_root().resolve()), env=DATA_ROOT_ENV)
 
     stages = [s.strip() for s in args.stages.split(",")]
 

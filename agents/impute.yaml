@@ -130,8 +130,6 @@ params:
   propagate_shared_error: true        # neutral scale: carry reconcile's g_unlabelled/a_era error across battles
 
   imputation_priors: config/imputation_priors.yaml
-  reconcile_root: data/processed/reconcile
-  imputed_root: data/imputed
   model_type: imputation
 
   # sampling
@@ -164,14 +162,14 @@ prompt: null   # statistical model, no LLM
 quality_checks:
   - name: imputation_completeness
     method: imputation_gate
-    params: {gate: imputation_completeness, root: data/imputed, scale: neutral}
+    params: {gate: imputation_completeness, scale: neutral}
     severity: error
     description: >
       Every in-scope side has a finite value in every round.
 
   - name: imputed_ratio_plausible
     method: imputation_gate
-    params: {gate: imputed_ratio_plausible, root: data/imputed, scale: neutral}
+    params: {gate: imputed_ratio_plausible, scale: neutral}
     severity: error
     description: >
       Median |log ratio| across rounds < 4 for every multi-sided battle with at
@@ -182,7 +180,7 @@ quality_checks:
 
   - name: imputed_values_plausible
     method: imputation_gate
-    params: {gate: imputed_values_plausible, root: data/imputed, scale: neutral}
+    params: {gate: imputed_values_plausible, scale: neutral}
     severity: error
     description: >
       Published scale only: imputed troop counts between 50 and 10,000,000.
@@ -190,7 +188,7 @@ quality_checks:
 
   - name: distributional_check
     method: imputation_gate
-    params: {gate: distributional_check, root: data/imputed, scale: neutral}
+    params: {gate: distributional_check, scale: neutral}
     severity: warning
     description: >
       KS test within era, imputed against observed. Expected to fire under MAR
@@ -198,7 +196,7 @@ quality_checks:
 
   - name: kept_pair_ratio_slope
     method: imputation_gate
-    params: {gate: kept_pair_ratio_slope, root: data/imputed, scale: neutral}
+    params: {gate: kept_pair_ratio_slope, scale: neutral}
     severity: error
     description: >
       Over battles with exactly two observed (point-reported) sides, the slope
@@ -213,7 +211,7 @@ quality_checks:
 
   - name: kept_side_slope
     method: imputation_gate
-    params: {gate: kept_side_slope, root: data/imputed, scale: neutral}
+    params: {gate: kept_side_slope, scale: neutral}
     severity: error
     description: >
       OLS slope of the across-round mean imputed log value on the reported

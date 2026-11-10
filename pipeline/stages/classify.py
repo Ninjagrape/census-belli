@@ -112,6 +112,7 @@ from pipeline.overrides import (
     load_overrides,
     overrides_path,
 )
+from pipeline.paths import data_path
 from pipeline.stages.base import StageContext, StageOutcome
 
 __all__ = [
@@ -123,8 +124,16 @@ __all__ = [
 
 logger = structlog.get_logger()
 
-PROCESSED_ROOT: Final[Path] = Path("data/processed")
-RAW_ROOT: Final[Path] = Path("data/raw")
+
+def default_processed_root() -> Path:
+    """Return the processed-data directory under the current data root."""
+    return data_path("processed")
+
+
+def default_raw_root() -> Path:
+    """Return the raw-data directory under the current data root."""
+    return data_path("raw")
+
 
 _DEFAULT_EXCERPT_MAX_CHARS: Final[int] = 6000
 _PARAGRAPH_RE: Final = re.compile(r"\n{2,}")
@@ -757,7 +766,7 @@ def _build_missingness_pairs(
 
 
 def build_pending_missingness_requests(
-    conn: Any, spec: dict[str, Any], raw_root: Path = Path("data/raw")
+    conn: Any, spec: dict[str, Any], raw_root: Path | None = None
 ) -> list[tuple[MissingnessContext, LLMRequest]]:
     """Build the missingness request for every row the heuristics cannot settle.
 
@@ -774,6 +783,8 @@ def build_pending_missingness_requests(
     Returns:
         ``(context, request)`` pairs in ``log_id`` order.
     """
+    if raw_root is None:
+        raw_root = default_raw_root()
     manual_types = [
         m
         for _entry, m in match_battle_types(_spec_entries(spec), load_battle_source_slugs(conn))
@@ -943,7 +954,7 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
         ValueError: If ``params.llm_mode`` is neither 'offline' nor 'api'.
     """
     params = spec.get("params") or {}
-    raw_root = Path(str(params.get("raw_root", RAW_ROOT)))
+    raw_root = Path(str(params.get("raw_root", default_raw_root())))
     excerpt_max_chars = int(params.get("excerpt_max_chars", _DEFAULT_EXCERPT_MAX_CHARS))
 
     llm_mode = str(params.get("llm_mode", "offline")).strip().lower()
@@ -960,7 +971,7 @@ def _run(spec: dict[str, Any], ctx: StageContext, conn: Any) -> StageOutcome | N
 
     overrides_file, explicit = overrides_path(params)
     overrides = load_overrides(overrides_file, required=explicit)
-    processed_root = Path(str(params.get("processed_root", PROCESSED_ROOT)))
+    processed_root = Path(str(params.get("processed_root", default_processed_root())))
     # A dry run leaves the previous real run's report alone: it writes nothing
     # else, so the report must keep describing what the database holds.
     if not ctx.dry_run:

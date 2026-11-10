@@ -17,6 +17,7 @@ import yaml
 
 from pipeline.modelers.priors import ModelPriors
 from pipeline.modelers.records import DesignParams
+from pipeline.paths import data_path
 from pipeline.reconcilers.model import SamplerSettings
 
 __all__ = ["DEFAULT_CONFIG_PATH", "GateParams", "ModelParams", "load_model_params"]
@@ -176,9 +177,11 @@ class ModelParams:
             replacement_percentile=float(merged.get("replacement_percentile", 40.0)),
             rank_by=rank_by,
             scale=scale,
-            imputed_root=str(merged.get("imputed_root", "data/imputed")),
+            imputed_root=str(merged.get("imputed_root", data_path("imputed").as_posix())),
             diagnostics_root=str(
-                merged.get("diagnostics_root", "data/processed/model_diagnostics")
+                merged.get(
+                    "diagnostics_root", data_path("processed", "model_diagnostics").as_posix()
+                )
             ),
             draws_kept_per_round=kept,
             max_rounds=None if max_rounds is None else int(max_rounds),

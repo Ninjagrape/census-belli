@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
+from pipeline.paths import data_path
+
 __all__ = ["STORED_CI_LEVEL", "ReportParams"]
 
 # general_skill_estimates stores the 95% interval only, so no other level can
@@ -67,13 +69,17 @@ class ReportParams:
                 its minimum, the threshold is outside [0, 1], the run selection
                 is not ``latest`` or embedding is switched off.
         """
-        output_root = str(params.get("output_root", "data/processed/report"))
+        output_root = str(params.get("output_root", data_path("processed", "report").as_posix()))
         out = cls(
             output_root=output_root,
             diagnostics_root=str(
-                params.get("diagnostics_root", "data/processed/model_diagnostics")
+                params.get(
+                    "diagnostics_root", data_path("processed", "model_diagnostics").as_posix()
+                )
             ),
-            evaluation_root=str(params.get("evaluation_root", "data/processed/evaluation")),
+            evaluation_root=str(
+                params.get("evaluation_root", data_path("processed", "evaluation").as_posix())
+            ),
             evaluate_spec_path=str(params.get("evaluate_spec_path", "agents/evaluate.yaml")),
             report_path=str(params.get("report_path", f"{output_root}/manifest.json")),
             require_passing_diagnostics=bool(params.get("require_passing_diagnostics", True)),

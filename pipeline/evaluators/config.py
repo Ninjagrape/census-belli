@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from pipeline.modelers.config import ModelParams, load_model_params
+from pipeline.paths import data_path
 
 __all__ = ["EvaluateParams", "load_eval_model_params"]
 
@@ -77,9 +78,17 @@ class EvaluateParams:
         out = cls(
             model_spec=str(params.get("model_spec", "agents/model.yaml")),
             expert_rankings=str(params.get("expert_rankings", "config/expert_rankings.yaml")),
-            reconcile_root=str(params.get("reconcile_root", "data/processed/reconcile")),
-            output_root=str(params.get("output_root", "data/processed/evaluation")),
-            report_path=str(params.get("report_path", "data/processed/evaluation_report.json")),
+            reconcile_root=str(
+                params.get("reconcile_root", data_path("processed", "reconcile").as_posix())
+            ),
+            output_root=str(
+                params.get("output_root", data_path("processed", "evaluation").as_posix())
+            ),
+            report_path=str(
+                params.get(
+                    "report_path", data_path("processed", "evaluation_report.json").as_posix()
+                )
+            ),
             seed=int(params.get("seed", 20261014)),
             held_out_folds=int(params.get("held_out_folds", 5)),
             cv_rounds=int(params.get("cv_rounds", 3)),
