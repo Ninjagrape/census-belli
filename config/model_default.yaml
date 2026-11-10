@@ -117,8 +117,6 @@ rank_by: total_war
 # the gates and report select by MAX(run_id) over the plain type, is never
 # displaced. Set it with --set scale=published.
 scale: neutral
-imputed_root: data/imputed
-diagnostics_root: data/processed/model_diagnostics
 
 pooling:
   # Draws kept per round for pooling, WAR and the checks (evenly spaced out of

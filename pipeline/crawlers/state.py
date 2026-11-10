@@ -24,16 +24,26 @@ from typing import Any
 
 import structlog
 
+from pipeline.paths import data_path
+
 __all__ = [
-    "DEFAULT_STATE_PATH",
     "CrawlState",
+    "default_state_path",
     "load_state",
     "save_state",
 ]
 
 logger = structlog.get_logger()
 
-DEFAULT_STATE_PATH = Path("data/raw/crawl_state.json")
+
+def default_state_path() -> Path:
+    """Return the resume-state file under the current data root.
+
+    Returns:
+        ``<data root>/raw/crawl_state.json``, resolved when called.
+    """
+    return data_path("raw", "crawl_state.json")
+
 
 # Bumped when the on-disk shape changes incompatibly. An older file is
 # discarded rather than misread.
@@ -220,7 +230,7 @@ class CrawlState:
         )
 
 
-def load_state(path: Path | str = DEFAULT_STATE_PATH) -> CrawlState:
+def load_state(path: Path | str | None = None) -> CrawlState:
     """Load resume state, falling back to a fresh state.
 
     A missing file is the normal first-run case. An unreadable or malformed
@@ -228,12 +238,12 @@ def load_state(path: Path | str = DEFAULT_STATE_PATH) -> CrawlState:
     start costs the whole run.
 
     Args:
-        path: Where the state file lives.
+        path: Where the state file lives; defaults to :func:`default_state_path`.
 
     Returns:
         The loaded state, or an empty one.
     """
-    state_path = Path(path)
+    state_path = Path(path) if path is not None else default_state_path()
     if not state_path.exists():
         logger.info("crawl_state_absent", path=str(state_path))
         return CrawlState()
@@ -257,7 +267,7 @@ def load_state(path: Path | str = DEFAULT_STATE_PATH) -> CrawlState:
     return state
 
 
-def save_state(state: CrawlState, path: Path | str = DEFAULT_STATE_PATH) -> None:
+def save_state(state: CrawlState, path: Path | str | None = None) -> None:
     """Write resume state atomically.
 
     The write goes to a temporary file in the same directory and is then
@@ -266,12 +276,12 @@ def save_state(state: CrawlState, path: Path | str = DEFAULT_STATE_PATH) -> None
 
     Args:
         state: The state to persist.
-        path: Where to write it.
+        path: Where to write it; defaults to :func:`default_state_path`.
 
     Raises:
         OSError: If the directory cannot be created or written.
     """
-    state_path = Path(path)
+    state_path = Path(path) if path is not None else default_state_path()
     state_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = state_path.with_name(f"{state_path.name}.tmp")
 

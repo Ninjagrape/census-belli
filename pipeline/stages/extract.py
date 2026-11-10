@@ -89,6 +89,7 @@ from pipeline.overrides import (
     manual_source_id,
     overrides_path,
 )
+from pipeline.paths import data_path
 from pipeline.stages.base import StageContext, StageOutcome
 
 __all__ = [
@@ -102,8 +103,16 @@ __all__ = [
 
 logger = structlog.get_logger()
 
-RAW_ROOT: Final[Path] = Path("data/raw")
-PROCESSED_ROOT: Final[Path] = Path("data/processed")
+
+def default_processed_root() -> Path:
+    """Return the processed-data directory under the current data root."""
+    return data_path("processed")
+
+
+def default_raw_root() -> Path:
+    """Return the raw-data directory under the current data root."""
+    return data_path("raw")
+
 
 _ARTICLE_DIR: Final[str] = "battles_html"
 _WIKIDATA_DIR: Final[str] = "wikidata"
@@ -316,7 +325,7 @@ def _enwiki_urls(payload: dict[str, Any]) -> list[str]:
     return urls
 
 
-def discover_battles(raw_root: Path = RAW_ROOT) -> list[RawBattle]:
+def discover_battles(raw_root: Path | None = None) -> list[RawBattle]:
     """Find every battle with raw data on disk.
 
     Args:
@@ -328,6 +337,8 @@ def discover_battles(raw_root: Path = RAW_ROOT) -> list[RawBattle]:
         some of them is still returned: the extractors handle a missing
         source and the merger logs it.
     """
+    if raw_root is None:
+        raw_root = default_raw_root()
     battles: dict[str, RawBattle] = {}
 
     article_dir = raw_root / _ARTICLE_DIR
@@ -1056,8 +1067,8 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
     ctx = context or StageContext()
     params = spec.get("params") or {}
 
-    raw_root = Path(str(params.get("raw_root", RAW_ROOT)))
-    processed_root = Path(str(params.get("processed_root", PROCESSED_ROOT)))
+    raw_root = Path(str(params.get("raw_root", default_raw_root())))
+    processed_root = Path(str(params.get("processed_root", default_processed_root())))
     batch_size = int(params.get("batch_size", 50))
     max_passage_chars = int(params.get("max_passage_chars", DEFAULT_MAX_PASSAGE_CHARS))
 
@@ -1085,7 +1096,10 @@ def run(spec: dict[str, Any], context: StageContext | None = None) -> StageOutco
             "extract_limited_run_writes_suffixed_files",
             limit=ctx.limit,
             suffix=output_suffix,
-            hint="data/processed/*.jsonl are untouched; downstream stages read those",
+            hint=(
+                f"{data_path('processed').as_posix()}/*.jsonl are untouched; "
+                "downstream stages read those"
+            ),
         )
 
     if not discovered:

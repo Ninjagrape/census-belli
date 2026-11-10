@@ -21,6 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 import streamlit as st  # noqa: E402
 
 from pipeline.inspector.connection import default_inspect_url, redact_url  # noqa: E402
+from pipeline.paths import data_root  # noqa: E402
 from scripts.inspector_pages import _ctx  # noqa: E402
 
 PAGES = [
@@ -48,7 +49,7 @@ def _sidebar() -> None:
     )
     st.sidebar.caption(f"Target: `{redact_url(url) if url else 'not configured'}`")
     st.sidebar.text_input(
-        "Data root", value=os.environ.get("INSPECT_DATA_ROOT", "data"), key=_ctx.ROOT_KEY
+        "Data root", value=os.environ.get("INSPECT_DATA_ROOT", str(data_root())), key=_ctx.ROOT_KEY
     )
     _year_filter(url)
 

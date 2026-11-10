@@ -14,6 +14,8 @@ from typing import Any, Final
 import structlog
 import yaml
 
+from pipeline.paths import data_path
+
 __all__ = [
     "DEFAULT_PRIORS_PATH",
     "UNDATED",
@@ -87,9 +89,11 @@ class ImputeParams:
     min_side_slope: float = 0.9
     slope_gate_min_n: int = 10
     model_type: str = "imputation"
-    imputed_root: str = "data/imputed"
+    imputed_root: str = field(default_factory=lambda: data_path("imputed").as_posix())
     priors_path: str = str(DEFAULT_PRIORS_PATH)
-    reconcile_root: str = "data/processed/reconcile"
+    reconcile_root: str = field(
+        default_factory=lambda: data_path("processed", "reconcile").as_posix()
+    )
     draws_path: str | None = None
     propagate_shared_error: bool = True
 

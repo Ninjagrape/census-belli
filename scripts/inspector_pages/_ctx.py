@@ -18,6 +18,7 @@ from sqlalchemy import Engine, text
 
 from pipeline.inspector import queries
 from pipeline.inspector.connection import read_only_engine
+from pipeline.paths import data_root as default_data_root
 
 logger = structlog.get_logger()
 
@@ -45,7 +46,7 @@ def get_ctx() -> Ctx:
     years = st.session_state.get(YEARS_KEY)
     return Ctx(
         url=str(st.session_state.get(URL_KEY, "")),
-        data_root=Path(str(st.session_state.get(ROOT_KEY, "data"))),
+        data_root=Path(str(st.session_state.get(ROOT_KEY, default_data_root()))),
         year_range=(int(years[0]), int(years[1])) if years else None,
     )
 

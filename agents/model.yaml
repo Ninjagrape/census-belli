@@ -170,13 +170,13 @@ quality_checks:
       99% posterior predictive interval (Bonferroni over five categories),
       computed on a representative round.
     method: model_gate
-    params: {gate: posterior_predictive_category_check, root: data/processed/model_diagnostics}
+    params: {gate: posterior_predictive_category_check}
     severity: warning
 
   - name: fmi_top_generals
     check: "no top-50 general has FMI above 0.3"
     method: model_gate
-    params: {gate: fmi_top_generals, root: data/processed/model_diagnostics}
+    params: {gate: fmi_top_generals}
     severity: warning
     description: >
       If it fires, raise n_imputations to 40. FMI is a lower bound while the
@@ -185,7 +185,7 @@ quality_checks:
   - name: circularity_check
     check: "joint latent fit agrees with the pooled imputed fit"
     method: model_gate
-    params: {gate: circularity_check, root: data/processed/model_diagnostics}
+    params: {gate: circularity_check}
     severity: warning
     description: >
       Impute conditions on outcome, so imputed force ratios are partly built
@@ -198,7 +198,7 @@ quality_checks:
   - name: exclusion_concentration
     check: "top-50 generals have most of their battles credited"
     method: model_gate
-    params: {gate: exclusion_concentration, root: data/processed/model_diagnostics}
+    params: {gate: exclusion_concentration}
     severity: warning
     description: >
       Fires if any top-50 general has under 50% of their battles credited, or
@@ -208,7 +208,7 @@ quality_checks:
   - name: extreme_ratio_dependence
     check: "no top-50 general earns most of their xWAR against extreme odds"
     method: model_gate
-    params: {gate: extreme_ratio_dependence, root: data/processed/model_diagnostics}
+    params: {gate: extreme_ratio_dependence}
     severity: warning
     description: >
       Lists top-50 generals with over 50% of absolute xWAR from battles where
@@ -218,14 +218,14 @@ quality_checks:
   - name: implausible_career_span
     check: "no general's included battles span more than 60 years"
     method: model_gate
-    params: {gate: implausible_career_span, root: data/processed/model_diagnostics}
+    params: {gate: implausible_career_span}
     severity: warning
     description: A longer span usually means two people merged into one general.
 
   - name: prior_predictive_sensible
     check: "the priors alone imply a plausible tournament"
     method: model_gate
-    params: {gate: prior_predictive_sensible, root: data/processed/model_diagnostics}
+    params: {gate: prior_predictive_sensible}
     severity: warning
     description: >
       Fires if any outcome level exceeds 40% under the priors on the real
@@ -234,7 +234,7 @@ quality_checks:
   - name: top_generals_cross_component
     check: "count of top-50 generals outside the largest component"
     method: model_gate
-    params: {gate: top_generals_cross_component, root: data/processed/model_diagnostics}
+    params: {gate: top_generals_cross_component}
     severity: warning
     description: >
       Warns when the count is above 0; details list the generals. Their level
@@ -243,7 +243,7 @@ quality_checks:
   - name: exclusions_reported
     check: "at most half the battles in scope are excluded"
     method: model_gate
-    params: {gate: exclusions_reported, root: data/processed/model_diagnostics}
+    params: {gate: exclusions_reported}
     severity: warning
     description: The full exclusion breakdown is in the gate's details.
 

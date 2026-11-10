@@ -269,7 +269,6 @@ params:
   casualty_side_prior_sd_scale: 1.5
 
   model_type: source_disagreement
-  processed_root: data/processed
 
 prompt: null   # this stage is a statistical model, no LLM needed
 

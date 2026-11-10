@@ -46,6 +46,7 @@ from pipeline.llm.base import (
 )
 from pipeline.llm.call_log import find_completed_call, log_call
 from pipeline.llm.parsing import parse_structured
+from pipeline.paths import data_path
 
 __all__ = [
     "IMPORT_PROVIDER",
@@ -54,6 +55,8 @@ __all__ = [
     "OfflineProvider",
     "REQUEST_DIR",
     "RESPONSE_DIR",
+    "default_request_dir",
+    "default_response_dir",
     "ValidationReport",
     "agent_model_for",
     "answered_hashes",
@@ -70,8 +73,28 @@ __all__ = [
 
 logger = structlog.get_logger()
 
-REQUEST_DIR: Path = Path("data/llm_requests")
-RESPONSE_DIR: Path = Path("data/llm_responses")
+# Explicit overrides (tests pin these); None means "under the data root".
+REQUEST_DIR: Path | None = None
+RESPONSE_DIR: Path | None = None
+
+
+def default_request_dir() -> Path:
+    """Return the directory request batch files are written to.
+
+    Returns:
+        :data:`REQUEST_DIR` when overridden, else ``<data root>/llm_requests``.
+    """
+    return REQUEST_DIR if REQUEST_DIR is not None else data_path("llm_requests")
+
+
+def default_response_dir() -> Path:
+    """Return the directory subagent responses are read from.
+
+    Returns:
+        :data:`RESPONSE_DIR` when overridden, else ``<data root>/llm_responses``.
+    """
+    return RESPONSE_DIR if RESPONSE_DIR is not None else data_path("llm_responses")
+
 
 # Recorded as ``llm_calls.provider`` on imported rows, so an audit query can
 # tell an answer a Claude Code subagent produced from a billed API call.
@@ -183,7 +206,7 @@ def write_request_file(
         The path written. A second file in the same second gets a numeric
         suffix rather than overwriting the first.
     """
-    out = output_dir or REQUEST_DIR
+    out = output_dir or default_request_dir()
     out.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -243,7 +266,7 @@ def find_reusable_batch(
     Returns:
         The newest file with an identical hash set, or None.
     """
-    directory = output_dir or REQUEST_DIR
+    directory = output_dir or default_request_dir()
     if not hashes or not directory.is_dir():
         return None
     candidates = sorted(
@@ -300,7 +323,7 @@ def export_pending(
         seen.add(digest)
         lines.append(build_request_line(request, digest, stage, provider, model))
 
-    path = (output_dir or REQUEST_DIR) / f"{stage}_none.jsonl"
+    path = (output_dir or default_request_dir()) / f"{stage}_none.jsonl"
     if lines:
         path = write_request_file(stage, lines, output_dir)
 
@@ -404,13 +427,13 @@ def index_requests(
     Args:
         request_files: Explicit files to index. Without it, every
             ``*.jsonl`` directly under ``request_dir`` is indexed.
-        request_dir: Directory to scan; defaults to :data:`REQUEST_DIR`.
+        request_dir: Directory to scan; defaults to :func:`default_request_dir`.
 
     Returns:
         Hash to request line. Unreadable lines are logged and skipped.
     """
     if request_files is None:
-        directory = request_dir or REQUEST_DIR
+        directory = request_dir or default_request_dir()
         files = sorted(directory.glob("*.jsonl")) if directory.is_dir() else []
     else:
         files = list(request_files)
@@ -551,7 +574,7 @@ def import_responses(
         model: Model recorded when a line carries no ``model_used``. Falls
             back to ``"claude-code-subagent"``.
         request_files: Explicit request files to resolve hashes against;
-            by default every ``*.jsonl`` under :data:`REQUEST_DIR`.
+            by default every ``*.jsonl`` under :func:`default_request_dir`.
         index: A prebuilt request index.
 
     Returns:

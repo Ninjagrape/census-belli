@@ -98,9 +98,6 @@ params:
   # come from this spec's params via load_model_params, as in the model stage.
   model_spec: agents/model.yaml
   expert_rankings: config/expert_rankings.yaml
-  reconcile_root: data/processed/reconcile
-  output_root: data/processed/evaluation
-  report_path: data/processed/evaluation_report.json
   seed: 20261014
 
   held_out_folds: 5

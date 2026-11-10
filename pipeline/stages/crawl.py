@@ -47,8 +47,9 @@ from pipeline.crawlers.log import (
     entry_from_result,
 )
 from pipeline.crawlers.seeds import DEFAULT_SEED_PATH, Seeds, load_seeds
-from pipeline.crawlers.state import DEFAULT_STATE_PATH, CrawlState, load_state, save_state
+from pipeline.crawlers.state import CrawlState, default_state_path, load_state, save_state
 from pipeline.db import get_connection
+from pipeline.paths import data_path
 from pipeline.stages.base import StageContext
 
 __all__ = [
@@ -119,23 +120,27 @@ class CrawlPaths:
     state_file: Path
 
     @classmethod
-    def under(cls, root: Path | str, state_file: Path | str = DEFAULT_STATE_PATH) -> CrawlPaths:
+    def under(
+        cls, root: Path | str | None = None, state_file: Path | str | None = None
+    ) -> CrawlPaths:
         """Build the standard layout under a raw-data root.
 
         Args:
-            root: The raw data directory, normally ``data/raw``.
-            state_file: Where resume state lives.
+            root: The raw data directory; defaults to ``<data root>/raw``.
+            state_file: Where resume state lives; defaults to the data root's
+                ``raw/crawl_state.json``.
 
         Returns:
             The paths, not yet created on disk.
         """
-        base = Path(root)
+        base = Path(root) if root is not None else data_path("raw")
+        state = Path(state_file) if state_file is not None else default_state_path()
         return cls(
             battles_html=base / "battles_html",
             wikidata=base / "wikidata",
             dbpedia=base / "dbpedia",
             citations=base / "citations",
-            state_file=Path(state_file),
+            state_file=state,
         )
 
     def ensure(self) -> None:
@@ -228,8 +233,8 @@ class CrawlParams:
         if not user_agent:
             raise CrawlConfigError("user_agent must be a non-empty string")
 
-        root = params.get("output_root", "data/raw")
-        state_file = params.get("state_file", DEFAULT_STATE_PATH)
+        root = params.get("output_root", data_path("raw"))
+        state_file = params.get("state_file", default_state_path())
 
         return cls(
             rate_limit_wikipedia=_as_float(params, "rate_limit_wikipedia"),

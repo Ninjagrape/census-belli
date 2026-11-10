@@ -61,8 +61,6 @@ params:
   battle_duplicate_threshold: 92    # name similarity, after "Battle of" is stripped
   battle_duplicate_year_slack: 1    # years apart two records of one battle may be
 
-  processed_root: data/processed
-  raw_root: data/raw
 
   # Most resolution is SPARQL plus rapidfuzz; the LLM only breaks ties the
   # fuzzy matcher leaves ambiguous, so the judgement asked of it is narrow

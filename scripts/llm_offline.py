@@ -38,15 +38,16 @@ from pipeline.llm.base import request_hash as compute_hash
 from pipeline.llm.call_log import find_completed_call
 from pipeline.llm.factory import llm_params
 from pipeline.llm.offline import (
-    REQUEST_DIR,
-    RESPONSE_DIR,
     answered_hashes,
     build_chunks,
+    default_request_dir,
+    default_response_dir,
     export_pending,
     import_responses,
     index_requests,
     validate_responses,
 )
+from pipeline.paths import data_path
 
 logger = structlog.get_logger()
 
@@ -70,7 +71,7 @@ def _build_requests_from_spec(
     """
     stage = spec.get("stage", "unknown")
     params = spec.get("params", {}) or {}
-    processed_root = Path(params.get("processed_root", "data/processed"))
+    processed_root = Path(params.get("processed_root", data_path("processed")))
 
     if stage == "extract":
         return _extract_requests(spec, processed_root)
@@ -96,7 +97,6 @@ def _extract_requests(
     from pipeline.extractors import build_passages
     from pipeline.extractors.article import DEFAULT_MAX_PASSAGE_CHARS, render_template
     from pipeline.stages.extract import (
-        RAW_ROOT,
         _citation_records,
         _read_text,
         discover_battles,
@@ -111,7 +111,7 @@ def _extract_requests(
         return []
 
     params = spec.get("params") or {}
-    raw_root = Path(str(params.get("raw_root", RAW_ROOT)))
+    raw_root = Path(str(params.get("raw_root", data_path("raw"))))
     max_passage_chars = int(params.get("max_passage_chars", DEFAULT_MAX_PASSAGE_CHARS))
     max_tokens = int(params.get("llm_max_tokens", 4096))
     temperature = params.get("llm_temperature")
@@ -251,7 +251,7 @@ def _classify_requests(
     )
 
     params = spec.get("params", {}) or {}
-    raw_root = Path(str(params.get("raw_root", "data/raw")))
+    raw_root = Path(str(params.get("raw_root", data_path("raw"))))
     excerpt_max_chars = int(params.get("excerpt_max_chars", 6000))
 
     try:
@@ -430,7 +430,7 @@ def run_split(
     stem = request_file.stem
     skip: set[str] = set()
     if skip_answered:
-        skip |= answered_hashes(response_dir or RESPONSE_DIR / stem)
+        skip |= answered_hashes(response_dir or default_response_dir() / stem)
         if conn is not None:
             skip |= {
                 digest
@@ -515,7 +515,7 @@ def run_validate(
         0 when every line is valid, 1 when any line failed or no response
         file was found.
     """
-    directory = request_dir or REQUEST_DIR
+    directory = request_dir or default_request_dir()
     files = sorted(responses.glob("*.jsonl")) if responses.is_dir() else [responses]
     files = [f for f in files if f.exists()]
     if not files:
@@ -557,7 +557,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_list(args: argparse.Namespace) -> None:
     """List exported request files."""
-    directory = Path(args.dir) if args.dir else REQUEST_DIR
+    directory = Path(args.dir) if args.dir else default_request_dir()
     if not directory.exists():
         print(f"No request directory at {directory}")
         return
