@@ -6,6 +6,7 @@ data/llm_requests/
 data/llm_responses/
 data/logs/
 data/backups/
+data/corpus*/
 !data/**/.gitkeep
 
 # python

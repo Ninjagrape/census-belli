@@ -9,14 +9,13 @@ import pytest
 from pipeline import paths
 from pipeline.paths import DATA_ROOT_ENV, data_path, data_root
 
-ALT = "data/corpus3"
-
 
 @pytest.fixture
-def alt_root(monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point the data root at a second corpus."""
-    monkeypatch.setenv(DATA_ROOT_ENV, ALT)
-    return Path(ALT)
+def alt_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point the data root at a second corpus that does not exist on disk."""
+    root = tmp_path / "corpus3"
+    monkeypatch.setenv(DATA_ROOT_ENV, str(root))
+    return root
 
 
 @pytest.fixture

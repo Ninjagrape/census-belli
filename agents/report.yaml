@@ -188,7 +188,7 @@ quality_checks:
   - name: disclosures_match_db
     check: "every number in the coverage disclosures equals a fresh database recomputation"
     method: evaluation_gate
-    params: {report: data/processed/report/manifest.json, gate: disclosures_match_db}
+    params: {report_under_root: processed/report/manifest.json, gate: disclosures_match_db}  # an explicit report_path overrides this
     severity: error
     description: >
       The coverage sentences (rule_single sides, components, passage pass,
@@ -200,7 +200,7 @@ quality_checks:
   - name: coverage_figures_written
     check: "each coverage figure whose data existed was written and embedded, and the explorer has the coverage tab"
     method: evaluation_gate
-    params: {report: data/processed/report/manifest.json, gate: coverage_figures_written}
+    params: {report_under_root: processed/report/manifest.json, gate: coverage_figures_written}  # an explicit report_path overrides this
     severity: error
     description: >
       The "Data coverage and caveats" set (corpus timeline, comparison
