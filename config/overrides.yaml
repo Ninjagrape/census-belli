@@ -3384,3 +3384,77 @@ entries:
     source: "Oman 1911, History of the Peninsular War vol. IV, pp. 40, 54-56, 61 (garrison 4,100 at the start of 1811, 5,000 after Mendizabal's two battalions, over 8,000 after the Gebora survivors; rations found for 8,000), as cited by Wikipedia 'First siege of Badajoz (1811)'; infobox 9,000 at the end (Bodart 1908 p. 422)"
     note: "The 21,000 'at the beginning' is not a garrison: Oman's garrison was 4,100 to 5,000 until the Gebora survivors arrived. It appears to count Mendizabal's field army. The besieged force that fought and surrendered was 8,000 to 9,000. The infobox 14,000 captured conflicts with Oman and is not used. The French 17,000 (Bodart) was not checked against Oman."
     reviewed: {by: lee, "on": 2026-11-06}
+
+  # --- user-approved corrections (approved 2026-11-08) ---
+  - id: ov-0607
+    kind: troop_strength
+    target: {battle: Battle_of_Rovereto-6add7f8553, side: Austria}
+    value: {point: 13695}
+    scope: available
+    source: "Wikipedia, 'Battle of Rovereto', infobox and body, citing Boycott-Brown pp. 418-419"
+    note: "Davidovich controlled 19,555, of which 13,695 were immediately available. The infobox 20,000 is the corps total and was tagged engaged, which inverts the scope."
+    reviewed: {by: lee, "on": 2026-11-08}
+  - id: ov-0608
+    kind: commander_link
+    target: {battle: Second_Battle_of_Mesilla-08aeaa0ff0, side: Confederate States, mention: "Colonel. Steel"}
+    value: none
+    source: "Wikipedia, 'Second Battle of Mesilla', infobox"
+    note: "The mention is William Steele, not Nathan Bedford Forrest, who was not present. It had been exact-matched to Forrest (Q366102) and is now unlinked."
+    reviewed: {by: lee, "on": 2026-11-08}
+  - id: ov-0609
+    kind: troop_strength
+    target: {battle: Battle_of_Fort_Sumter-449fc4a1b6, side: United States}
+    value: {point: 85}
+    scope: engaged
+    source: "Wikipedia, 'Battle of Fort Sumter', infobox (85 soldiers, 43 non-combatant workmen)"
+    note: "85 is the soldier count; the 43 non-combatant workmen are excluded. This is below the 100 floor, and reconcile is being changed so curated overrides bypass the floor."
+    reviewed: {by: lee, "on": 2026-11-08}
+  - id: ov-0610
+    kind: battle_type
+    target: {battle: Peninsula_campaign-ae9d528f96}
+    value: campaign
+    source: "Wikipedia, 'Peninsula campaign'"
+    note: "Campaign-level row. Its constituent battles are separate corpus rows, so the campaign row double counts."
+    reviewed: {by: lee, "on": 2026-11-08}
+  - id: ov-0611
+    kind: battle_type
+    target: {battle: Jackson_s_Valley_campaign-30054803e4}
+    value: campaign
+    source: "Wikipedia, 'Jackson's Valley campaign'"
+    note: "Campaign-level row. Its constituent battles are separate corpus rows, so the campaign row double counts."
+    reviewed: {by: lee, "on": 2026-11-08}
+  - id: ov-0612
+    kind: battle_type
+    target: {battle: Chattanooga_campaign-b59712374b}
+    value: campaign
+    source: "Wikipedia, 'Chattanooga campaign'"
+    note: "Campaign-level row. Its constituent battles are separate corpus rows, so the campaign row double counts."
+    reviewed: {by: lee, "on": 2026-11-08}
+  - id: ov-0613
+    kind: battle_type
+    target: {battle: Stoneman_s_1863_raid-6e62775ce1}
+    value: campaign
+    source: "Wikipedia, 'Stoneman's Raid of 1863'"
+    note: "A cavalry raid, not a battle. Its row credits Robert E. Lee at 1.0 as army commander, which the campaign type takes out of the model."
+    reviewed: {by: lee, "on": 2026-11-08}
+  - id: ov-0614
+    kind: battle_type
+    target: {battle: Seven_Days_Battles-e9f9850b2b}
+    value: campaign
+    source: "Wikipedia, 'Seven Days Battles'"
+    note: "Campaign-level row. Constituent battles such as Gaines's Mill and Malvern Hill are separate corpus rows, so this row double counts."
+    reviewed: {by: lee, "on": 2026-11-08}
+  - id: ov-0615
+    kind: battle_date
+    target: {battle: Battle_of_Fredericksburg-2eec47bf23}
+    value: {start: "1862-12-11", end: "1862-12-15", precision: day}
+    source: "Wikipedia, 'Battle of Fredericksburg', infobox (Date: 11-15 December 1862)"
+    note: "Stored at year precision as 1862-01-01, a default from the extract date parser rather than a date."
+    reviewed: {by: lee, "on": 2026-11-08}
+  - id: ov-0616
+    kind: battle_type
+    target: {battle: First_Battle_of_Fort_Wagner-d5f332ba81}
+    value: field
+    source: "Wikipedia, 'First Battle of Fort Wagner' (11 July 1863)"
+    note: "Stored as naval. It was an infantry assault on the fort, so field."
+    reviewed: {by: lee, "on": 2026-11-08}

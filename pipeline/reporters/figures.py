@@ -31,8 +31,9 @@ MIN_HEIGHT = 3.0
 def write_forest_plot(top: Sequence[RankedGeneral], directory: Path, ci_level: float) -> str | None:
     """Skill with its stored credible interval for the headline top generals.
 
-    Rows follow the stored WAR rank, best at the top; the plot shows skill,
-    which is why the points need not descend.
+    Rows follow the stored WAR order, best at the top, and are labelled with the
+    headline rank (1..N among headline generals); the plot shows skill, which is
+    why the points need not descend.
 
     Args:
         top: The leading headline generals.
@@ -53,7 +54,10 @@ def write_forest_plot(top: Sequence[RankedGeneral], directory: Path, ci_level: f
         highs = [g.estimate.skill_ci_hi - g.estimate.skill_mean for g in top]
         ax.errorbar(means, ys, xerr=[lows, highs], fmt="o", color=POINT_COLOR, ecolor="#9db4c0")
         ax.set_yticks(ys)
-        labels = [f"{'n/a' if g.rank is None else g.rank}. {g.estimate.name}" for g in top]
+        labels = [
+            f"{'n/a' if g.headline_rank is None else g.headline_rank}. {g.estimate.name}"
+            for g in top
+        ]
         ax.set_yticklabels(labels, fontsize=7)
         ax.invert_yaxis()
         ax.axvline(0.0, color="#999999", linestyle="--", linewidth=0.8)

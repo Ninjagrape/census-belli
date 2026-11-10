@@ -15,10 +15,34 @@ For observation ``i`` on the log scale::
 
     eta_i  = mu_side[s_i] + beta_source[j_i] + keep_i * g_regime[r_i]
              + delta_level[k_i] + a_era * era_i * unlabelled_i * keep_i
+             - d_lone_branch[k_i] * lone_i
     beta_j = b_type[t_j] + u_j
 
 ``mu_side`` is the quantity published. Everything else exists to explain why a
 particular source's number differs from it.
+
+``lone_i`` flags a troop row the loader promoted from a lone single-arm figure
+(only "3,500 cavalry") to the side's total because the side had no total report.
+Such a figure under-counts the force (on corpus3 sides that have both, median
+ln(total / branch) is 1.08: cavalry 2.39, irregular 0.62, infantry 0.24), so its
+reported log value is modelled as the side's true log total minus an offset
+``d_lone_branch[k] ~ TruncatedNormal(log 1.5, 0.6, lower=0)``, one per promoted side
+``k`` (dims ``lone_side``; all flagged rows of a side share its ``d_k``). The variable
+exists only when some row is flagged, so a fit with no promotion is unchanged.
+
+It is prior-only per side, deliberately not one shared scalar. A flagged row alone on
+its side is exactly confounded with ``mu_side``, so each ``d_k`` is identified by
+nothing but its own prior and its posterior stays there, widening that side's interval
+by the prior spread. A single scalar shared across sides was tried first: the data
+identified it through the battle effect ``b`` shared with the opponent (synthetic fit:
+posterior 1.095 +- 0.10 against a prior of 0.405 +- 0.6), which pulled every promoted
+side toward its opponent's size and so partly assumed the force ratio the model is
+there to measure. The offset's job is to move a promoted side's published estimate
+``exp(mu_side)`` above the raw figure by about the prior shift, with the spread the
+prior carries. It enters ``eta`` wherever ``delta_level`` does (the fit, the neutral
+fit, the prior predictive and summarise's rebuild), and the corpus-average offset
+``offset_bar`` carries the row average of ``d_k * lone_i``, so ``corpus_level`` stays the
+data-identified average of ``eta``.
 
 ## The troop side prior (P1, from 2026-10-23)
 
@@ -478,6 +502,8 @@ class ModelPriors:
     side_deviation_prior_sd: float = 0.5
     side_prior_independent: bool = False
     battle_effect_centred: bool = False
+    lone_branch_offset_prior_mu: float = 0.405465  # log(1.5)
+    lone_branch_offset_prior_sd: float = 0.6
 
     @property
     def informative_noise(self) -> bool:
@@ -551,6 +577,8 @@ class ModelPriors:
             battle_effect_centred=_parse_bool(
                 params.get("battle_effect_centred", False), "battle_effect_centred"
             ),
+            lone_branch_offset_prior_mu=float(params.get("lone_branch_offset_prior_mu", 0.405465)),
+            lone_branch_offset_prior_sd=float(params.get("lone_branch_offset_prior_sd", 0.6)),
         )
 
 
@@ -794,6 +822,18 @@ def build_model(
             "delta_level", _level_offsets(pm, pt, design, priors), dims="level"
         )
 
+        # ── lone-branch offset: promoted single-arm figures under-count the total ──
+        # Only when a row is flagged, so a fit with no promotion is unchanged.
+        d_lone: Any = None
+        if design.has_lone_branch:
+            d_lone = pm.TruncatedNormal(
+                "d_lone_branch",
+                mu=priors.lone_branch_offset_prior_mu,
+                sigma=priors.lone_branch_offset_prior_sd,
+                lower=0.0,
+                dims="lone_side",
+            )
+
         # ── era fallback, on unlabelled rows only ────────────────────────────
         # Gated, because an ancient chronicle row already carries g_chronicle,
         # which was fitted on cases that were themselves mostly pre-modern:
@@ -818,6 +858,13 @@ def build_model(
             g_unlabelled = g_regime[unlabelled_ix] if unlabelled_ix is not None else 0.0
             era_h = g_unlabelled * pre_anchor + a_era * era_levels
             offset_bar_expr = offset_bar_expr + era_h.mean()
+        if d_lone is not None:
+            rows_per_lone_side = np.bincount(
+                design.lone_branch_offset_index,
+                weights=design.lone_branch_rows,
+                minlength=design.lone_branch_side_positions.size,
+            )
+            offset_bar_expr = offset_bar_expr - pt.dot(d_lone, rows_per_lone_side / design.n_obs)
         offset_bar = pm.Deterministic("offset_bar", offset_bar_expr)
         level = pm.Normal("corpus_level", mu=priors.side_prior_mu, sigma=_LEVEL_PRIOR_SD)
         m0 = pm.Deterministic("m0", level - offset_bar)
@@ -961,6 +1008,10 @@ def build_model(
             + delta_level[_data(pm, "data_level_index", design.level_index)]
             + a_era * era_column
         )
+        if d_lone is not None:
+            eta = eta - d_lone[
+                _data(pm, "data_lone_branch_index", design.lone_branch_offset_index)
+            ] * _data(pm, "data_lone_branch", design.lone_branch_rows)
         ratio_mask = _ratio_level_mask(design)
         if ratio_mask.any():
             # delta_level is one corpus-wide constant per component, so the

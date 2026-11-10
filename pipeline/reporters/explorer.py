@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from string import Template
 from typing import Any
 
+from pipeline.reporters.explorer_coverage import COVERAGE_JS, COVERAGE_TAB_HTML, COVERAGE_TITLE
 from pipeline.reporters.explorer_script import EXPLORER_CSS, EXPLORER_JS
 
 __all__ = ["embed_json", "load_plotly_js", "render_explorer"]
@@ -31,12 +32,18 @@ model. Expected score is P(win) plus half of P(indecisive), not P(win).</p>
 ${banner}
 </header>
 <main>
+<div role="tablist" class="tabs">
+<button id="tabbtn-ranking" role="tab" aria-selected="true">Ranking</button>
+<button id="tabbtn-coverage" role="tab" aria-selected="false">${coverage_title}</button>
+</div>
+<div id="tab-ranking" role="tabpanel">
 <section id="ranking">
 <h2>Search generals</h2>
 ${cap_note}
 <input id="search" type="search" placeholder="Search by name" aria-label="Search generals">
 <div class="scroll"><table id="general-table"><thead><tr>
-<th>Rank</th><th>General</th><th>Credited battles</th><th>Expected WAR</th><th>WAR sd</th>
+<th>Rank</th><th>Stored position (all generals)</th><th>General</th>
+<th>Credited battles</th><th>Expected WAR</th><th>WAR sd</th>
 <th>WAR (95% interval)</th><th>Skill (95% CI)</th><th>P(above next ranked)</th>
 <th>Overlaps next listed general</th></tr></thead>
 <tbody></tbody></table></div>
@@ -61,6 +68,8 @@ ${cap_note}
 <label for="variant">Variant <select id="variant"></select></label>
 <div id="chart-sens" class="chart"></div>
 </section>
+</div>
+${coverage_tab}
 <section id="disclosures">
 <h2>Disclosures</h2>
 <ul>
@@ -71,6 +80,7 @@ ${disclosures}
 <script type="application/json" id="report-data">${data}</script>
 <script>${plotly}</script>
 <script>${script}</script>
+<script>${coverage_script}</script>
 </body>
 </html>
 """
@@ -149,4 +159,7 @@ def render_explorer(payload: Mapping[str, Any], *, plotly_js: str | None = None)
         data=embed_json(payload),
         plotly=plotly_js if plotly_js is not None else load_plotly_js(),
         script=EXPLORER_JS,
+        coverage_title=COVERAGE_TITLE,
+        coverage_tab=COVERAGE_TAB_HTML,
+        coverage_script=COVERAGE_JS,
     )

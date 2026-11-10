@@ -46,6 +46,9 @@ class RankedGeneral:
             general's by more than the threshold. None when there is no next
             listed general, when either interval is missing, or when the flag
             is switched off; never False for "could not compare".
+        headline_rank: Position 1..N among headline generals only, in stored-rank
+            order; None for under-determined ones. ``rank`` stays the stored
+            position among all credited generals.
     """
 
     estimate: GeneralEstimate
@@ -57,6 +60,7 @@ class RankedGeneral:
     overlaps_next: bool | None = None
     war_interval_approx: bool = False
     p_above_next: float | None = None
+    headline_rank: int | None = None
 
 
 def z_for_level(ci_level: float) -> float:
@@ -188,8 +192,11 @@ def split_generals(
             overlaps_next=flag,
             war_interval_approx=iv is not None and not has_stored_war_interval(e),
             p_above_next=pn,
+            headline_rank=position,
         )
-        for (e, iv), flag, pn in zip(intervals, flags, p_next, strict=True)
+        for position, ((e, iv), flag, pn) in enumerate(
+            zip(intervals, flags, p_next, strict=True), start=1
+        )
     )
     thin = sorted((e for e in estimates if e.n_battles < min_battles), key=_thin_order)
     under = tuple(

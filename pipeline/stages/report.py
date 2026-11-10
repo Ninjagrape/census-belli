@@ -9,6 +9,8 @@ whether the run may be published.
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +21,13 @@ from pipeline.db import get_connection
 from pipeline.reporters import load
 from pipeline.reporters.atomic import remove_if_present, write_text_atomic
 from pipeline.reporters.config import ReportParams
+from pipeline.reporters.coverage import load_coverage, with_component_counts
+from pipeline.reporters.coverage_check import recount, used_counts
+from pipeline.reporters.coverage_figures import write_coverage_figures
+from pipeline.reporters.coverage_panels import build_panels, expected_figures
+from pipeline.reporters.disclosures import coverage_disclosures
 from pipeline.reporters.explorer import render_explorer
+from pipeline.reporters.explorer_coverage import COVERAGE_TAB_ID
 from pipeline.reporters.exports import (
     build_payload,
     read_csv_rows,
@@ -29,11 +37,13 @@ from pipeline.reporters.exports import (
 from pipeline.reporters.figures import copy_evaluation_figures, write_forest_plot
 from pipeline.reporters.manifest import (
     build_manifest,
+    coverage_figures_gate,
+    disclosures_match_db_gate,
     evaluation_current_gate,
     export_matches_db_gate,
     write_manifest,
 )
-from pipeline.reporters.markdown import render_markdown
+from pipeline.reporters.markdown import _esc, render_markdown
 from pipeline.reporters.view import ReportView, build_view
 from pipeline.stages.base import StageContext
 
@@ -65,10 +75,40 @@ def _build(conn: Connection, params: ReportParams, run_id: int) -> ReportView:
         evaluation_reason=reason,
         evaluation_severities=load.load_evaluate_severities(Path(params.evaluate_spec_path)),
         pooled_draws=load.load_pooled_draws(diagnostics_root, run_id, rank_by),
+        coverage=load_coverage(conn, run_id, min_battles=params.min_battles),
     )
 
 
-def _write_all(view: ReportView, db_headline_rows: int) -> dict[str, Any]:
+def _fresh_coverage_text(conn: Connection, view: ReportView) -> tuple[str, ...]:
+    """The coverage sentences recomputed from the database, independent of the view."""
+    stats = load_coverage(conn, view.model_run_id, min_battles=view.params.min_battles)
+    return coverage_disclosures(
+        with_component_counts(stats, view.headline), min_battles=view.params.min_battles
+    )
+
+
+_EMBEDDED = re.compile(r'<script type="application/json" id="report-data">(.*?)</script>', re.S)
+
+
+def _explorer_coverage_keys(explorer_html: str) -> list[str]:
+    """Panel keys of the ``coverage`` object embedded in the explorer page."""
+    match = _EMBEDDED.search(explorer_html)
+    if match is None:
+        return []
+    try:
+        data = json.loads(match.group(1))
+    except ValueError:
+        return []
+    cov = data.get("coverage") if isinstance(data, dict) else None
+    return list(cov) if isinstance(cov, dict) else []
+
+
+def _write_all(
+    view: ReportView,
+    db_headline_rows: int,
+    fresh_coverage: tuple[str, ...],
+    recounted: dict[str, int | None],
+) -> dict[str, Any]:
     out = Path(view.params.output_root)
     figures_dir = out / "figures"
     forest = write_forest_plot(view.top, figures_dir, view.params.ci_level)
@@ -77,16 +117,40 @@ def _write_all(view: ReportView, db_headline_rows: int) -> dict[str, Any]:
         *copy_evaluation_figures(view.evaluation, figures_dir),
     ]
 
+    panels = build_panels(view.coverage, view.headline) if view.coverage is not None else {}
+    coverage_names = write_coverage_figures(panels, figures_dir)
+
     csv_rows = write_rankings_csv(out / FILES["csv"], view)
     payload = build_payload(view)
     write_rankings_json(out / FILES["json"], payload)
-    explorer_payload = build_payload(view, limit=view.params.explorer_max_generals)
+    explorer_payload = build_payload(view, limit=view.params.explorer_max_generals, coverage=panels)
     write_text_atomic(out / FILES["explorer"], render_explorer(explorer_payload))
-    write_text_atomic(out / FILES["report"], render_markdown(view, figure_names))
+    write_text_atomic(out / FILES["report"], render_markdown(view, figure_names, coverage_names))
 
+    written = json.loads((out / FILES["json"]).read_text(encoding="utf-8"))["disclosures"]
+    markdown = (out / FILES["report"]).read_text(encoding="utf-8")
+    expected = expected_figures(panels)
+    explorer_html = (out / FILES["explorer"]).read_text(encoding="utf-8")
     csv_headline = sum(r["headline"] == "true" for r in read_csv_rows(out / FILES["csv"]))
     gates = [
         export_matches_db_gate(csv_headline_rows=csv_headline, db_headline_rows=db_headline_rows),
+        disclosures_match_db_gate(
+            fresh=fresh_coverage,
+            reported=view.coverage_disclosures,
+            in_json=written,
+            in_markdown=[d for d in fresh_coverage if _esc(d) in markdown],
+            used_counts=used_counts(view.coverage),
+            recounted=recounted,
+        ),
+        coverage_figures_gate(
+            expected=expected,
+            on_disk=[n for n in expected if (figures_dir / n).is_file()],
+            in_markdown=[n for n in expected if f"figures/{n}" in markdown],
+            explorer_has_tab=f'id="{COVERAGE_TAB_ID}"' in explorer_html,
+            written_panels=list(panels),
+            explorer_panels=_explorer_coverage_keys(explorer_html),
+            explorer_hosts=[k for k in panels if f'id="chart-cov-{k}"' in explorer_html],
+        ),
         evaluation_current_gate(
             evaluation_reason=view.evaluation_reason,
             evaluated_run_id=view.evaluation.model_run_id if view.evaluation else None,
@@ -97,7 +161,10 @@ def _write_all(view: ReportView, db_headline_rows: int) -> dict[str, Any]:
         csv_rows=csv_rows,
         json_generals=len(payload["generals"]),
         gates=gates,
-        files={**FILES, **{f"figure_{i}": n for i, n in enumerate(figure_names)}},
+        files={
+            **FILES,
+            **{f"figure_{i}": n for i, n in enumerate([*figure_names, *coverage_names])},
+        },
     )
     write_manifest(Path(view.params.report_path), manifest)
     return manifest
@@ -130,7 +197,14 @@ def _run_body(conn: Connection, spec_params: dict[str, Any], ctx: StageContext) 
         return
     _clear_manifest(params)
     view = _build(conn, params, run_id)
-    manifest = _write_all(view, load.count_headline_eligible(conn, run_id, params.min_battles))
+    db_headline_rows = load.count_headline_eligible(conn, run_id, params.min_battles)
+    fresh = _fresh_coverage_text(conn, view)
+    manifest = _write_all(
+        view,
+        db_headline_rows,
+        fresh,
+        recount(conn, run_id, min_battles=params.min_battles),
+    )
     for reason in view.reasons:
         logger.warning("report_provisional", reason=reason)
     for gate in manifest["gates"]:

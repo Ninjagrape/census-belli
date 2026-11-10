@@ -201,6 +201,9 @@ class Design:
         battle_ids: Labels ``side_battle_index`` points into.
         row_year: Per row, the battle's astronomical year (NaN if undated); None
             reads as all NaN through :attr:`year_of_row`. The level anchor reads it.
+        lone_branch: Per row, 1.0 where the figure is a promoted lone-branch
+            figure (see :attr:`pipeline.reconcilers.records.Report.lone_branch`),
+            else 0.0; None reads as all zeros through :attr:`lone_branch_rows`.
     """
 
     quantity: str
@@ -233,6 +236,41 @@ class Design:
     side_era_bin: np.ndarray | None = None
     battle_ids: tuple[int, ...] = ()
     row_year: np.ndarray | None = None
+    lone_branch: np.ndarray | None = None
+
+    @property
+    def lone_branch_rows(self) -> np.ndarray:
+        """Per row, 1.0 for a promoted lone-branch troop figure, else 0.0.
+
+        Always zero for casualties: the branch only exists for troop reports.
+        """
+        if self.lone_branch is None or self.quantity != "troops":
+            return np.zeros(self.n_obs, dtype=float)
+        return self.lone_branch
+
+    @property
+    def has_lone_branch(self) -> bool:
+        """Whether any row is a promoted lone-branch figure (the model then has an offset)."""
+        return bool(self.lone_branch_rows.any())
+
+    @property
+    def lone_branch_side_positions(self) -> np.ndarray:
+        """Sorted side positions that carry a promoted lone-branch row (the offset's dims)."""
+        flagged = self.lone_branch_rows > 0
+        return np.unique(self.side_index[flagged]).astype(int)
+
+    @property
+    def lone_branch_offset_index(self) -> np.ndarray:
+        """Per row, the position of its side in :attr:`lone_branch_side_positions`.
+
+        Rows of a side that carries no promoted row read 0; they are multiplied by
+        the zero flag wherever the index is used.
+        """
+        positions = self.lone_branch_side_positions
+        if positions.size == 0:
+            return np.zeros(self.n_obs, dtype=int)
+        found = np.searchsorted(positions, self.side_index)
+        return np.minimum(found, positions.size - 1).astype(int)
 
     @property
     def ancient_rows(self) -> np.ndarray:
@@ -327,6 +365,7 @@ class Design:
             "lineage": [str(x) for x in self.lineage_ids],
             "battle": self.battle_labels,
             "era_bin": list(ERA_BIN_LABELS),
+            "lone_side": [str(self.side_ids[i]) for i in self.lone_branch_side_positions],
         }
 
 
@@ -550,6 +589,7 @@ def build_design(
             [np.nan if r.year_astronomical is None else float(r.year_astronomical) for r in rows],
             dtype=float,
         ),
+        lone_branch=np.array([r.lone_branch for r in rows], dtype=float),
     )
 
     logger.info(

@@ -156,6 +156,11 @@ class Report:
         range_var: Extra observation variance on the log scale, nonzero only for
             a row built from a stated range (see
             :func:`pipeline.reconcilers.claims.merge_range_pairs`).
+        lone_branch: True for a single-arm figure (infantry, cavalry or
+            irregular) the loader promoted to ``branch="total"`` because its
+            side had no total report. Such a figure under-counts the force, so
+            the troop model subtracts a per-side offset (``d_lone_branch``)
+            from its location.
     """
 
     report_id: int
@@ -178,6 +183,7 @@ class Report:
     lineage_id: int | None = None
     roundness: float = 0.0
     range_var: float = 0.0
+    lone_branch: bool = False
 
     def __post_init__(self) -> None:
         """Validate every vocabulary field at construction, once, at the boundary.
@@ -224,6 +230,7 @@ class ReconcileCounts:
     casualty_reports_used: int = 0
     excluded_non_total_branch: int = 0
     excluded_naval: int = 0
+    promoted_lone_branch: int = 0
     excluded_population_scope: int = 0
     excluded_superseded_by_modern: int = 0
     excluded_superseded_by_override: int = 0
@@ -262,6 +269,7 @@ class ReconcileCounts:
             "casualty_reports_used": self.casualty_reports_used,
             "excluded_non_total_branch": self.excluded_non_total_branch,
             "excluded_naval": self.excluded_naval,
+            "promoted_lone_branch": self.promoted_lone_branch,
             "excluded_population_scope": self.excluded_population_scope,
             "excluded_superseded_by_modern": self.excluded_superseded_by_modern,
             "excluded_superseded_by_override": self.excluded_superseded_by_override,

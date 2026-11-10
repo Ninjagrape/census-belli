@@ -275,6 +275,10 @@ def summarise_fit(
         "contraction": _contraction(idata, design, priors, inflation),
         "g_regime": g_regime_stats(idata, design, inflation),
         "bound_excess": _bound_excess_stats(idata, priors),
+        # Sides whose troop figure is a promoted lone-branch figure, and the per-side
+        # offsets subtracted from such rows (prior-only; see the model docstring).
+        "promoted_lone_branch_sides": _promoted_lone_branch_sides(design),
+        "d_lone_branch": _lone_branch_offset_stats(idata, priors),
     }
     diagnostics.update(_contamination_diagnostics(idata, design, priors.contamination_sd))
     if design.quantity == "troops":
@@ -663,6 +667,20 @@ def _row_sigma(draw: Callable[[str], np.ndarray], design: Design, rows: np.ndarr
     return blended
 
 
+def _lone_branch_row_offset(d: np.ndarray, design: Design) -> np.ndarray:
+    """Per-draw lone-branch offset of every row (``d_k`` of its side, 0 if unflagged).
+
+    Args:
+        d: ``(n_draws, n_lone_sides)`` draws of ``d_lone_branch``.
+        design: The design the fit used.
+
+    Returns:
+        ``(n_draws, n_obs)``.
+    """
+    flag = design.lone_branch_rows[None, :]
+    return cast(np.ndarray, d[:, design.lone_branch_offset_index] * flag)
+
+
 def _row_eta_and_var(
     draw: Callable[[str], np.ndarray], design: Design, rows: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -688,6 +706,8 @@ def _row_eta_and_var(
         + draw("delta_level")[:, design.level_index[rows]]
         + draw("a_era")[:, None] * (design.era * _unlabelled_mask(design) * keep)[rows]
     )
+    if design.has_lone_branch:
+        eta = eta - _lone_branch_row_offset(draw("d_lone_branch"), design)[:, rows]
     ratio = _ratio_level_mask(design)
     if ratio.any():
         pair_of_row, _ = _ratio_pairs(design)
@@ -841,6 +861,11 @@ def reports_honoured(
     g_regime = _pooled(idata, "g_regime")
     delta = _pooled(idata, "delta_level")
     a_era = _pooled(idata, "a_era")
+    lone_row = (
+        _lone_branch_row_offset(_pooled(idata, "d_lone_branch"), design)
+        if design.has_lone_branch
+        else None
+    )
     keep = 1.0 - level_anchor_mask(design)
     era = design.era.copy()
     if "unlabelled" in design.regimes:
@@ -876,6 +901,8 @@ def reports_honoured(
                 + delta[:, int(design.level_index[row])]
                 + a_era * era[row]
             )
+            if lone_row is not None:
+                eta = eta - lone_row[:, row]
             lo, hi = np.quantile(eta, [lower_q, 1.0 - lower_q])
             if lo <= design.log_y[row] <= hi:
                 contained = True
@@ -1399,6 +1426,50 @@ def _side_quantile_mcse(
     return n_fail, worst_side, failed
 
 
+def _lone_branch_offset_stats(
+    idata: az.InferenceData, priors: ModelPriors
+) -> dict[str, float | int | None] | None:
+    """Summarise the per-side lone-branch offsets against their truncated prior.
+
+    Args:
+        idata: The fit's posterior.
+        priors: The hierarchy scales, for the offset prior.
+
+    Returns:
+        None when the fit has no offset; otherwise the number of promoted sides,
+        the mean of their posterior means, the mean posterior sd, and the mean
+        contraction ``1 - post_sd / prior_sd`` where ``prior_sd`` is the sd of the
+        truncated prior (near 0 means the posterior is the prior, as intended).
+    """
+    if "d_lone_branch" not in idata.posterior.data_vars:
+        return None
+    from scipy import stats  # noqa: PLC0415 - scipy is only needed on this path
+
+    d = _pooled(idata, "d_lone_branch")
+    mu0, sd0 = priors.lone_branch_offset_prior_mu, priors.lone_branch_offset_prior_sd
+    prior_sd = float(stats.truncnorm(-mu0 / sd0, np.inf, loc=mu0, scale=sd0).std())
+    post_sd = d.std(axis=0)
+    return {
+        "n_sides": int(d.shape[1]),
+        "mean_of_means": _finite(float(d.mean(axis=0).mean())),
+        "mean_sd": _finite(float(post_sd.mean())),
+        "mean_contraction": _finite(float((1.0 - post_sd / prior_sd).mean())),
+    }
+
+
+def _promoted_lone_branch_sides(design: Design) -> list[int]:
+    """List the sides that carry a promoted lone-branch row.
+
+    Args:
+        design: The design the fit used.
+
+    Returns:
+        Sorted ``side_id`` values, empty when nothing was promoted.
+    """
+    flagged = design.lone_branch_rows > 0
+    return sorted({int(design.side_ids[i]) for i in design.side_index[flagged]})
+
+
 def _scalar_stats(idata: az.InferenceData, name: str) -> dict[str, float | None]:
     """Posterior mean and sd of a scalar (no extra dims) variable.
 
@@ -1446,7 +1517,14 @@ def _identified_level_stats(
         g_row = _pooled(idata, "g_regime")[:, design.regime_index] * keep
         delta_row = _pooled(idata, "delta_level")[:, design.level_index]
         era_row = _pooled(idata, "a_era")[:, None] * (design.era * _unlabelled_mask(design) * keep)
-        combined = _pooled(idata, "m0") + (e_row + g_row + delta_row + era_row).mean(axis=1)
+        lone_row = (
+            _lone_branch_row_offset(_pooled(idata, "d_lone_branch"), design)
+            if design.has_lone_branch
+            else 0.0
+        )
+        combined = _pooled(idata, "m0") + (e_row + g_row + delta_row + era_row - lone_row).mean(
+            axis=1
+        )
     else:
         combined = _pooled(idata, "m0") + _pooled(idata, "offset_bar")
     return {"mean": _finite(float(np.mean(combined))), "sd": _finite(float(np.std(combined)))}
@@ -1601,6 +1679,8 @@ def _side_offsets(idata: az.InferenceData, design: Design) -> np.ndarray:
     regime_weight = np.zeros((design.n_sides, len(design.regimes)))
     level_weight = np.zeros((design.n_sides, len(design.levels)))
     era_weight = np.zeros(design.n_sides)
+    lone_positions = design.lone_branch_side_positions
+    lone_weight = np.zeros((design.n_sides, lone_positions.size))
     # A precise row says more about where the side sits than a vague one, so
     # the side's offset is the precision-weighted mean of its rows' offsets,
     # the same weighting the likelihood gives them.
@@ -1610,6 +1690,13 @@ def _side_offsets(idata: az.InferenceData, design: Design) -> np.ndarray:
     np.add.at(regime_weight, (design.side_index, design.regime_index), row_weight * keep)
     np.add.at(level_weight, (design.side_index, design.level_index), row_weight)
     np.add.at(era_weight, design.side_index, row_weight * era_row)
+    if lone_positions.size:
+        np.add.at(
+            lone_weight,
+            (design.side_index, design.lone_branch_offset_index),
+            row_weight * design.lone_branch_rows,
+        )
+        lone_weight /= totals[:, None]
     regime_weight /= totals[:, None]
     level_weight /= totals[:, None]
     era_weight /= totals
@@ -1618,6 +1705,8 @@ def _side_offsets(idata: az.InferenceData, design: Design) -> np.ndarray:
         + delta @ level_weight.T
         + _pooled(idata, "a_era")[:, None] * era_weight[None, :]
     )
+    if lone_positions.size:
+        offsets = offsets - _pooled(idata, "d_lone_branch") @ lone_weight.T
     return offsets
 
 

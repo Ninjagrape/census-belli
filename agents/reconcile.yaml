@@ -244,6 +244,13 @@ params:
   # lineage_prior_sd removed 2026-10-02: copies of one claim are collapsed to
   # one row in build_design, so the model has no lineage term (handover-log 20.10).
   scope_offset_prior_sd: 0.4
+  # d_lone_branch[k] ~ TruncatedNormal(mu, sd, lower=0), one per promoted side k, subtracted
+  # from the location of that side's promoted lone-branch rows (a side's only infantry,
+  # cavalry or irregular figure counted as its total). Prior-only per side (a shared
+  # scalar is identified through the battle effect and pulls toward the opponent); mu = log(1.5). Corpus3 sides
+  # with both a branch and a total: median ln(total/branch) 1.08.
+  lone_branch_offset_prior_mu: 0.405465
+  lone_branch_offset_prior_sd: 0.6
   scope_unknown_dispersion_sd: 0.4
   # estimate_dispersion_sd and roundness_dispersion_sd: see the observation-noise
   # block above. Conventional (round) figures are coarsened, not noisy.
